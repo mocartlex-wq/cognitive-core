@@ -294,7 +294,7 @@ ISP **не блокирует** входящие 80/443 на этом тариф
 
 ## 📦 Auto-deploy pipeline
 
-С 2026-05-06 сервер тянет изменения **сам** через systemd-timer + `git fetch`. Никаких ручных `scp` или `docker exec` для обычных правок.
+С 2026-05-07 сервер тянет изменения **сам** через systemd-timer + `git fetch`. Никаких ручных `scp` или `docker exec` для обычных правок. Active since 2026-05-07T06:44 UTC, bare-repo at `salex@192.168.0.118:/home/salex/cognitive-core.git`.
 
 ### Как это работает
 
