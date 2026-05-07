@@ -240,8 +240,9 @@ git init (30мин)
 | 6 | **Versioned configs** — на сервере хранить `nginx.conf.<sha>` снапшоты последних 10 версий, для отката конфига без отката кода | 2 часа | remote update (DS) |
 | 7 | **Backup retention** — TTL 14 дней в `scripts/cron-backup.sh`, старые pg_dump удаляются автоматически | 1 час | stability |
 | 8 | **One-line agent install** — `curl https://mcp.ии-память.рф/onboard.sh \| bash` генерирует per-agent key + готовый JSON для Claude Desktop / Cursor | 4 часа | public + simple (DS) |
+| 9 | **OOB SSH-порт 2222** для emergency-доступа когда главный 22 забанен fail2ban-ом или упал. `sshd_config.d/99-oob.conf` слушает 2222 + `fail2ban.local` ignoreip для admin-IP-set + UFW open 2222 + port-forward на роутере. Ключ-only auth, минимальный MaxStartups. | 2 часа | stability + remote update |
 
-**Definition of Done v0.5.0-prod:** auto-deploy переживает любой битый коммит без вмешательства человека; падение DeepSeek не валит endpoint; новый агент подключается одной командой; все алерты о problem-ах приходят в Telegram.
+**Definition of Done v0.5.0-prod:** auto-deploy переживает любой битый коммит без вмешательства человека; падение DeepSeek не валит endpoint; новый агент подключается одной командой; все алерты о problem-ах приходят в Telegram; emergency-канал к серверу работает даже когда главный 22-й порт недоступен.
 
 После этого можно ставить тег **v0.5.0** и считать публично-готовым.
 
