@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO_DIR="${COGNITIVE_REPO_DIR:-/opt/cognitive-core}"
 BRANCH="${COGNITIVE_DEPLOY_BRANCH:-main}"
-HEALTH_URL="${COGNITIVE_HEALTH_URL:-http://localhost:9001/health}"
+HEALTH_CMD="${COGNITIVE_HEALTH_CMD:-docker exec cognitive_api curl -sS --max-time 6 http://localhost:8000/health}"
 SMOKE_ATTEMPTS="${COGNITIVE_SMOKE_ATTEMPTS:-6}"
 SMOKE_INTERVAL="${COGNITIVE_SMOKE_INTERVAL:-5}"
 SMOKE_MIN_OK="${COGNITIVE_SMOKE_MIN_OK:-5}"
@@ -56,22 +56,22 @@ git pull --ff-only --quiet origin "$BRANCH"
 # Если non-trivial reload (rebuild api/mcp), даём контейнерам время подняться:
 # первый запрос с большим timeout, остальные быстрее.
 
-log "smoke-testing $HEALTH_URL (need ${SMOKE_MIN_OK}/${SMOKE_ATTEMPTS} healthy responses)"
+log "smoke-testing via [$HEALTH_CMD] (need ${SMOKE_MIN_OK}/${SMOKE_ATTEMPTS} healthy responses)"
 
 ok_count=0
+# При первой попытке ждём чуть дольше — даём контейнеру время после rebuild
+[ "$SMOKE_ATTEMPTS" -gt 0 ] && sleep 3
+
 for i in $(seq 1 "$SMOKE_ATTEMPTS"); do
-    timeout=$([ "$i" = 1 ] && echo 25 || echo 8)
-    if response=$(curl -sS --max-time "$timeout" -w "\n%{http_code}" "$HEALTH_URL" 2>&1); then
-        body=$(echo "$response" | head -n -1)
-        code=$(echo "$response" | tail -1)
-        if [ "$code" = "200" ] && echo "$body" | grep -q '"healthy":true'; then
+    if body=$(eval "$HEALTH_CMD" 2>/dev/null); then
+        if echo "$body" | grep -q '"healthy":true'; then
             ok_count=$((ok_count + 1))
             log "smoke #${i}/${SMOKE_ATTEMPTS}: ok (${ok_count}/${SMOKE_MIN_OK})"
         else
-            log "smoke #${i}/${SMOKE_ATTEMPTS}: bad (code=${code})"
+            log "smoke #${i}/${SMOKE_ATTEMPTS}: bad response"
         fi
     else
-        log "smoke #${i}/${SMOKE_ATTEMPTS}: connect failed"
+        log "smoke #${i}/${SMOKE_ATTEMPTS}: probe failed"
     fi
 
     # Раннее завершение если уже набрали нужное количество
@@ -111,7 +111,7 @@ fi
 log "post-rollback smoke-check"
 post_ok=0
 for i in 1 2 3; do
-    if curl -sS --max-time 8 "$HEALTH_URL" 2>&1 | grep -q '"healthy":true'; then
+    if eval "$HEALTH_CMD" 2>/dev/null | grep -q '"healthy":true'; then
         post_ok=$((post_ok + 1))
     fi
     [ "$i" -lt 3 ] && sleep 5
