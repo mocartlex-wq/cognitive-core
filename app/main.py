@@ -14,7 +14,7 @@ from app.db.redis import init_redis, close_redis
 from app.db.s3 import init_s3
 from app.services.metrics import track_http, log_event
 
-__version__ = "0.5.0"
+__version__ = "0.5.0"  # bumped 2026-05-07 (was 0.2.0 stale stamp)
 
 _start_time: datetime | None = None
 _scheduler_task: asyncio.Task | None = None
