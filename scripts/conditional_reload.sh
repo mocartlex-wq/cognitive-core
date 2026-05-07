@@ -33,7 +33,18 @@ while IFS= read -r f; do
     [ -z "$f" ] && continue
     case "$f" in
         nginx/*)
-            reload_nginx=1; worth_logging=1 ;;
+            reload_nginx=1; worth_logging=1
+            # Versioned snapshot: keep last 10 working nginx.confs in history/
+            # for emergency rollback (config-only) without rolling back code.
+            HIST="$REPO_DIR/nginx/history"
+            mkdir -p "$HIST"
+            if [ -f "$REPO_DIR/nginx/nginx.conf" ]; then
+                cp "$REPO_DIR/nginx/nginx.conf" "$HIST/nginx.conf.${PREV:0:7}" 2>/dev/null || true
+            fi
+            # LRU: trim to last 10
+            # shellcheck disable=SC2012
+            ls -t "$HIST"/nginx.conf.* 2>/dev/null | tail -n +11 | xargs -r rm -f
+            ;;
         mcp_server/*)
             rebuild_mcp=1; worth_logging=1 ;;
         app/*|alembic/*|requirements*.txt|pyproject.toml|Dockerfile)
