@@ -1,5 +1,12 @@
 # Cognitive Core — Changelog
 
+## Unreleased — v0.5.0-prod sprint (in progress)
+
+Production-readiness sprint, согласован two-voice (Claude + DeepSeek). Превращает working pipeline в production-grade. См. `roadmap.md` раздел v0.5.0-prod.
+
+### Added
+- `scripts/auto-deploy.sh`: smoke-test (6 attempts × 5s) после conditional_reload + auto-rollback к предыдущему SHA если /health не возвращает healthy=true минимум 5/6 раз. Production остаётся на последней рабочей версии при любом сломанном push'е. Telegram alerts задним числом (sprint task 5).
+
 ## v0.5.0-rc1 (2026-05-04) — Pre-deploy ready
 
 Полная готовность к переносу на сервер.
