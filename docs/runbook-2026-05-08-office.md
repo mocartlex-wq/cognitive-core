@@ -21,14 +21,28 @@ ssh -i ~/.ssh/cogcore_lan salex@192.168.0.118
 # (через WAN-IP 94.181.169.239 будет работать после задачи 2)
 ```
 
-### 2. Unban shared NAT IP — разблокирует SSH через WAN навсегда
+### 2. Unban shared NAT IP + UFW whitelist для admin
 
 ```bash
+# 2.1. Снять f2b-ban с VPN-pool IP, через который сегодня летели запросы
 sudo fail2ban-client unban 207.211.215.149
 sudo fail2ban-client status sshd          # проверка
+
+# 2.2. Узнать UFW-правила для 22 — там whitelist (мы это диагностировали 2026-05-07:
+#       SYN с домашнего Дом.ру дропался ДО fail2ban → UFW source-IP filter)
+sudo ufw status verbose | grep -E "22|tcp"
+
+# 2.3. Добавить admin-IP в whitelist чтобы не зависеть ни от VPN ни от f2b в будущем.
+#       Узнай свой текущий внешний IP без AdGuard и подставь:
+HOME_IP=$(curl -s https://api.ipify.org)   # ВАЖНО: запускать без VPN!
+echo "home IP: $HOME_IP"
+sudo ufw allow from "$HOME_IP" to any port 22 comment "admin home (cognitive-core-laptop owner)"
+
+# 2.4. Если в офисе есть статический WAN — тоже добавить:
+# sudo ufw allow from <office-static-IP> to any port 22 comment "office admin"
 ```
 
-После этого ai-crm-deploy и cognitive-core-laptop смогут SSH через WAN с дома без VPN.
+После этого SSH с дома и из офиса напрямую без VPN — и ai-crm-deploy / cognitive-core-laptop смогут к серверу.
 
 ### 3. AI-CRM три действия (handoff от ai-crm-deploy)
 
