@@ -23,6 +23,25 @@ SMOKE_MIN_OK="${COGNITIVE_SMOKE_MIN_OK:-5}"
 
 log() { echo "[$(date -Iseconds)] $*"; }
 
+# Telegram-alert helper: silent if TELEGRAM_BOT_TOKEN/CHAT_ID не заданы.
+# Set in /etc/cognitive-deploy.env or systemd unit Environment= directives.
+notify() {
+    local msg="$1"
+    log "ALERT: $msg"
+    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+        # send as single message; trim to Telegram's 4096 char limit
+        local body
+        body=$(printf '🚨 cognitive-core deploy\n\n%s' "$msg" | head -c 4000)
+        curl -sS --max-time 6 \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${body}" \
+            >/dev/null 2>&1 \
+            && log "telegram notified" \
+            || log "telegram notify failed (non-fatal)"
+    fi
+}
+
 cd "$REPO_DIR"
 
 # Не паникуем если git fetch упал по сети — попробуем в следующий тик
@@ -133,11 +152,10 @@ done
 
 if [ "$post_ok" -ge 2 ]; then
     log "ROLLED BACK successfully to ${PREV:0:7} (post-smoke ${post_ok}/3 ok)"
-    # Notification stub — будет заменён на Telegram webhook в задаче 5 sprint
-    log "ALERT: deploy ${PREV:0:7}->${NEW:0:7} failed smoke-test, rolled back"
+    notify "Deploy ${NEW:0:7} failed smoke-test, auto-rolled back to ${PREV:0:7}. Service is healthy on previous version."
     exit 1
 else
     log "FATAL: rollback to ${PREV:0:7} also unhealthy — production in degraded state" >&2
-    log "ALERT: full deploy failure, manual intervention required"
+    notify "FULL DEPLOY FAILURE: ${PREV:0:7}->${NEW:0:7} broken AND rollback to ${PREV:0:7} also unhealthy. Manual intervention required."
     exit 2
 fi

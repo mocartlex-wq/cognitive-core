@@ -1,6 +1,6 @@
 [Unit]
 Description=Cognitive Core auto-deploy: git fetch + conditional reload
-Documentation=https://github.com/REPLACE_WITH_OWNER/cognitive-core/blob/main/AGENT_OPERATIONS.md
+Documentation=https://github.com/mocartlex-wq/cognitive-core/blob/main/AGENT_OPERATIONS.md
 After=docker.service network-online.target
 Wants=network-online.target
 
@@ -10,6 +10,13 @@ User=salex
 WorkingDirectory=/opt/cognitive-core
 Environment=COGNITIVE_REPO_DIR=/opt/cognitive-core
 Environment=COGNITIVE_DEPLOY_BRANCH=main
+
+# Optional: Telegram alerts on deploy-failure / rollback.
+# Create /etc/cognitive-deploy.env with TELEGRAM_BOT_TOKEN=... and TELEGRAM_CHAT_ID=...
+# (chmod 600 root) — auto-deploy will pick them up. Without this file, alerts are
+# silent (only journalctl).
+EnvironmentFile=-/etc/cognitive-deploy.env
+
 ExecStart=/opt/cognitive-core/scripts/auto-deploy.sh
 
 # Allow docker exec without password (sudoers configured separately)
