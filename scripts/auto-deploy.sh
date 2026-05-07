@@ -51,6 +51,20 @@ git pull --ff-only --quiet origin "$BRANCH"
 # Применяем изменения через conditional_reload (forward direction PREV → NEW)
 "$REPO_DIR/scripts/conditional_reload.sh" "$PREV" "$NEW"
 
+# Smoke-test нужен только если поменялся application код или infra (compose).
+# Изменения в scripts/auto-deploy*, conditional_reload*, deploy/*, *.md, docs/*
+# не влияют на runtime — smoke-тест бесполезен и рискует ложным rollback'ом
+# (если сам skoke-скрипт буггован, он откатит свой же fix, рекурсивный лок).
+APP_CHANGED=$(git diff --name-only "$PREV" "$NEW" | grep -vE '^(scripts/(auto-deploy|conditional_reload)\.sh$|deploy/|.*\.md$|docs/|CHANGELOG|README|\.gitattributes|\.gitignore)' || true)
+
+if [ -z "$APP_CHANGED" ]; then
+    log "deploy-infra/docs only — skipping smoke-test"
+    log "deploy complete: $NEW (no smoke needed)"
+    exit 0
+fi
+
+log "app/infra files changed: $(echo "$APP_CHANGED" | head -3 | tr '\n' ' ')..."
+
 # ─── SMOKE-TEST ─────────────────────────────────────────────────────────────
 # Проверяем что endpoint жив + healthy=true.
 # Если non-trivial reload (rebuild api/mcp), даём контейнерам время подняться:
