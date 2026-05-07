@@ -161,12 +161,16 @@ async def health():
     from app.db.s3 import get_s3
     from app.services.metrics import update_layer_size, get_llm_stats
     from app.services.embedder import get_embedding_provider, EMBEDDING_MODEL_NAME
+    from app.services.llm_client import get_circuit_states
 
     status = {"postgres": "ok", "redis": "ok", "minio": "ok"}
     layers = {}
     db_size_mb = 0
+    deep = {}  # deep-health probes per layer (sprint task #4)
 
+    # ─── Postgres: count + last_consolidation timestamps + query timing ──
     try:
+        t0 = time.monotonic()
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute("SELECT 1")
@@ -178,25 +182,54 @@ async def health():
                 count = await conn.fetchval(f"SELECT COUNT(*) FROM {table}")
                 update_layer_size(layer, "all", count or 0)
                 layers[layer] = count or 0
-            # DB size
-            db_size = await conn.fetchval(
-                "SELECT pg_database_size(current_database())"
-            )
+            db_size = await conn.fetchval("SELECT pg_database_size(current_database())")
             db_size_mb = round((db_size or 0) / (1024 * 1024), 2)
+            # Deep: timestamps of last L2/L3 consolidation
+            last_l2 = await conn.fetchval("SELECT MAX(date) FROM l2_daily_buffers")
+            last_l3 = await conn.fetchval("SELECT MAX(created_at) FROM l3_master_knowledge")
+            last_l4 = await conn.fetchval("SELECT MAX(created_at) FROM l4_snapshots")
+            deep["postgres_query_ms"] = round((time.monotonic() - t0) * 1000, 1)
+            deep["last_l2_buffer"] = last_l2.isoformat() if last_l2 else None
+            deep["last_l3_knowledge"] = last_l3.isoformat() if last_l3 else None
+            deep["last_l4_snapshot"] = last_l4.isoformat() if last_l4 else None
     except Exception as e:
         status["postgres"] = str(e)
 
+    # ─── Redis: ping + RediSearch index existence ─────────────────────────
     try:
+        t0 = time.monotonic()
         r = await get_redis()
         await r.ping()
+        deep["redis_ping_ms"] = round((time.monotonic() - t0) * 1000, 1)
+        try:
+            from app.db.redis import get_redis_raw
+            raw = await get_redis_raw()
+            info = await raw.execute_command("FT.INFO", "idx:operative")
+            deep["redis_index_ok"] = info is not None
+        except Exception as e:
+            deep["redis_index_ok"] = False
+            deep["redis_index_error"] = str(e)[:100]
     except Exception as e:
         status["redis"] = str(e)
 
+    # ─── MinIO: bucket exists + can list ──────────────────────────────────
     try:
+        t0 = time.monotonic()
         s3 = get_s3()
-        s3.bucket_exists(settings.s3_bucket)
+        bucket_ok = s3.bucket_exists(settings.s3_bucket)
+        deep["minio_bucket_ok"] = bool(bucket_ok)
+        deep["minio_query_ms"] = round((time.monotonic() - t0) * 1000, 1)
     except Exception as e:
         status["minio"] = str(e)
+
+    # ─── Disk free (host volume; container sees /backups if mounted) ──────
+    try:
+        import shutil
+        usage = shutil.disk_usage("/")
+        deep["disk_free_gb"] = round(usage.free / (1024**3), 2)
+        deep["disk_used_pct"] = round(usage.used / usage.total * 100, 1)
+    except Exception as e:
+        deep["disk_error"] = str(e)[:100]
 
     all_ok = all(v == "ok" for v in status.values())
 
@@ -214,6 +247,8 @@ async def health():
         "db_size_mb": db_size_mb,
         "uptime_seconds": uptime_seconds,
         "llm": get_llm_stats(),
+        "llm_circuit_breakers": get_circuit_states(),
+        "deep": deep,
         "embedding": {
             "model": EMBEDDING_MODEL_NAME,
             "provider": get_embedding_provider(),

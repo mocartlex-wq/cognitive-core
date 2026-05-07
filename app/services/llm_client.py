@@ -8,6 +8,81 @@ _response_cache: dict[str, dict[str, str]] = {}
 _ab_stats: dict[str, dict[str, int]] = {}  # {function: {"a_success": N, "b_success": N, "a_fail": N, "b_fail": N}}
 
 
+# ─── Circuit Breaker ──────────────────────────────────────────────────────────
+# Per-endpoint (base_url:model) state machine. Защищает от висения на dead
+# endpoint: после N последовательных fail переходит в OPEN и fail-fast'ит
+# на T секунд, потом HALF_OPEN — один пробный вызов; success → CLOSED,
+# fail → opnt OPEN. Не блокирует chain — если primary OPEN, fallback всё равно
+# попробуется (его breaker отдельный).
+
+class CircuitState:
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreaker:
+    def __init__(self, threshold: int, timeout: int):
+        self.threshold = threshold
+        self.timeout = timeout
+        self.failures = 0
+        self.state = CircuitState.CLOSED
+        self.opened_at = 0.0
+
+    def allow(self) -> bool:
+        if self.state == CircuitState.CLOSED:
+            return True
+        if self.state == CircuitState.OPEN:
+            if _time.monotonic() - self.opened_at > self.timeout:
+                self.state = CircuitState.HALF_OPEN
+                return True
+            return False
+        # HALF_OPEN — let one probe through (next call will trigger record_*)
+        return True
+
+    def record_success(self) -> None:
+        self.failures = 0
+        self.state = CircuitState.CLOSED
+
+    def record_failure(self) -> None:
+        self.failures += 1
+        if self.state == CircuitState.HALF_OPEN:
+            self.state = CircuitState.OPEN
+            self.opened_at = _time.monotonic()
+        elif self.failures >= self.threshold:
+            self.state = CircuitState.OPEN
+            self.opened_at = _time.monotonic()
+
+
+_breakers: dict[str, CircuitBreaker] = {}
+
+
+def _get_breaker(endpoint_key: str) -> CircuitBreaker:
+    if endpoint_key not in _breakers:
+        _breakers[endpoint_key] = CircuitBreaker(
+            threshold=settings.llm_circuit_threshold,
+            timeout=settings.llm_circuit_timeout,
+        )
+    return _breakers[endpoint_key]
+
+
+def get_circuit_states() -> dict:
+    """Snapshot circuit-breaker state for /health observability."""
+    return {
+        key: {
+            "state": b.state,
+            "failures": b.failures,
+            "opened_seconds_ago": round(_time.monotonic() - b.opened_at, 1) if b.state != CircuitState.CLOSED else None,
+        }
+        for key, b in _breakers.items()
+    }
+
+
+def reset_circuit_breakers() -> None:
+    """For testing / manual recovery."""
+    _breakers.clear()
+
+
 def _build_client(base_url: str, api_key: str) -> AsyncOpenAI:
     return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
@@ -73,29 +148,51 @@ class LLMClient:
             chain.insert(1, (self.primary_config, self.primary_model))
 
         tried = set()
+        skipped_open = []  # endpoints we skipped due to OPEN circuit (for log)
         for cfg, mdl in chain:
             key = f"{cfg['base_url']}:{mdl}"
             if key in tried:
                 continue
             tried.add(key)
+
+            # Circuit-breaker gate — skip endpoint if its breaker is OPEN
+            breaker = _get_breaker(key)
+            if not breaker.allow():
+                skipped_open.append(key)
+                continue
+
             try:
                 start = _time.monotonic()
                 result = await self._try_call(cfg, mdl, messages)
                 duration = _time.monotonic() - start
                 if result:
+                    breaker.record_success()
                     self._cache_response(domain, result)
                     _track_ab(self.function_name, is_ab, True)
                     from app.services.metrics import track_llm
                     track_llm(self.function_name, mdl, "success", duration)
                     return result
             except Exception:
+                breaker.record_failure()
                 _track_ab(self.function_name, is_ab, False)
 
+        # All fresh attempts exhausted — try last-known-good cached response.
+        # Graceful degradation: caller gets stale-but-valid data instead of crash.
         cached = self._get_cached(domain)
         if cached:
+            from app.services.metrics import log_event
+            log_event(
+                "warning",
+                "all LLM endpoints unavailable, returning cached response",
+                function=self.function_name, domain=domain,
+                tried=list(tried), skipped_open=skipped_open,
+            )
             return cached
 
-        raise RuntimeError(f"All LLM calls failed for function '{self.function_name}'")
+        raise RuntimeError(
+            f"All LLM calls failed for function '{self.function_name}' "
+            f"(tried={len(tried)}, skipped_open={len(skipped_open)}, no cache)"
+        )
 
     async def embed(self, text: str) -> list[float]:
         config = settings.get_model_config(settings.llm_embedding)
