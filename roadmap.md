@@ -226,6 +226,51 @@ git init (30мин)
 
 ---
 
+## v0.5.5 — Multi-agent collaboration (1-2 недели)
+
+**Trigger:** owner озвучил 2026-05-07 — нужно чтобы AI-агенты на разных ПК (Claude Code на разных машинах, Cursor, custom) работали **под одним проектом**, общаясь через сервер. Разблокирует параллельную разработку самой системы и объединение разных проектов экосистемы под общей memory-инфраструктурой.
+
+**Цель:** MVP набор примитивов для inter-agent communication поверх Cognitive Core, без полноценного chat-UI или workflow-engine.
+
+**MVP scope (после DS-консультации сужен до 4 ядерных примитивов):**
+
+| # | Задача | Эффорт | Done-критерий |
+|---|---|---|---|
+| 1 | Agent identity / registry endpoint (`POST /agents/register`) | 4 часа | каждый агент имеет уникальный agent_id + project + capabilities в `agent_states` |
+| 2 | Direct messages (events с `domain=agent_inbox`, `payload.to=<recipient>`) | 1 день | агент A пишет, агент B видит через `cognitive_recall` или `GET /agents/<id>/inbox` |
+| 3 | Presence + heartbeat (агент пишет `last_heartbeat` + `current_task` каждые 30 сек) | 4 часа | `GET /agents/online?project=X` показывает who's online + что делает |
+| 4 | Realtime push через SSE (`GET /agents/<id>/stream`) | 1 день | новые messages приходят без polling |
+| 5 | Per-agent rate-limit на write-операции | 4 часа | spam от одного бот-агента не валит общий поток |
+| 6 | Mini-CLI обвязка для Python (cognitive-client) | 4 часа | агент в одну строку: `client.message(to="B", text="...")`, `client.online("project")` |
+| 7 | Тесты на concurrent messages + race conditions на agent_states | 1 день | покрыто 30+ тестами |
+
+**Отложено в v0.5.6 (после первого использования MVP):**
+
+| # | Задача | Когда брать |
+|---|---|---|
+| 8 | Broadcast / project channels | если N директмесседжей становятся ущербом |
+| 9 | Coordination locks (advisory) | если ловим race-conditions на shared files в реальной работе |
+| 10 | Web chat-UI для observability | если CLI неудобно — nice-to-have |
+
+**Definition of Done v0.5.5:** запускаем 3 агента на разных машинах, каждый видит presence остальных через `GET /agents/online`, шлёт direct messages, новые messages приходят push-ом через SSE без polling-а. Документация — в `MULTI_AGENT.md`.
+
+**Anti-patterns (НЕ делаем — финал после DS):**
+- Полноценный chat-UI (текстовое API достаточно)
+- Сложная аутентификация поверх существующих API keys (среда self-hosted, доверенная)
+- Дублирование message history — она и так в L1 + L5 audit
+- Distributed locks / broadcast в первом релизе (откладываем до реального use case)
+- Workflow-engine с DAG, email/Slack/Telegram интеграции
+- Распределённый consensus (Raft, Paxos) — для одного сервера не нужно
+
+**Архитектурное замечание:** MVP — это в основном API-обвязка над существующими примитивами (`agent_states`, L1 events, MCP SSE). Большой сложности нет, главный риск — race conditions на heartbeat-ах и spam от заброшенного агента (mitigation: per-agent rate-limit + TTL на presence).
+
+**Совет двух (зафиксировано 2026-05-07):**
+- Claude (я) предлагал 6 примитивов в MVP: registry, DM, broadcast, locks, presence, SSE-push
+- DeepSeek сократил до 4 (a, b, e, f), отложив broadcast и locks как преждевременную сложность
+- Owner — третий голос, должен утвердить sized scope перед началом v0.5.5
+
+---
+
 ## v0.6 — GPU & Hybrid Local+Cloud LLM
 
 **Trigger:** owner's RTX 24GB upgrade (планируется после dogfooding на текущем железе).
