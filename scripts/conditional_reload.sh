@@ -35,10 +35,15 @@ while IFS= read -r f; do
         docker-compose*.yml|.env*)
             restart_full=1; worth_logging=1 ;;
         scripts/auto-deploy.sh|scripts/conditional_reload.sh|deploy/cognitive-deploy.*)
-            # Сами себя тоже релоадим (через systemctl daemon-reload)
+            # Сами себя тоже релоадим (через systemctl daemon-reload).
+            # systemctl требует root → sudo (salex в sudoers с NOPASSWD).
             echo "[$(date -Iseconds)] deploy infra changed — reloading systemd"
-            systemctl daemon-reload || true
-            systemctl restart cognitive-deploy.timer || true
+            if [ -f /etc/systemd/system/cognitive-deploy.service ]; then
+                sudo cp "$REPO_DIR/deploy/cognitive-deploy.service" /etc/systemd/system/
+                sudo cp "$REPO_DIR/deploy/cognitive-deploy.timer"   /etc/systemd/system/
+            fi
+            sudo systemctl daemon-reload || true
+            sudo systemctl restart cognitive-deploy.timer || true
             worth_logging=1 ;;
         *)
             : ;;  # docs / scripts / .md / прочее — игнор
