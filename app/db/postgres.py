@@ -129,9 +129,32 @@ CREATE TABLE IF NOT EXISTS agent_states (
     total_checkpoints INT DEFAULT 0,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Multi-agent collaboration fields (sprint v0.5.0-prod #3 + v0.5.5)
+    project VARCHAR(64),
+    machine VARCHAR(128),
+    capabilities JSONB DEFAULT '[]',
+    last_heartbeat_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- Idempotent migration for existing rows
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS project VARCHAR(64);
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS machine VARCHAR(128);
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '[]';
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ DEFAULT NOW();
 CREATE INDEX IF NOT EXISTS idx_agent_states_updated ON agent_states(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_states_project_heartbeat ON agent_states(project, last_heartbeat_at DESC);
+
+-- Per-agent API keys (sprint v0.5.0-prod #3): each agent gets its own key,
+-- can be revoked, audited via last_used_at. Replaces single-shared key from .env.
+CREATE TABLE IF NOT EXISTS agent_keys (
+    api_key VARCHAR(128) PRIMARY KEY,
+    agent_id VARCHAR(64) NOT NULL REFERENCES agent_states(agent_id) ON DELETE CASCADE,
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_agent_keys_agent ON agent_keys(agent_id) WHERE revoked_at IS NULL;
 
 -- История checkpoints (для отката)
 CREATE TABLE IF NOT EXISTS agent_state_history (

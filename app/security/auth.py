@@ -1,26 +1,53 @@
 from fastapi import Request, HTTPException
 from app.config import settings
 from app.db.redis import get_redis
+from app.db.postgres import get_pool
 
 
 async def verify_api_key(request: Request) -> str:
-    """Проверяет X-API-Key и возвращает agent_id. 401 если невалиден."""
+    """Validate X-API-Key, return agent_id. 401 if invalid.
+
+    Two-tier lookup:
+      1. agent_keys table (per-agent issued via POST /agents/register)
+      2. Legacy settings.agent_api_keys env (backwards compat for old clients)
+    """
     api_key = request.headers.get("X-API-Key")
     if not api_key:
         raise HTTPException(status_code=401, detail="X-API-Key header required")
 
+    # Tier 1: per-agent keys in DB (sprint v0.5.0-prod #3)
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT agent_id FROM agent_keys
+                WHERE api_key = $1 AND revoked_at IS NULL
+                """,
+                api_key,
+            )
+            if row:
+                # Update last_used_at (fire-and-forget — no need to await separately)
+                await conn.execute(
+                    "UPDATE agent_keys SET last_used_at = NOW() WHERE api_key = $1",
+                    api_key,
+                )
+                request.state.agent_id = row["agent_id"]
+                return row["agent_id"]
+    except HTTPException:
+        raise
+    except Exception:
+        # If DB unavailable, fall through to legacy env-keys (don't block during outage)
+        pass
+
+    # Tier 2: legacy env-defined keys (kept for ai-crm handoff and existing clients)
     agent_keys = settings.get_agent_keys()
-    agent_id = None
     for aid, key in agent_keys.items():
         if key == api_key:
-            agent_id = aid
-            break
+            request.state.agent_id = aid
+            return aid
 
-    if agent_id is None:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    request.state.agent_id = agent_id
-    return agent_id
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 async def check_rate_limit(agent_id: str) -> bool:
