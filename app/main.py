@@ -136,6 +136,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.demo import router as demo_router
 from app.api.agents import router as agents_router
 from app.api.agents_collab import router as agents_collab_router
+from app.api.onboard import router as onboard_router
 
 app.include_router(events_router)
 app.include_router(operative_router)
@@ -145,6 +146,7 @@ app.include_router(dashboard_router)
 app.include_router(demo_router)
 app.include_router(agents_router)
 app.include_router(agents_collab_router)
+app.include_router(onboard_router)
 from app.api.replication import router as replication_router
 app.include_router(replication_router)
 
