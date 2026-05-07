@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     daily_hours: int = 24
     weekly_days: int = 7
 
+    # LLM circuit breaker (per provider+model)
+    llm_circuit_threshold: int = 3   # consecutive failures to trip OPEN
+    llm_circuit_timeout: int = 60    # seconds in OPEN before half-open probe
+
     # Язык
     system_language: str = "ru"  # ru / en / zh
 
