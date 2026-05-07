@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO_DIR="${COGNITIVE_REPO_DIR:-/opt/cognitive-core}"
 BRANCH="${COGNITIVE_DEPLOY_BRANCH:-main}"
-HEALTH_CMD="${COGNITIVE_HEALTH_CMD:-docker exec cognitive_api curl -sS --max-time 6 http://localhost:8000/health}"
+HEALTH_CMD="${COGNITIVE_HEALTH_CMD:-docker exec cognitive_api python -c \"import urllib.request,sys; sys.stdout.write(urllib.request.urlopen('http://localhost:8000/health',timeout=5).read().decode())\"}"
 SMOKE_ATTEMPTS="${COGNITIVE_SMOKE_ATTEMPTS:-6}"
 SMOKE_INTERVAL="${COGNITIVE_SMOKE_INTERVAL:-5}"
 SMOKE_MIN_OK="${COGNITIVE_SMOKE_MIN_OK:-5}"
