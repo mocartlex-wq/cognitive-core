@@ -294,7 +294,11 @@ ISP **не блокирует** входящие 80/443 на этом тариф
 
 ## 📦 Auto-deploy pipeline
 
-С 2026-05-07 сервер тянет изменения **сам** через systemd-timer + `git fetch`. Никаких ручных `scp` или `docker exec` для обычных правок. Active since 2026-05-07T06:44 UTC, bare-repo at `salex@192.168.0.118:/home/salex/cognitive-core.git`.
+С 2026-05-07 сервер тянет изменения **сам** через systemd-timer + `git fetch`. Никаких ручных `scp` или `docker exec` для обычных правок.
+
+**С 2026-05-07T13:00 UTC основной remote — GitHub** (`git@github.com:mocartlex-wq/cognitive-core.git`, приватный, deploy-key read-only). Push в GitHub из любой точки мира → через 60 сек на сервере. WG/LAN не нужны для деплоя обычных изменений.
+
+`/home/salex/cognitive-core.git` остаётся как secondary mirror на случай отказа GitHub.
 
 ### Как это работает
 
