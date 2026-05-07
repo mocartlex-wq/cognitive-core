@@ -648,6 +648,76 @@ async def cognitive_agent_manifest() -> dict:
     return manifest
 
 
+# ════════════════════════════════════════════════════════════════════════
+# Multi-agent collaboration tools (v0.5.5 MVP)
+# Inter-agent messaging via Cognitive Core. Two agents on different machines
+# can discover each other (online), exchange direct messages (durable in L1),
+# and broadcast presence (heartbeat). All through public HTTPS endpoint.
+# ════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def cognitive_send(to: str, text: str, context: dict | None = None) -> dict:
+    """Отправить direct message другому агенту (стораж в L1, переживает рестарт).
+
+    Args:
+        to: agent_id получателя (например 'ai-crm-deploy')
+        text: текст сообщения
+        context: опциональный JSON-контекст (ссылки на коммиты, теги, etc)
+    """
+    async with _client() as c:
+        r = await c.post("/agents/message", json={
+            "to": to, "text": text, "context": context or {},
+        })
+        return r.json()
+
+
+@mcp.tool()
+async def cognitive_inbox(since_minutes: int = 60, limit: int = 50) -> dict:
+    """Прочитать входящие direct messages для меня, новые первыми.
+
+    Args:
+        since_minutes: за сколько минут назад смотреть (1-10080, default 60)
+        limit: максимум сообщений (1-500, default 50)
+    """
+    async with _client() as c:
+        r = await c.get("/agents/inbox", params={
+            "since_minutes": since_minutes, "limit": limit,
+        })
+        return r.json()
+
+
+@mcp.tool()
+async def cognitive_online(project: str | None = None, within_seconds: int = 120) -> dict:
+    """Список агентов с heartbeat в последние N секунд.
+
+    Args:
+        project: фильтр по проекту (например 'cognitive-core' или 'ai-crm')
+        within_seconds: окно presence (default 120 — двойной запас от 60s heartbeat TTL)
+    """
+    async with _client() as c:
+        params: dict = {"within_seconds": within_seconds}
+        if project:
+            params["project"] = project
+        r = await c.get("/agents/online", params=params)
+        return r.json()
+
+
+@mcp.tool()
+async def cognitive_heartbeat(current_task: str | None = None) -> dict:
+    """Обновить мою presence (last_heartbeat_at + current_task).
+
+    Вызывать каждые 30 секунд если работа активная. Через 120s без heartbeat
+    я пропадаю из cognitive_online.
+
+    Args:
+        current_task: коротко чем сейчас занят (показывается другим агентам)
+    """
+    async with _client() as c:
+        r = await c.post("/agents/heartbeat", json={"current_task": current_task})
+        return r.json()
+
+
 def main():
     """Запуск MCP-сервера в одном из 3 режимов:
       stdio (default)  — для local docker exec (Claude Desktop / Cherry Studio локально)
