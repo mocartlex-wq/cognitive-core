@@ -193,13 +193,14 @@ async def send_message(req: MessageRequest, agent_id: str = Depends(verify_api_k
             "SELECT 1 FROM agent_states WHERE agent_id = $1", req.to
         )
         # Insert as L1 event in agent_inbox domain
+        # Schema: l1_raw_events(id, timestamp, source_agent, domain, raw_payload)
         event_id = await conn.fetchval(
             """
-            INSERT INTO l1_raw_events (agent_id, domain, event_type, payload)
-            VALUES ($1, $2, 'agent_message', $3::jsonb)
-            RETURNING event_id
+            INSERT INTO l1_raw_events (source_agent, domain, raw_payload)
+            VALUES ($1, $2, $3::jsonb)
+            RETURNING id
             """,
-            agent_id, f"agent_inbox", json.dumps(payload, ensure_ascii=False),
+            agent_id, "agent_inbox", json.dumps(payload, ensure_ascii=False),
         )
     return {
         "ok": True,
@@ -221,11 +222,11 @@ async def inbox(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT event_id, agent_id AS from_agent, payload, timestamp
+            SELECT id, source_agent AS from_agent, raw_payload, timestamp
             FROM l1_raw_events
             WHERE domain = 'agent_inbox'
               AND timestamp >= $1
-              AND payload->>'to' = $2
+              AND raw_payload->>'to' = $2
             ORDER BY timestamp DESC
             LIMIT $3
             """,
@@ -233,9 +234,9 @@ async def inbox(
         )
     messages = []
     for r in rows:
-        p = json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"]
+        p = json.loads(r["raw_payload"]) if isinstance(r["raw_payload"], str) else r["raw_payload"]
         messages.append({
-            "id": str(r["event_id"]),
+            "id": str(r["id"]),
             "from": p.get("from", r["from_agent"]),
             "text": p.get("text", ""),
             "context": p.get("context", {}),
