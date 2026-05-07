@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cognitive Core — Песочница API</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="theme-color" content="#0a0e14">
+<link rel="stylesheet" href="/static/shared.css?v=20260506a">
+<link rel="stylesheet" href="/static/glass.css?v=20260506a">
+<style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }</style>
+<style>
+  /* === Sandbox glass-mode === */
+  body.glass-mode main.container { padding: 28px; }
+  body.glass-mode .page-title {
+    font-size: 28px; font-weight: 700; letter-spacing: -0.8px;
+    background: linear-gradient(180deg, #ffffff 0%, #c8d2dd 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  body.glass-mode .page-subtitle {
+    color: rgba(230,237,243,0.65); font-size: 14px;
+  }
+
+  .stage { margin-bottom: 40px; }
+  .stage-head {
+    display: flex; align-items: baseline; gap: 14px;
+    margin-bottom: 14px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .stage-num {
+    font-size: 11px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, rgba(88,166,255,0.3), rgba(188,140,255,0.3));
+    padding: 5px 12px; border-radius: 99px;
+    text-transform: uppercase; letter-spacing: 0.7px;
+    border: 1px solid var(--glass-border-strong);
+  }
+  .stage-title {
+    font-size: 18px; font-weight: 700; color: #fff;
+    letter-spacing: -0.3px;
+  }
+  .stage-sub {
+    color: rgba(230,237,243,0.6); font-size: 13.5px;
+    margin-bottom: 16px; line-height: 1.6;
+  }
+
+  .stage-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 800px) { .stage-grid { grid-template-columns: 1fr; } }
+
+  /* === Glass endpoint cards === */
+  body.glass-mode .endpoint-card {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius);
+    padding: 22px;
+    box-shadow: var(--glass-shadow);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  body.glass-mode .endpoint-card:hover {
+    border-color: var(--glass-border-strong);
+    transform: translateY(-2px);
+  }
+  .endpoint-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px; flex-wrap: wrap;
+  }
+  .endpoint-head h3 {
+    font-size: 15px; font-weight: 600; color: #fff;
+    letter-spacing: -0.2px;
+  }
+  .endpoint-path {
+    font-family: var(--mono); font-size: 11px;
+    color: rgba(230,237,243,0.55); padding: 2px 8px;
+    background: rgba(13,17,23,0.5); border-radius: 6px;
+    border: 1px solid var(--glass-border);
+  }
+  .endpoint-desc {
+    font-size: 12.5px; color: rgba(230,237,243,0.6);
+    margin-bottom: 16px; line-height: 1.55;
+  }
+
+  /* === API-key bar — glass === */
+  body.glass-mode .api-key-bar {
+    display: flex; gap: 12px; align-items: center;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.04);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px; margin-bottom: 28px;
+  }
+  body.glass-mode .api-key-bar label {
+    margin: 0; color: rgba(230,237,243,0.6);
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  body.glass-mode .api-key-bar select {
+    width: auto; flex: 1; max-width: 280px;
+    background: rgba(13,17,23,0.5);
+    border: 1px solid var(--glass-border);
+    color: #fff;
+  }
+
+  /* === Form inputs — solid (читаемость) === */
+  body.glass-mode input,
+  body.glass-mode textarea,
+  body.glass-mode select {
+    background: rgba(13,17,23,0.6);
+    border: 1px solid var(--glass-border);
+    color: #fff;
+    border-radius: 8px;
+  }
+  body.glass-mode input:focus,
+  body.glass-mode textarea:focus,
+  body.glass-mode select:focus {
+    border-color: rgba(88,166,255,0.5);
+    box-shadow: 0 0 0 3px rgba(88,166,255,0.15);
+    outline: none;
+  }
+  body.glass-mode label {
+    color: rgba(230,237,243,0.55); font-weight: 600;
+  }
+
+  /* === Buttons — Apple glass === */
+  body.glass-mode .btn {
+    border-radius: 10px; padding: 9px 18px;
+    font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+    background: linear-gradient(135deg, #58a6ff 0%, #4d8fdf 100%);
+    color: #fff; border: none; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(88,166,255,0.3), 0 1px 0 rgba(255,255,255,0.15) inset;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  body.glass-mode .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(88,166,255,0.4), 0 1px 0 rgba(255,255,255,0.2) inset;
+  }
+  body.glass-mode .btn.ghost {
+    background: rgba(255,255,255,0.06);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border-strong);
+    box-shadow: none;
+  }
+  body.glass-mode .btn.ghost:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.22);
+  }
+  body.glass-mode .btn.danger {
+    background: linear-gradient(135deg, #f85149 0%, #d73a49 100%);
+    box-shadow: 0 4px 12px rgba(248,81,73,0.3);
+  }
+  body.glass-mode .btn.success {
+    background: linear-gradient(135deg, #3fb950 0%, #2ea043 100%);
+    box-shadow: 0 4px 12px rgba(63,185,80,0.3);
+  }
+  body.glass-mode .btn.sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+
+  /* === Response panels — glass с solid фоном для текста === */
+  body.glass-mode .response {
+    background: rgba(13,17,23,0.72);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: 14px;
+    font-family: var(--mono); font-size: 12px;
+    white-space: pre-wrap; max-height: 420px; overflow-y: auto;
+    color: #d4d4d4; line-height: 1.55;
+  }
+  body.glass-mode .response.ok { border-color: rgba(63,185,80,0.4); }
+  body.glass-mode .response.err { border-color: rgba(248,81,73,0.5); }
+
+  /* === Tool registry rows — solid === */
+  .tool-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(13,17,23,0.5);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    margin-bottom: 6px; font-size: 12px;
+  }
+  .tool-row:hover { background: rgba(255,255,255,0.04); }
+  .tool-row .tool-info { display: flex; flex-direction: column; gap: 2px; }
+  .tool-row .tool-name { font-weight: 600; color: #58a6ff; font-size: 13px; }
+  .tool-row .tool-meta { font-size: 11px; color: rgba(230,237,243,0.55); }
+  .tool-del {
+    background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.25);
+    color: #f85149; cursor: pointer;
+    width: 26px; height: 26px; font-size: 14px;
+    border-radius: 8px; transition: all 0.15s;
+  }
+  .tool-del:hover { background: rgba(248,81,73,0.2); }
+
+  /* === Pills (badge) === */
+  body.glass-mode .pill {
+    background: rgba(88,166,255,0.15);
+    color: #58a6ff;
+    border: 1px solid rgba(88,166,255,0.25);
+  }
+  body.glass-mode .pill.green { background: rgba(63,185,80,0.15); color: #3fb950; border-color: rgba(63,185,80,0.25); }
+  body.glass-mode .pill.red { background: rgba(248,81,73,0.15); color: #f85149; border-color: rgba(248,81,73,0.25); }
+  body.glass-mode .pill.yellow { background: rgba(210,153,29,0.15); color: #d2991d; border-color: rgba(210,153,29,0.25); }
+
+  /* === Help tooltip === */
+  body.glass-mode .help {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--glass-border);
+    color: rgba(230,237,243,0.6);
+  }
+</style>
+</head>
+<body class="glass-mode">
+<div class="orb-3"></div>
+
+<div class="top-bar">
+  <a class="brand" href="/">
+    <div class="brand-icon"><span class="brand-dot"></span></div>
+    <div>
+      <div class="brand-name">Cognitive Core</div>
+      <span class="brand-ver" id="ver">v?</span>
+    </div>
+  </a>
+  <nav class="top-nav">
+    <a href="/">Главная</a>
+    <a href="/ui">Дашборд</a>
+    <a href="/sandbox" class="active">Песочница API</a>
+  </nav>
+  <div class="top-status">
+    <span class="live">live</span>
+    <span><span class="dot unknown" id="d-pg"></span>PG</span>
+    <span><span class="dot unknown" id="d-rd"></span>Redis</span>
+    <span><span class="dot unknown" id="d-s3"></span>S3</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Сменить тему" aria-label="Сменить тему">
+      <svg class="icon icon-sun"><use href="#sun"/></svg>
+      <svg class="icon icon-moon"><use href="#moon"/></svg>
+    </button>
+  </div>
+</div>
+
+<main class="container">
+
+<div class="page-header">
+  <h1 class="page-title">Песочница API</h1>
+  <p class="page-subtitle">
+    Прямой доступ ко всем эндпоинтам системы. Карточки сгруппированы по этапам жизненного цикла памяти —
+    от записи сырого события до KNN-поиска по выученным знаниям.
+    Все запросы идут с выбранным API-ключом ниже.
+  </p>
+</div>
+
+<div class="api-key-bar">
+  <label>API-ключ агента:</label>
+  <select id="api-key">
+    <option value="key-design-001">agent_designer (key-design-001)</option>
+    <option value="key-dev-001">agent_developer (key-dev-001)</option>
+    <option value="default-key">agent_default (default-key)</option>
+  </select>
+  <span class="text-xs muted help" data-tip="Ключи задаются в .env через AGENT_API_KEYS. Каждый запрос требует X-API-Key. По нему определяется source_agent для аудита.">?</span>
+</div>
+
+<!-- ========== ЭТАП 1: ЗАПИСЬ ОПЫТА ========== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-num">Этап 1</span>
+    <h2 class="stage-title">Запись опыта в L1 <span class="help" data-tip="Единственная точка входа данных. Каждое событие проходит 6-шаговый защитный конвейер: auth → rate-limit → pydantic → sanitizer → ingest → audit.">?</span></h2>
+  </div>
+  <p class="stage-sub">
+    Агент отправляет каждое значимое действие в систему. Это попадает в L1 и ждёт ночной консолидации.
+    Payload — произвольный JSON: что делал, какой результат, какой feedback.
+  </p>
+
+  <div class="stage-grid">
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Отправить одно событие</h3>
+        <span class="endpoint-path">/events</span>
+      </div>
+      <p class="endpoint-desc">Самый частый вызов. Используется агентами для логирования каждого действия.</p>
+
+      <div class="form-group">
+        <label>Домен (предметная область)</label>
+        <input id="ev-domain" value="test_domain" placeholder="memory_arch, fastapi_dev...">
+      </div>
+      <div class="form-group">
+        <label>Source agent</label>
+        <input id="ev-agent" value="agent_designer">
+      </div>
+      <div class="form-group">
+        <label>Payload (JSON)</label>
+        <textarea id="ev-payload">{
+  "task": "generate React button",
+  "result": "Created Button.tsx with variants",
+  "feedback": "positive",
+  "tools_used": ["react", "typescript"]
+}</textarea>
+      </div>
+      <button class="btn" onclick="doIngest()">Отправить событие</button>
+      <div id="resp-events" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Bulk: 5 тестовых событий</h3>
+        <span class="endpoint-path">/events × 5</span>
+      </div>
+      <p class="endpoint-desc">
+        Быстрый способ накачать домен данными чтобы можно было запустить daily/weekly. Минимум для daily — 3 события.
+      </p>
+
+      <div class="form-group">
+        <label>Домен</label>
+        <input id="bulk-domain" value="test_domain">
+      </div>
+      <button class="btn" onclick="doBulkIngest()">Отправить 5 событий</button>
+      <div id="resp-bulk" class="response"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== ЭТАП 2: КОНСОЛИДАЦИЯ ========== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-num">Этап 2</span>
+    <h2 class="stage-title">Анализ памяти LLM-куратором <span class="help" data-tip="Обычно эти задачи запускает фоновый worker по расписанию (daily 02:00, weekly понедельник 03:00, monthly 1-го). Здесь — ручной запуск для тестирования.">?</span></h2>
+  </div>
+  <p class="stage-sub">
+    Куратор фильтрует шум, аналитик извлекает паттерны. Daily превращает L1 в L2, weekly — L2 в L3.
+    Каждая операция вызывает DeepSeek (~10-30 секунд).
+  </p>
+
+  <div class="stage-grid">
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Daily: L1 → L2</h3>
+        <span class="endpoint-path">/memory/consolidate/daily</span>
+      </div>
+      <p class="endpoint-desc">
+        Куратор-фильтр + Daily Analyzer LLM. Создаёт один буфер на (date, domain) с patterns/mistakes/lessons.
+      </p>
+
+      <div class="form-group">
+        <label>Домен (опционально — все если пусто)</label>
+        <input id="daily-domain" value="test_domain">
+      </div>
+      <button class="btn success" onclick="doDaily()">Запустить daily</button>
+      <div id="resp-daily" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Weekly: L2 → L3</h3>
+        <span class="endpoint-path">/memory/consolidate/weekly</span>
+      </div>
+      <p class="endpoint-desc">
+        Pre-Weekly Check (дубли, противоречия, повторяемость) + Weekly Consolidator LLM.
+        Добавляет знания и инструменты в L3, создаёт L4-снапшот если изменилось.
+      </p>
+
+      <div class="form-group">
+        <label>Домен (обязательно)</label>
+        <input id="weekly-domain" value="test_domain">
+      </div>
+      <button class="btn success" onclick="doWeekly()">Запустить weekly</button>
+      <div id="resp-weekly" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Monthly Audit</h3>
+        <span class="endpoint-path">/memory/audit/monthly</span>
+      </div>
+      <p class="endpoint-desc">
+        Полный аудит L3: устаревшие знания (>90д), мёртвые инструменты (>60д), внутренние конфликты, дубликаты.
+      </p>
+
+      <div class="form-group">
+        <label>Домен</label>
+        <input id="audit-domain" value="test_domain">
+      </div>
+      <button class="btn ghost" onclick="doAudit()">Запустить monthly audit</button>
+      <div id="resp-audit" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill red">POST</span>
+        <h3>Очистка L1</h3>
+        <span class="endpoint-path">/memory/cleanup</span>
+      </div>
+      <p class="endpoint-desc">
+        Удаляет события L1 старше 14 дней (RETENTION_DAYS). По плану вызывается после weekly.
+      </p>
+
+      <button class="btn danger" onclick="doCleanup()">Удалить старые L1</button>
+      <div id="resp-cleanup" class="response"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== ЭТАП 3: ПОИСК ЗНАНИЙ ========== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-num">Этап 3</span>
+    <h2 class="stage-title">Поиск знаний через OP <span class="help" data-tip="Operative — единственный канал чтения для агентов. KNN-поиск по эмбеддингам в RediSearch. Возвращает релевантные L3-знания + инструменты.">?</span></h2>
+  </div>
+  <p class="stage-sub">
+    Агент задаёт контекст-вопрос → система превращает его в вектор → KNN ищет ближайшие L3-записи →
+    создаётся сессия в Redis (24h TTL).
+  </p>
+
+  <div class="stage-grid">
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>KNN-поиск</h3>
+        <span class="endpoint-path">/operative/query</span>
+      </div>
+      <p class="endpoint-desc">
+        Возвращает session_id + top_k знаний и инструментов с distance (косинусное сходство).
+      </p>
+
+      <div class="form-group">
+        <label>Домен</label>
+        <input id="op-domain" value="test_domain">
+      </div>
+      <div class="form-group">
+        <label>Запрос (естественный язык)</label>
+        <input id="op-query" value="How to generate React components?">
+      </div>
+      <div class="row-2">
+        <div class="form-group">
+          <label>Top-K</label>
+          <input id="op-topk" value="5" type="number" min="1" max="20">
+        </div>
+        <div class="form-group">
+          <label>Включать tools</label>
+          <select id="op-tools"><option value="true">да</option><option value="false">нет</option></select>
+        </div>
+      </div>
+      <button class="btn" onclick="doQuery()">Найти знания</button>
+      <div id="resp-query" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Закрыть сессию</h3>
+        <span class="endpoint-path">/operative/sessions/{id}/close</span>
+      </div>
+      <p class="endpoint-desc">
+        keep_results=true → результат работы агента уйдёт обратно в L1 (обратная петля).
+        false → сессия просто удаляется.
+      </p>
+
+      <div class="form-group">
+        <label>Session ID</label>
+        <input id="close-sid" placeholder="UUID из ответа /operative/query">
+      </div>
+      <div class="row-2">
+        <div class="form-group">
+          <label>Сохранить результат</label>
+          <select id="close-keep"><option value="false">нет</option><option value="true">да (обратная петля)</option></select>
+        </div>
+        <div class="form-group">
+          <label>Source agent</label>
+          <input id="close-agent" value="agent_designer">
+        </div>
+      </div>
+      <button class="btn ghost" onclick="doClose()">Закрыть сессию</button>
+      <div id="resp-close" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Feedback по записи</h3>
+        <span class="endpoint-path">/operative/feedback</span>
+      </div>
+      <p class="endpoint-desc">
+        useful=true → confidence записи в Redis повышается. false → понижается, при &lt;0.3 удаляется из фрагмента.
+      </p>
+
+      <div class="form-group">
+        <label>Record ID</label>
+        <input id="fb-rid" placeholder="UUID знания/инструмента из результата query">
+      </div>
+      <div class="row-2">
+        <div class="form-group">
+          <label>Тип</label>
+          <select id="fb-type"><option value="knowledge">knowledge</option><option value="tool">tool</option></select>
+        </div>
+        <div class="form-group">
+          <label>Полезно?</label>
+          <select id="fb-useful"><option value="true">да</option><option value="false">нет</option></select>
+        </div>
+      </div>
+      <button class="btn ghost" onclick="doFeedback()">Отправить feedback</button>
+      <div id="resp-feedback" class="response"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== ЭТАП 4: РЕЕСТР ИНСТРУМЕНТОВ ========== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-num">Этап 4</span>
+    <h2 class="stage-title">Реестр инструментов L3 <span class="help" data-tip="Параллельно знаниям, в L3 хранятся описания инструментов: API, библиотеки, скрипты. Когда найдены через KNN, агент знает чем именно решать задачу.">?</span></h2>
+  </div>
+  <p class="stage-sub">
+    Инструменты можно регистрировать вручную (агент описал свою API) или они извлекаются автоматически
+    weekly-консолидатором из L2-буферов.
+  </p>
+
+  <div class="stage-grid">
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill blue">POST</span>
+        <h3>Зарегистрировать инструмент</h3>
+        <span class="endpoint-path">/tools</span>
+      </div>
+
+      <div class="form-group">
+        <label>Домен</label>
+        <input id="tool-domain" value="test_domain">
+      </div>
+      <div class="form-group">
+        <label>Имя инструмента</label>
+        <input id="tool-name" value="my_tool">
+      </div>
+      <div class="row-2">
+        <div class="form-group">
+          <label>Тип</label>
+          <select id="tool-type">
+            <option value="api">api</option>
+            <option value="script">script</option>
+            <option value="prompt">prompt</option>
+            <option value="library">library</option>
+            <option value="service" selected>service</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Описание</label>
+          <input id="tool-desc" value="My custom tool">
+        </div>
+      </div>
+      <button class="btn" onclick="doRegisterTool()">Зарегистрировать</button>
+      <div id="resp-tool-reg" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill green">GET</span>
+        <span class="pill red">DELETE</span>
+        <h3>Список инструментов домена</h3>
+        <span class="endpoint-path">/tools?domain=...</span>
+      </div>
+
+      <div class="form-group">
+        <label>Домен</label>
+        <div style="display:flex;gap:8px;">
+          <input id="tool-list-domain" value="test_domain" style="flex:1;">
+          <button class="btn" onclick="doListTools()">Показать</button>
+        </div>
+      </div>
+      <div id="tool-list" style="max-height:300px;overflow-y:auto;margin-top:10px;"></div>
+      <div id="resp-tool-list" class="response"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== ЭТАП 5: СНАПШОТЫ И ВОССТАНОВЛЕНИЕ ========== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-num">Этап 5</span>
+    <h2 class="stage-title">Снапшоты L4 <span class="help" data-tip="L4 — слой архивирования. Полные слепки L3 в S3 (MinIO). Создаются автоматически после weekly если L3 изменилась. Можно восстановить L3 из любого снапшота.">?</span></h2>
+  </div>
+  <p class="stage-sub">
+    Disaster recovery: если L3 повреждён — восстанавливаем из любого снапшота. Каждый снапшот с SHA-256.
+  </p>
+
+  <div class="stage-grid">
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill green">GET</span>
+        <h3>Список снапшотов</h3>
+        <span class="endpoint-path">/memory/snapshots</span>
+      </div>
+      <p class="endpoint-desc">Все снапшоты L4 с типом, размером и хэшем.</p>
+      <button class="btn ghost" onclick="doSnapshots()">Показать снапшоты</button>
+      <div id="resp-snap" class="response"></div>
+    </div>
+
+    <div class="endpoint-card">
+      <div class="endpoint-head">
+        <span class="pill red">POST</span>
+        <h3>Восстановить L3 из снапшота</h3>
+        <span class="endpoint-path">/memory/snapshots/restore/{id}</span>
+      </div>
+      <p class="endpoint-desc">
+        Двухфазно: проверка хэша → атомарная транзакция (старое в effective_to, новое в effective_from).
+        Опасная операция!
+      </p>
+
+      <div class="form-group">
+        <label>Snapshot ID</label>
+        <input id="restore-id" placeholder="UUID из списка снапшотов">
+      </div>
+      <button class="btn danger" onclick="doRestore()">Восстановить</button>
+      <div id="resp-restore" class="response"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+const API = '';
+
+function key() { return document.getElementById('api-key').value; }
+function headers() { return { 'Content-Type': 'application/json', 'X-API-Key': key() }; }
+
+function show(id, data, ok) {
+  const el = document.getElementById(id);
+  el.className = 'response show ' + (ok ? 'ok' : 'err');
+  el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: headers() };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  let json;
+  try { json = await res.json(); } catch(e) { json = { error: 'Invalid JSON response' }; }
+  return { ok: res.ok, status: res.status, data: json };
+}
+
+// ===== Status (top bar) =====
+async function loadStatus() {
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    document.getElementById('ver').textContent = 'v' + (d.version || '?');
+    const setDot = (id, ok) => document.getElementById(id).className = 'dot ' + (ok ? 'ok' : 'err');
+    setDot('d-pg', d.services?.postgres === 'ok');
+    setDot('d-rd', d.services?.redis === 'ok');
+    setDot('d-s3', d.services?.minio === 'ok');
+  } catch(e) {}
+}
+loadStatus();
+setInterval(loadStatus, 5000);
+
+// ===== Этап 1: Запись =====
+async function doIngest() {
+  let payload;
+  try { payload = JSON.parse(document.getElementById('ev-payload').value); }
+  catch(e) { return show('resp-events', 'Невалидный JSON: ' + e.message, false); }
+  const res = await api('POST', '/events', {
+    source_agent: document.getElementById('ev-agent').value,
+    domain: document.getElementById('ev-domain').value,
+    payload,
+  });
+  show('resp-events', res.data, res.ok);
+}
+
+async function doBulkIngest() {
+  const dom = document.getElementById('bulk-domain').value;
+  const results = [];
+  for (let i = 1; i <= 5; i++) {
+    const r = await api('POST', '/events', {
+      source_agent: 'agent_designer',
+      domain: dom,
+      payload: { task: `bulk task #${i}`, result: 'ok', feedback: 'positive', i },
+    });
+    results.push({ i, status: r.status, id: r.data?.id });
+  }
+  show('resp-bulk', { sent: 5, results }, results.every(r => r.status === 200 || r.status === 201));
+}
+
+// ===== Этап 2: Анализ =====
+async function doDaily() {
+  const dom = document.getElementById('daily-domain').value.trim();
+  const url = '/memory/consolidate/daily' + (dom ? `?domain=${encodeURIComponent(dom)}` : '');
+  show('resp-daily', '⏳ Запуск Daily через DeepSeek (10-30 сек)...', true);
+  const res = await api('POST', url);
+  show('resp-daily', res.data, res.ok);
+}
+
+async function doWeekly() {
+  const dom = document.getElementById('weekly-domain').value.trim();
+  if (!dom) return show('resp-weekly', 'Domain обязателен', false);
+  show('resp-weekly', '⏳ Запуск Weekly через DeepSeek (15-45 сек)...', true);
+  const res = await api('POST', `/memory/consolidate/weekly?domain=${encodeURIComponent(dom)}`);
+  show('resp-weekly', res.data, res.ok);
+}
+
+async function doAudit() {
+  const dom = document.getElementById('audit-domain').value.trim();
+  if (!dom) return show('resp-audit', 'Domain обязателен', false);
+  show('resp-audit', '⏳ Monthly audit через DeepSeek (15-30 сек)...', true);
+  const res = await api('POST', `/memory/audit/monthly?domain=${encodeURIComponent(dom)}`);
+  show('resp-audit', res.data, res.ok);
+}
+
+async function doCleanup() {
+  if (!confirm('Удалить все L1-события старше 14 дней? Действие необратимо.')) return;
+  const res = await api('POST', '/memory/cleanup');
+  show('resp-cleanup', res.data, res.ok);
+}
+
+// ===== Этап 3: Поиск =====
+async function doQuery() {
+  const res = await api('POST', '/operative/query', {
+    domain: document.getElementById('op-domain').value,
+    context: document.getElementById('op-query').value,
+    top_k: parseInt(document.getElementById('op-topk').value),
+    include_tools: document.getElementById('op-tools').value === 'true',
+  });
+  show('resp-query', res.data, res.ok);
+  if (res.data?.session_id) document.getElementById('close-sid').value = res.data.session_id;
+}
+
+async function doClose() {
+  const sid = document.getElementById('close-sid').value;
+  if (!sid) return show('resp-close', 'Session ID обязателен', false);
+  const res = await api('POST', `/operative/sessions/${sid}/close`, {
+    keep_results: document.getElementById('close-keep').value === 'true',
+    source_agent: document.getElementById('close-agent').value,
+  });
+  show('resp-close', res.data, res.ok);
+}
+
+async function doFeedback() {
+  const sid = document.getElementById('close-sid').value;
+  const rid = document.getElementById('fb-rid').value;
+  if (!sid || !rid) return show('resp-feedback', 'session_id и record_id обязательны', false);
+  const res = await api('POST', '/operative/feedback', {
+    session_id: sid,
+    record_id: rid,
+    record_type: document.getElementById('fb-type').value,
+    useful: document.getElementById('fb-useful').value === 'true',
+  });
+  show('resp-feedback', res.data, res.ok);
+}
+
+// ===== Этап 4: Tools =====
+async function doRegisterTool() {
+  const res = await api('POST', '/tools', {
+    domain: document.getElementById('tool-domain').value,
+    tool_name: document.getElementById('tool-name').value,
+    tool_type: document.getElementById('tool-type').value,
+    description: document.getElementById('tool-desc').value,
+    config_schema: {},
+    usage_patterns: { tip: 'manual registration' },
+  });
+  show('resp-tool-reg', res.data, res.ok);
+}
+
+async function doListTools() {
+  const dom = document.getElementById('tool-list-domain').value;
+  const res = await api('GET', `/tools?domain=${encodeURIComponent(dom)}`);
+  const list = document.getElementById('tool-list');
+  if (!res.ok || !Array.isArray(res.data)) {
+    list.innerHTML = '';
+    return show('resp-tool-list', res.data, false);
+  }
+  list.innerHTML = res.data.length === 0
+    ? '<div class="muted text-sm" style="padding:12px;">Нет инструментов в домене</div>'
+    : res.data.map(t => `
+        <div class="tool-row">
+          <div class="tool-info">
+            <span class="tool-name">${esc(t.tool_name)}</span>
+            <span class="tool-meta">${esc(t.tool_type)} · v${t.version} · ${esc((t.description || '').slice(0, 60))}</span>
+          </div>
+          <button class="tool-del" onclick="deleteTool('${t.id}')" title="Деактивировать">×</button>
+        </div>
+      `).join('');
+  document.getElementById('resp-tool-list').className = 'response';
+}
+
+async function deleteTool(id) {
+  if (!confirm('Деактивировать инструмент?')) return;
+  const res = await api('DELETE', `/tools/${id}`);
+  show('resp-tool-list', res.data, res.ok);
+  if (res.ok) doListTools();
+}
+
+// ===== Этап 5: Snapshots =====
+async function doSnapshots() {
+  const res = await api('GET', '/memory/snapshots');
+  show('resp-snap', res.data, res.ok);
+}
+
+async function doRestore() {
+  const id = document.getElementById('restore-id').value;
+  if (!id) return show('resp-restore', 'Snapshot ID обязателен', false);
+  if (!confirm('Восстановить L3 из снапшота? Текущая L3 будет переписана.')) return;
+  const res = await api('POST', `/memory/snapshots/restore/${id}`);
+  show('resp-restore', res.data, res.ok);
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+<script src="/static/theme.js"></script>
+
+</body>
+</html>

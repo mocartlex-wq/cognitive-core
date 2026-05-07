@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cognitive Core — SF Symbols-style icon sprite.
+  Все иконки 24×24, stroke-based 2px, без fill.
+  Использование:
+    <svg class="icon"><use href="/static/icons.svg#dashboard"/></svg>
+  Стилизация через CSS:
+    .icon { width: 20px; height: 20px; stroke: currentColor; fill: none; }
+-->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+
+  <!-- Dashboard / chart -->
+  <symbol id="dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="7" height="9" rx="1.5"/>
+    <rect x="14" y="3" width="7" height="5" rx="1.5"/>
+    <rect x="14" y="12" width="7" height="9" rx="1.5"/>
+    <rect x="3" y="16" width="7" height="5" rx="1.5"/>
+  </symbol>
+
+  <!-- API / sliders -->
+  <symbol id="api" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="4" y1="6" x2="20" y2="6"/>
+    <line x1="4" y1="12" x2="20" y2="12"/>
+    <line x1="4" y1="18" x2="20" y2="18"/>
+    <circle cx="9" cy="6" r="2.2" fill="currentColor" stroke="none"/>
+    <circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none"/>
+    <circle cx="7" cy="18" r="2.2" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <!-- Play / demo -->
+  <symbol id="play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M10 8.5 L16 12 L10 15.5 Z" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <!-- Memory / brain -->
+  <symbol id="memory" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8c0 1 .5 1.9 1.3 2.4-.2.4-.3.9-.3 1.3 0 1.4.9 2.6 2.2 3-.1.4-.1.7-.1 1.1A2.6 2.6 0 0 0 10.2 20c1.4 0 2.6-1.2 2.6-2.6"/>
+    <path d="M14.5 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8c0 1-.5 1.9-1.3 2.4.2.4.3.9.3 1.3 0 1.4-.9 2.6-2.2 3 .1.4.1.7.1 1.1A2.6 2.6 0 0 1 13.8 20c-1.4 0-2.6-1.2-2.6-2.6V4"/>
+  </symbol>
+
+  <!-- Search -->
+  <symbol id="search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="7"/>
+    <path d="m20 20-3.5-3.5"/>
+  </symbol>
+
+  <!-- Layers -->
+  <symbol id="layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3 2 8l10 5 10-5-10-5Z"/>
+    <path d="m2 13 10 5 10-5"/>
+    <path d="m2 18 10 5 10-5"/>
+  </symbol>
+
+  <!-- Audit / clock -->
+  <symbol id="audit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/>
+    <polyline points="12 7 12 12 15.5 14"/>
+  </symbol>
+
+  <!-- Domains / globe -->
+  <symbol id="domains" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M2.5 12h19"/>
+    <path d="M12 2.5c2.5 3 4 6.5 4 9.5s-1.5 6.5-4 9.5c-2.5-3-4-6.5-4-9.5s1.5-6.5 4-9.5Z"/>
+  </symbol>
+
+  <!-- Chart -->
+  <symbol id="chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v18h18"/>
+    <path d="m7 16 4-4 3 3 5-7"/>
+  </symbol>
+
+  <!-- Sun (light theme) -->
+  <symbol id="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+  </symbol>
+
+  <!-- Moon (dark theme) -->
+  <symbol id="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>
+  </symbol>
+
+  <!-- Info -->
+  <symbol id="info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 16v-4M12 8h.01"/>
+  </symbol>
+
+  <!-- Check -->
+  <symbol id="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="5 12 10 17 19 7"/>
+  </symbol>
+
+  <!-- Alert -->
+  <symbol id="alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.3 3.5 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.5a2 2 0 0 0-3.4 0Z"/>
+    <line x1="12" y1="9" x2="12" y2="13"/>
+    <line x1="12" y1="17" x2="12.01" y2="17"/>
+  </symbol>
+
+  <!-- Lightning / bolt -->
+  <symbol id="bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <!-- Settings / gear -->
+  <symbol id="settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
+  </symbol>
+
+</svg>

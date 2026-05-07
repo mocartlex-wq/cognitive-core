@@ -1,0 +1,21 @@
+[Unit]
+Description=Cognitive Core auto-deploy: git fetch + conditional reload
+Documentation=https://github.com/REPLACE_WITH_OWNER/cognitive-core/blob/main/AGENT_OPERATIONS.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=salex
+WorkingDirectory=/opt/cognitive-core
+Environment=COGNITIVE_REPO_DIR=/opt/cognitive-core
+Environment=COGNITIVE_DEPLOY_BRANCH=main
+ExecStart=/opt/cognitive-core/scripts/auto-deploy.sh
+
+# Allow docker exec without password (sudoers configured separately)
+# StandardOutput/Error → journal, читать через `journalctl -u cognitive-deploy -n 100 -f`
+StandardOutput=journal
+StandardError=journal
+
+# Не дольше 10 минут — крайний случай для full rebuild
+TimeoutStartSec=600

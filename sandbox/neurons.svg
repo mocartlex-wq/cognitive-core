@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cognitive Core — neural network background.
+  Декоративный фон с нейронами и анимированными импульсами.
+  Подключается через CSS как background-image на body.glass-mode.
+  Все анимации — pure SVG SMIL + CSS-overlay для glow.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice"
+     style="width:100%;height:100%">
+  <defs>
+    <!-- Glow для тел нейронов -->
+    <radialGradient id="neuronCore" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff8c42" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#ff8c42" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#ff8c42" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="neuronCoreBlue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a4cdff" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#58a6ff" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#58a6ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="neuronCorePurple" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d8c4ff" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#bc8cff" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#bc8cff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Линии-аксоны: тонкие с прозрачностью -->
+    <linearGradient id="axonGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="rgba(164,205,255,0)"/>
+      <stop offset="50%" stop-color="rgba(164,205,255,0.45)"/>
+      <stop offset="100%" stop-color="rgba(164,205,255,0)"/>
+    </linearGradient>
+
+    <!-- Импульс — маленькая яркая точка -->
+    <radialGradient id="pulseGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffd4a3" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#ff8c42" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#ff8c42" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Пути для импульсов (невидимые, по ним движутся точки) -->
+    <path id="path1" d="M 200,300 Q 400,200 600,350 T 1100,400" />
+    <path id="path2" d="M 100,700 Q 350,650 550,750 T 900,650 T 1400,720" />
+    <path id="path3" d="M 1500,200 Q 1300,300 1100,250 T 700,300 T 300,450" />
+    <path id="path4" d="M 800,100 Q 700,300 800,500 T 850,850" />
+    <path id="path5" d="M 1400,500 Q 1200,600 1000,580 T 600,650" />
+    <path id="path6" d="M 50,500 Q 250,400 450,500 T 800,400" />
+    <path id="path7" d="M 1500,800 Q 1300,750 1100,820 T 700,800" />
+    <path id="path8" d="M 300,150 Q 500,250 700,200 T 1200,150" />
+
+    <!-- Filter для свечения тел нейронов -->
+    <filter id="cellGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Аксоны (нервные пути) — тонкие криволинейные -->
+  <g stroke-width="1.2" fill="none" opacity="0.55">
+    <use href="#path1" stroke="url(#axonGradient)"/>
+    <use href="#path2" stroke="url(#axonGradient)"/>
+    <use href="#path3" stroke="url(#axonGradient)"/>
+    <use href="#path4" stroke="url(#axonGradient)"/>
+    <use href="#path5" stroke="url(#axonGradient)"/>
+    <use href="#path6" stroke="url(#axonGradient)"/>
+    <use href="#path7" stroke="url(#axonGradient)"/>
+    <use href="#path8" stroke="url(#axonGradient)"/>
+  </g>
+
+  <!-- Дополнительные дендриты (более тонкие отростки) -->
+  <g stroke="rgba(164,205,255,0.18)" stroke-width="0.8" fill="none">
+    <path d="M 200,300 L 150,250 L 100,280"/>
+    <path d="M 200,300 L 220,250 L 250,220"/>
+    <path d="M 600,350 L 580,300 L 560,260"/>
+    <path d="M 600,350 L 650,400 L 700,420"/>
+    <path d="M 1100,400 L 1150,350 L 1200,320"/>
+    <path d="M 1100,400 L 1100,470 L 1130,520"/>
+
+    <path d="M 100,700 L 50,720 L 30,760"/>
+    <path d="M 550,750 L 530,820 L 540,870"/>
+    <path d="M 900,650 L 920,600 L 940,560"/>
+    <path d="M 1400,720 L 1430,680 L 1480,650"/>
+
+    <path d="M 1500,200 L 1530,160 L 1560,140"/>
+    <path d="M 700,300 L 680,260 L 670,220"/>
+    <path d="M 300,450 L 270,420 L 230,400"/>
+
+    <path d="M 800,100 L 770,70 L 750,50"/>
+    <path d="M 800,500 L 850,490 L 900,475"/>
+
+    <path d="M 1400,500 L 1450,460 L 1490,440"/>
+    <path d="M 800,400 L 850,380 L 900,360"/>
+  </g>
+
+  <!-- Тела нейронов — статичные с мягким пульсирующим свечением -->
+  <g filter="url(#cellGlow)">
+    <!-- Большие нейроны (cell bodies) -->
+    <circle cx="200" cy="300" r="14" fill="url(#neuronCore)">
+      <animate attributeName="r" values="14;18;14" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="600" cy="350" r="12" fill="url(#neuronCoreBlue)">
+      <animate attributeName="r" values="12;16;12" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1100" cy="400" r="13" fill="url(#neuronCorePurple)">
+      <animate attributeName="r" values="13;17;13" dur="3.5s" repeatCount="indefinite"/>
+    </circle>
+
+    <circle cx="100" cy="700" r="10" fill="url(#neuronCoreBlue)">
+      <animate attributeName="r" values="10;14;10" dur="4.2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="550" cy="750" r="11" fill="url(#neuronCore)">
+      <animate attributeName="r" values="11;15;11" dur="3.7s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="900" cy="650" r="13" fill="url(#neuronCorePurple)">
+      <animate attributeName="r" values="13;17;13" dur="3.2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1400" cy="720" r="11" fill="url(#neuronCoreBlue)">
+      <animate attributeName="r" values="11;15;11" dur="4s" repeatCount="indefinite"/>
+    </circle>
+
+    <circle cx="1500" cy="200" r="10" fill="url(#neuronCore)">
+      <animate attributeName="r" values="10;13;10" dur="3.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="700" cy="300" r="9" fill="url(#neuronCorePurple)">
+      <animate attributeName="r" values="9;12;9" dur="3.3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="300" cy="450" r="10" fill="url(#neuronCoreBlue)">
+      <animate attributeName="r" values="10;14;10" dur="4.5s" repeatCount="indefinite"/>
+    </circle>
+
+    <circle cx="800" cy="100" r="9" fill="url(#neuronCore)">
+      <animate attributeName="r" values="9;12;9" dur="3.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="800" cy="500" r="10" fill="url(#neuronCoreBlue)">
+      <animate attributeName="r" values="10;13;10" dur="4.1s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- ИМПУЛЬСЫ — точки света бегут по аксонам -->
+  <g>
+    <circle r="4" fill="url(#pulseGlow)">
+      <animateMotion dur="6s" repeatCount="indefinite" rotate="auto">
+        <mpath href="#path1"/>
+      </animateMotion>
+    </circle>
+    <circle r="3" fill="url(#pulseGlow)">
+      <animateMotion dur="6s" repeatCount="indefinite" begin="2s">
+        <mpath href="#path1"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="4" fill="url(#pulseGlow)">
+      <animateMotion dur="8s" repeatCount="indefinite">
+        <mpath href="#path2"/>
+      </animateMotion>
+    </circle>
+    <circle r="3" fill="url(#pulseGlow)">
+      <animateMotion dur="8s" repeatCount="indefinite" begin="3s">
+        <mpath href="#path2"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="4" fill="url(#pulseGlow)">
+      <animateMotion dur="7s" repeatCount="indefinite" begin="1s">
+        <mpath href="#path3"/>
+      </animateMotion>
+    </circle>
+    <circle r="3" fill="url(#pulseGlow)">
+      <animateMotion dur="7s" repeatCount="indefinite" begin="4s">
+        <mpath href="#path3"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="3.5" fill="url(#pulseGlow)">
+      <animateMotion dur="9s" repeatCount="indefinite">
+        <mpath href="#path4"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="4" fill="url(#pulseGlow)">
+      <animateMotion dur="7.5s" repeatCount="indefinite" begin="0.5s">
+        <mpath href="#path5"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="3" fill="url(#pulseGlow)">
+      <animateMotion dur="6.5s" repeatCount="indefinite" begin="2s">
+        <mpath href="#path6"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="4" fill="url(#pulseGlow)">
+      <animateMotion dur="8.5s" repeatCount="indefinite" begin="1s">
+        <mpath href="#path7"/>
+      </animateMotion>
+    </circle>
+
+    <circle r="3" fill="url(#pulseGlow)">
+      <animateMotion dur="7s" repeatCount="indefinite" begin="3s">
+        <mpath href="#path8"/>
+      </animateMotion>
+    </circle>
+  </g>
+</svg>

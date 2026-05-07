@@ -1,0 +1,15 @@
+[Unit]
+Description=Cognitive Core auto-deploy poller (every 60s)
+Requires=cognitive-deploy.service
+
+[Timer]
+# Первый запуск через 2 минуты после boot (даём docker подняться)
+OnBootSec=120s
+# Затем каждые 60 секунд
+OnUnitActiveSec=60s
+# AccuracySec=10s даёт хороший баланс между нагрузкой и реактивностью
+AccuracySec=10s
+Unit=cognitive-deploy.service
+
+[Install]
+WantedBy=timers.target

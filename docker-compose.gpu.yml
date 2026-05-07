@@ -1,0 +1,34 @@
+# Cognitive Core — GPU overlay (опционально)
+#
+# Использование:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
+#
+# Что делает:
+#   - Переключает api с Dockerfile на Dockerfile.gpu (CUDA 12.4 runtime base)
+#   - Прокидывает все доступные GPU в контейнер api
+#   - Включает EMBEDDING_USE_GPU=true в окружении
+#
+# Требования на хосте:
+#   - NVIDIA driver >= 525
+#   - nvidia-container-toolkit
+#
+# Проверка после старта:
+#   docker exec cognitive_api nvidia-smi      # должен показать GPU
+#   curl localhost:9001/health | jq           # provider должен быть "CUDA"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    environment:
+      EMBEDDING_USE_GPU: "true"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

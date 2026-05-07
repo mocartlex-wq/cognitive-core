@@ -1,0 +1,42 @@
+# Cognitive Core — GPU-enabled image
+#
+# Используется когда сервер имеет NVIDIA GPU и нужно ускорить fastembed.
+# Build:  docker build -f Dockerfile.gpu -t cognitive-api:gpu .
+# Запуск: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# Требования на хосте:
+#   - NVIDIA driver >= 525
+#   - nvidia-container-toolkit (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+#   - Docker Compose v2
+
+# Базовый образ с CUDA 12.4 runtime + Python 3.11
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# Установка Python 3.11 + system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3
+
+COPY requirements.txt .
+COPY requirements-gpu.txt .
+
+# Сначала ставим основные deps, затем подменяем onnxruntime на onnxruntime-gpu
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt \
+    && pip install --no-cache-dir --break-system-packages -r requirements-gpu.txt
+
+COPY . .
+
+# CUDA доступна — fastembed автоматически переключается при EMBEDDING_USE_GPU=true
+ENV EMBEDDING_USE_GPU=true
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

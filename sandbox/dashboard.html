@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cognitive Core — Дашборд</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="theme-color" content="#0a0e14">
+<link rel="stylesheet" href="/static/shared.css?v=20260506a">
+<link rel="stylesheet" href="/static/glass.css?v=20260506a">
+<style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }</style>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<style>
+  /* === Glass-mode overrides для dashboard === */
+  body.glass-mode main.container-wide { padding-top: 24px; }
+
+  /* Tab navigation в glass-стиле */
+  nav.tabs {
+    display: flex; gap: 4px; padding: 8px 12px;
+    background: rgba(11, 14, 20, 0.45);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius);
+    margin: 0 28px 24px;
+    overflow-x: auto;
+    position: sticky; top: 65px; z-index: 50;
+  }
+  nav.tabs button {
+    background: none; color: rgba(230,237,243,0.65);
+    border: none; padding: 9px 16px; cursor: pointer;
+    font-size: 13px; font-weight: 500; font-family: inherit;
+    border-radius: 12px; transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+  }
+  nav.tabs button:hover { color: #fff; background: rgba(255,255,255,0.05); }
+  nav.tabs button.active {
+    color: #fff;
+    background: rgba(88, 166, 255, 0.18);
+    box-shadow: 0 0 0 1px rgba(88,166,255,0.3);
+  }
+
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+  .grid { display: grid; gap: 16px; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) {
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+  .canvas-wrap { position: relative; height: 300px; padding: 8px; }
+
+  /* === Glass-карточки (stat, card) === */
+  body.glass-mode .stat,
+  body.glass-mode .card {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius);
+    box-shadow: var(--glass-shadow);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  body.glass-mode .stat:hover,
+  body.glass-mode .card:hover {
+    border-color: var(--glass-border-strong);
+    transform: translateY(-2px);
+  }
+  body.glass-mode .stat-val {
+    color: #fff; font-size: 32px; font-weight: 700;
+    letter-spacing: -1px; font-feature-settings: "tnum";
+  }
+  body.glass-mode .stat-label, body.glass-mode .card-title {
+    color: rgba(230,237,243,0.55); font-weight: 600;
+  }
+  body.glass-mode .stat-sub {
+    color: rgba(230,237,243,0.45);
+  }
+
+  /* === Layer arch — стеклянные узлы === */
+  .arch { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  @media (max-width: 700px) { .arch { grid-template-columns: repeat(2, 1fr); } }
+  body.glass-mode .layer-box {
+    background: rgba(255,255,255,0.04);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius-sm);
+    padding: 18px 14px; text-align: center;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  body.glass-mode .layer-box:hover {
+    background: rgba(88,166,255,0.08);
+    border-color: rgba(88,166,255,0.4);
+    transform: translateY(-3px);
+  }
+  body.glass-mode .layer-box .lay-name {
+    font-size: 11px; font-weight: 700; color: #58a6ff;
+    letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 6px;
+  }
+  body.glass-mode .layer-box .lay-cnt {
+    font-size: 26px; font-weight: 700; color: #fff;
+    font-feature-settings: "tnum";
+  }
+  body.glass-mode .layer-box .lay-desc {
+    font-size: 11px; color: rgba(230,237,243,0.55);
+    margin-top: 6px; line-height: 1.4;
+  }
+
+  /* === JSON output — solid (читаемость) === */
+  pre.json {
+    font-family: var(--mono); font-size: 11.5px;
+    background: rgba(13, 17, 23, 0.72);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px; padding: 14px;
+    max-height: 420px; overflow: auto; white-space: pre-wrap;
+    color: #d4d4d4;
+  }
+  .empty { text-align: center; color: rgba(230,237,243,0.45); font-size: 13px; padding: 40px; }
+
+  /* === Toolbar в glass-стиле === */
+  body.glass-mode .toolbar {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 14px; padding: 12px 14px;
+    background: rgba(255,255,255,0.04);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+  }
+  body.glass-mode .toolbar input,
+  body.glass-mode .toolbar select {
+    background: rgba(13,17,23,0.6);
+    border: 1px solid var(--glass-border);
+    color: #fff;
+  }
+  .toolbar input { width: 200px; }
+  .toolbar select { width: auto; }
+
+  /* === Info-strip — glass с акцентом === */
+  body.glass-mode .info-strip {
+    background: rgba(88, 166, 255, 0.08);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border-left: 3px solid #58a6ff;
+    border-top: 1px solid rgba(88,166,255,0.15);
+    border-right: 1px solid rgba(88,166,255,0.15);
+    border-bottom: 1px solid rgba(88,166,255,0.15);
+    padding: 14px 18px; border-radius: 12px;
+    margin-bottom: 20px; font-size: 13px; line-height: 1.6;
+    color: rgba(230,237,243,0.85);
+  }
+  body.glass-mode .info-strip strong { color: #58a6ff; }
+
+  /* === Tables — solid фон для читаемости === */
+  body.glass-mode .card[style*="padding: 0"] table {
+    background: rgba(13,17,23,0.5);
+    border-radius: var(--apple-radius);
+    overflow: hidden;
+  }
+  body.glass-mode thead th {
+    background: rgba(13,17,23,0.7);
+    color: rgba(230,237,243,0.65);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  body.glass-mode tbody td {
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: rgba(230,237,243,0.85);
+  }
+  body.glass-mode tbody tr:hover {
+    background: rgba(255,255,255,0.03);
+  }
+</style>
+</head>
+<body class="glass-mode">
+<div class="orb-3"></div>
+
+<div class="top-bar">
+  <a class="brand" href="/">
+    <div class="brand-icon"><span class="brand-dot"></span></div>
+    <div>
+      <div class="brand-name">Cognitive Core</div>
+      <span class="brand-ver" id="ver">v?</span>
+    </div>
+  </a>
+  <nav class="top-nav">
+    <a href="/">Главная</a>
+    <a href="/ui" class="active">Дашборд</a>
+    <a href="/sandbox">Песочница API</a>
+  </nav>
+  <div class="top-status">
+    <span class="live">live</span>
+    <span><span class="dot unknown" id="d-pg"></span>PG</span>
+    <span><span class="dot unknown" id="d-rd"></span>Redis</span>
+    <span><span class="dot unknown" id="d-s3"></span>S3</span>
+    <span id="uptime">uptime: -</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Сменить тему" aria-label="Сменить тему">
+      <svg class="icon icon-sun"><use href="#sun"/></svg>
+      <svg class="icon icon-moon"><use href="#moon"/></svg>
+    </button>
+  </div>
+</div>
+
+<nav class="tabs">
+  <button class="active" data-tab="overview">Обзор</button>
+  <button data-tab="layers">Слои памяти</button>
+  <button data-tab="events">События L1</button>
+  <button data-tab="knowledge">Знания L3</button>
+  <button data-tab="tools">Инструменты</button>
+  <button data-tab="audit">Аудит L5</button>
+  <button data-tab="domains">Домены</button>
+  <button data-tab="ab">LLM / A/B</button>
+</nav>
+
+<main class="container container-wide">
+
+<!-- ============ OVERVIEW ============ -->
+<section class="tab-pane active" id="tab-overview">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> текущее состояние памяти системы. Каждое число — сколько записей в соответствующем слое.
+    Слои растут слева направо в течение жизненного цикла данных.
+  </div>
+
+  <div class="grid grid-4 mb-2">
+    <div class="stat">
+      <div class="stat-label">L1 события <span class="help" data-tip="Сырой лог. Точка входа: все события агентов через POST /events. Очищается после 14 дней.">?</span></div>
+      <div class="stat-val" id="ov-l1">-</div>
+      <div class="stat-sub">сырой лог</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">L2 буферы <span class="help" data-tip="Дневные буферы. Раз в день LLM анализирует события L1 и создаёт один буфер на (date, domain).">?</span></div>
+      <div class="stat-val" id="ov-l2">-</div>
+      <div class="stat-sub">дневные срезы</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">L3 знания <span class="help" data-tip="Долговременные знания. Формируются раз в неделю синтезом L2-буферов. Источник истины для KNN-поиска.">?</span></div>
+      <div class="stat-val" id="ov-l3k">-</div>
+      <div class="stat-sub">эталоны</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">L3 инструменты <span class="help" data-tip="Реестр инструментов агентов: API, скрипты, библиотеки, описания использования.">?</span></div>
+      <div class="stat-val" id="ov-l3t">-</div>
+      <div class="stat-sub">tool registry</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2 mb-2">
+    <div class="stat">
+      <div class="stat-label">L4 снапшоты <span class="help" data-tip="Полные слепки L3 в S3-хранилище MinIO. Создаются после weekly если L3 изменилась.">?</span></div>
+      <div class="stat-val" id="ov-l4">-</div>
+      <div class="stat-sub">backup в MinIO</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Размер БД</div>
+      <div class="stat-val" id="ov-dbsize">-</div>
+      <div class="stat-sub">PostgreSQL</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Активность за 7 дней <span class="help" data-tip="Сколько событий поступило в L1, сколько буферов создано в L2, и сколько действий записано в L5 аудит каждый день.">?</span></div>
+    <div class="canvas-wrap"><canvas id="chart-timeline"></canvas></div>
+  </div>
+</section>
+
+<!-- ============ LAYERS ============ -->
+<section class="tab-pane" id="tab-layers">
+  <div class="info-strip">
+    <strong>Архитектура:</strong> 5 изолированных слоёв. Агенты пишут только в L1, читают только через OP.
+    Остальные слои — внутренние, доступ только через консолидацию.
+  </div>
+
+  <div class="card">
+    <div class="card-title">Распределение записей по слоям</div>
+    <div class="arch">
+      <div class="layer-box">
+        <div class="lay-name">L1</div>
+        <div class="lay-cnt" id="arc-l1">-</div>
+        <div class="lay-desc">Raw events<br>(вход)</div>
+      </div>
+      <div class="layer-box">
+        <div class="lay-name">L2</div>
+        <div class="lay-cnt" id="arc-l2">-</div>
+        <div class="lay-desc">Daily buffers<br>(LLM-анализ)</div>
+      </div>
+      <div class="layer-box">
+        <div class="lay-name">L3</div>
+        <div class="lay-cnt" id="arc-l3">-</div>
+        <div class="lay-desc">Master knowledge<br>+ tools</div>
+      </div>
+      <div class="layer-box">
+        <div class="lay-name">L4</div>
+        <div class="lay-cnt" id="arc-l4">-</div>
+        <div class="lay-desc">Snapshots<br>(MinIO/S3)</div>
+      </div>
+      <div class="layer-box">
+        <div class="lay-name">L5</div>
+        <div class="lay-cnt">Audit</div>
+        <div class="lay-desc">Журнал<br>всех действий</div>
+      </div>
+    </div>
+    <p class="text-center muted text-sm mt-2">
+      L1 (POST /events) → L2 (daily LLM) → L3 (weekly LLM + curator) → L4 (S3 snapshot)<br>
+      OP (KNN read) ↔ L3 — единственный путь чтения для агентов
+    </p>
+  </div>
+
+  <div class="card mt-2">
+    <div class="card-title">Сравнение размеров</div>
+    <div class="canvas-wrap" style="height: 320px;"><canvas id="chart-layers"></canvas></div>
+  </div>
+</section>
+
+<!-- ============ EVENTS ============ -->
+<section class="tab-pane" id="tab-events">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> сырые события L1, отсортированные по времени. Колонка <strong>L2?</strong> показывает,
+    обработано ли событие уже daily-консолидацией. Необработанные ждут следующего цикла.
+  </div>
+
+  <div class="toolbar">
+    <span class="text-sm muted">Домен:</span>
+    <input id="ev-filter-domain" placeholder="(все)" />
+    <button class="btn sm" onclick="loadEvents()">Обновить</button>
+    <span class="text-sm muted">Лимит:</span>
+    <select id="ev-limit"><option>20</option><option selected>50</option><option>100</option><option>200</option></select>
+    <span style="margin-left: auto;" class="live">авто-обновление 10с</span>
+  </div>
+
+  <div class="card" style="padding: 0;">
+    <table>
+      <thead><tr>
+        <th style="width: 160px;">Время</th>
+        <th>Домен</th>
+        <th>Агент</th>
+        <th>Payload (превью)</th>
+        <th style="width: 80px;">L2?</th>
+      </tr></thead>
+      <tbody id="tbody-events"><tr><td colspan="5" class="empty">Загрузка...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ KNOWLEDGE ============ -->
+<section class="tab-pane" id="tab-knowledge">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> активные L3-знания — то что система выучила и использует.
+    Тип <span class="pill green">pattern</span> — успешный приём, <span class="pill red">mistake</span> — ошибка чтобы не повторять,
+    <span class="pill blue">rule</span> — правило/принцип. Версия растёт при подтверждении.
+  </div>
+
+  <div class="toolbar">
+    <span class="text-sm muted">Домен:</span>
+    <input id="kn-filter-domain" placeholder="(все)" />
+    <button class="btn sm" onclick="loadKnowledge()">Обновить</button>
+  </div>
+
+  <div class="card" style="padding: 0;">
+    <table>
+      <thead><tr>
+        <th>Домен</th>
+        <th style="width: 100px;">Тип</th>
+        <th style="width: 60px;">Ver</th>
+        <th>Содержимое</th>
+        <th style="width: 140px;">С даты</th>
+      </tr></thead>
+      <tbody id="tbody-knowledge"><tr><td colspan="5" class="empty">Загрузка...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ AUDIT ============ -->
+<section class="tab-pane" id="tab-audit">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> аудит-лог L5 — каждое действие в системе. Полезно для compliance,
+    отладки сбоев и понимания что происходит фоном (worker запускает daily, agent делает запрос и т.д.).
+  </div>
+
+  <div class="toolbar">
+    <button class="btn sm" onclick="loadAudit(false)">Все</button>
+    <button class="btn sm ghost" onclick="loadAudit(true)">Только ошибки</button>
+    <span style="margin-left: auto;" class="live">авто-обновление 10с</span>
+  </div>
+
+  <div class="card" style="padding: 0;">
+    <table>
+      <thead><tr>
+        <th style="width: 160px;">Время</th>
+        <th style="width: 140px;">Агент</th>
+        <th style="width: 160px;">Действие</th>
+        <th>Цель</th>
+        <th style="width: 60px;">OK</th>
+      </tr></thead>
+      <tbody id="tbody-audit"><tr><td colspan="5" class="empty">Загрузка...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ TOOLS REGISTRY ============ -->
+<section class="tab-pane" id="tab-tools">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> глобальный реестр инструментов агентов. Одинаковые названия в разных доменах объединены.
+    Колонка <strong>экземпляров</strong> — сколько раз tool зарегистрирован, <strong>доменов</strong> — насколько широко используется.
+    Это аккумулированный опыт работы с инструментами AI-агентов.
+  </div>
+
+  <div class="grid grid-3 mb-2" id="tools-totals-grid">
+    <div class="stat"><div class="stat-label">Всего инструментов</div><div class="stat-val" id="tt-total">—</div><div class="stat-sub">экземпляров</div></div>
+    <div class="stat"><div class="stat-label">Уникальных имён</div><div class="stat-val" id="tt-unique">—</div><div class="stat-sub">после group by name</div></div>
+    <div class="stat"><div class="stat-label">Доменов</div><div class="stat-val" id="tt-domains">—</div><div class="stat-sub">с инструментами</div></div>
+  </div>
+
+  <div class="toolbar">
+    <span class="text-sm muted">Сортировка:</span>
+    <select id="tools-sort">
+      <option value="instances">по количеству</option>
+      <option value="domains">по широте</option>
+      <option value="recent">по дате</option>
+      <option value="name">по имени</option>
+    </select>
+    <span class="text-sm muted">Тип:</span>
+    <select id="tools-type">
+      <option value="">все</option>
+      <option value="api">api</option>
+      <option value="script">script</option>
+      <option value="prompt">prompt</option>
+      <option value="library">library</option>
+      <option value="service">service</option>
+    </select>
+    <button class="btn sm" onclick="loadTools()">Обновить</button>
+    <span style="margin-left: auto;" class="text-xs muted" id="tools-bytype">—</span>
+  </div>
+
+  <div class="card" style="padding: 0;">
+    <table>
+      <thead><tr>
+        <th>Инструмент</th>
+        <th style="width: 80px;">Тип</th>
+        <th style="width: 100px;">Экземпляров</th>
+        <th style="width: 100px;">Доменов</th>
+        <th>Описание</th>
+        <th style="width: 110px;">Последнее</th>
+      </tr></thead>
+      <tbody id="tbody-tools"><tr><td colspan="6" class="empty">Загрузка...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ DOMAINS ============ -->
+<section class="tab-pane" id="tab-domains">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> все домены, с которыми работает система. Домен — это группировка опыта по предметной области
+    (например, <code>fastapi_dev</code>, <code>memory_arch</code>). Каждый домен имеет свой набор L1/L2/L3.
+  </div>
+
+  <div class="card" style="padding: 0;">
+    <table>
+      <thead><tr>
+        <th>Домен</th>
+        <th>L1 события</th>
+        <th>L2 буферы</th>
+        <th>L3 знаний</th>
+        <th>Инструментов</th>
+      </tr></thead>
+      <tbody id="tbody-domains"><tr><td colspan="5" class="empty">Загрузка...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ AB / LLM ============ -->
+<section class="tab-pane" id="tab-ab">
+  <div class="info-strip">
+    <strong>Что здесь:</strong> A/B-статистика моделей и метрики LLM. Если в .env заданы две модели для функции
+    (например <code>LLM_DAILY_ANALYZER</code> и <code>LLM_DAILY_ANALYZER_B</code>), здесь видно успешность каждой.
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-title">A/B статистика по функциям</div>
+      <pre class="json" id="ab-json">Загрузка...</pre>
+    </div>
+    <div class="card">
+      <div class="card-title">LLM показатели (Prometheus)</div>
+      <pre class="json" id="llm-json">Загрузка...</pre>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+const API_KEY = 'key-design-001';
+const headers = { 'X-API-Key': API_KEY };
+
+document.querySelectorAll('nav.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    onTabSwitch(btn.dataset.tab);
+  });
+});
+
+function onTabSwitch(name) {
+  if (name === 'events') loadEvents();
+  if (name === 'knowledge') loadKnowledge();
+  if (name === 'tools') loadTools();
+  if (name === 'audit') loadAudit(false);
+  if (name === 'domains') loadDomains();
+  if (name === 'ab') loadAB();
+  if (name === 'layers') drawLayers();
+}
+
+let chartTimeline = null, chartLayers = null;
+let lastLayers = null;
+
+async function loadHealth() {
+  try {
+    const res = await fetch('/health');
+    const data = await res.json();
+    document.getElementById('ver').textContent = 'v' + (data.version || '?');
+    const setDot = (id, ok) => document.getElementById(id).className = 'dot ' + (ok ? 'ok' : 'err');
+    setDot('d-pg', data.services?.postgres === 'ok');
+    setDot('d-rd', data.services?.redis === 'ok');
+    setDot('d-s3', data.services?.minio === 'ok');
+    const up = data.uptime_seconds || 0;
+    const h = Math.floor(up / 3600), m = Math.floor((up % 3600) / 60), s = up % 60;
+    document.getElementById('uptime').textContent = `uptime: ${h}h ${m}m ${s}s`;
+
+    const L = data.layers || {};
+    lastLayers = L;
+    document.getElementById('ov-l1').textContent = L.l1 ?? '-';
+    document.getElementById('ov-l2').textContent = L.l2 ?? '-';
+    document.getElementById('ov-l3k').textContent = L.l3_knowledge ?? '-';
+    document.getElementById('ov-l3t').textContent = L.l3_tools ?? '-';
+    document.getElementById('ov-l4').textContent = L.l4 ?? '-';
+    document.getElementById('ov-dbsize').textContent = (data.db_size_mb ?? 0) + ' MB';
+
+    document.getElementById('arc-l1').textContent = L.l1 ?? '-';
+    document.getElementById('arc-l2').textContent = L.l2 ?? '-';
+    document.getElementById('arc-l3').textContent = (L.l3_knowledge ?? 0) + (L.l3_tools ?? 0);
+    document.getElementById('arc-l4').textContent = L.l4 ?? '-';
+  } catch(e) { console.error(e); }
+}
+
+async function loadTimeline() {
+  try {
+    const res = await fetch('/dashboard/timeline?days=7');
+    const data = await res.json();
+    const days = [...new Set([
+      ...data.l1_per_day.map(x => x.day),
+      ...data.l2_per_day.map(x => x.day),
+      ...data.audit_per_day.map(x => x.day),
+    ])].sort();
+    const mapToDays = arr => days.map(d => arr.find(x => x.day === d)?.count || 0);
+
+    if (chartTimeline) chartTimeline.destroy();
+    chartTimeline = new Chart(document.getElementById('chart-timeline'), {
+      type: 'line',
+      data: {
+        labels: days.map(d => d.slice(5)),
+        datasets: [
+          { label: 'L1 events', data: mapToDays(data.l1_per_day), borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.1)', tension: 0.3, fill: true },
+          { label: 'L2 buffers', data: mapToDays(data.l2_per_day), borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.1)', tension: 0.3, fill: true },
+          { label: 'Audit', data: mapToDays(data.audit_per_day), borderColor: '#bc8cff', backgroundColor: 'rgba(188,140,255,0.1)', tension: 0.3, fill: true },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#e6edf3', font: { size: 11 } } } },
+        scales: {
+          x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+          y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' }, beginAtZero: true },
+        },
+      },
+    });
+  } catch(e) { console.error(e); }
+}
+
+function drawLayers() {
+  if (!lastLayers) return;
+  if (chartLayers) chartLayers.destroy();
+  chartLayers = new Chart(document.getElementById('chart-layers'), {
+    type: 'bar',
+    data: {
+      labels: ['L1 raw', 'L2 daily', 'L3 knowledge', 'L3 tools', 'L4 snapshots'],
+      datasets: [{
+        label: 'Записей',
+        data: [lastLayers.l1, lastLayers.l2, lastLayers.l3_knowledge, lastLayers.l3_tools, lastLayers.l4],
+        backgroundColor: ['#58a6ff', '#3fb950', '#d2991d', '#bc8cff', '#f85149'],
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b949e' }, grid: { display: false } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+async function loadEvents() {
+  const tbody = document.getElementById('tbody-events');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty">Загрузка...</td></tr>';
+  const dom = document.getElementById('ev-filter-domain').value.trim();
+  const limit = document.getElementById('ev-limit').value;
+  const url = `/dashboard/recent-events?limit=${limit}` + (dom ? `&domain=${encodeURIComponent(dom)}` : '');
+  try {
+    const res = await fetch(url, { headers });
+    const data = await res.json();
+    if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Нет данных</td></tr>'; return; }
+    tbody.innerHTML = data.items.map(e => `
+      <tr>
+        <td class="mono dim">${new Date(e.timestamp).toLocaleString('ru-RU')}</td>
+        <td><span class="pill blue">${esc(e.domain)}</span></td>
+        <td class="mono">${esc(e.agent)}</td>
+        <td class="mono dim">${esc(JSON.stringify(e.payload).slice(0, 120))}${JSON.stringify(e.payload).length > 120 ? '…' : ''}</td>
+        <td>${e.processed ? '<span class="pill green">да</span>' : '<span class="pill yellow">ждёт</span>'}</td>
+      </tr>
+    `).join('');
+  } catch(e) { tbody.innerHTML = `<tr><td colspan="5" class="empty">Ошибка: ${e.message}</td></tr>`; }
+}
+
+async function loadKnowledge() {
+  const tbody = document.getElementById('tbody-knowledge');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty">Загрузка...</td></tr>';
+  const dom = document.getElementById('kn-filter-domain').value.trim();
+  const url = '/dashboard/knowledge?limit=100' + (dom ? `&domain=${encodeURIComponent(dom)}` : '');
+  try {
+    const res = await fetch(url, { headers });
+    const data = await res.json();
+    if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Нет данных</td></tr>'; return; }
+    const typeColors = { pattern: 'green', mistake: 'red', rule: 'blue' };
+    tbody.innerHTML = data.items.map(k => `
+      <tr>
+        <td><span class="pill blue">${esc(k.domain)}</span></td>
+        <td><span class="pill ${typeColors[k.type] || 'purple'}">${esc(k.type)}</span></td>
+        <td class="mono dim">v${k.version}</td>
+        <td class="mono dim">${esc(JSON.stringify(k.content).slice(0, 200))}${JSON.stringify(k.content).length > 200 ? '…' : ''}</td>
+        <td class="mono dim">${k.effective_from ? new Date(k.effective_from).toLocaleDateString('ru-RU') : '-'}</td>
+      </tr>
+    `).join('');
+  } catch(e) { tbody.innerHTML = `<tr><td colspan="5" class="empty">Ошибка: ${e.message}</td></tr>`; }
+}
+
+async function loadAudit(failuresOnly) {
+  const tbody = document.getElementById('tbody-audit');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty">Загрузка...</td></tr>';
+  try {
+    const res = await fetch(`/dashboard/audit-tail?limit=100&only_failures=${failuresOnly}`, { headers });
+    const data = await res.json();
+    if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Нет данных</td></tr>'; return; }
+    tbody.innerHTML = data.items.map(a => `
+      <tr>
+        <td class="mono dim">${new Date(a.time).toLocaleString('ru-RU')}</td>
+        <td class="mono">${esc(a.agent || '-')}</td>
+        <td><span class="pill ${actionColor(a.action)}">${esc(a.action || '-')}</span></td>
+        <td class="mono dim">${esc(a.target_table || '-')} ${a.target_id ? '/ ' + a.target_id.slice(0, 8) : ''}</td>
+        <td>${a.success ? '<span class="pill green">✓</span>' : '<span class="pill red">✗</span>'}</td>
+      </tr>
+    `).join('');
+  } catch(e) { tbody.innerHTML = `<tr><td colspan="5" class="empty">Ошибка: ${e.message}</td></tr>`; }
+}
+
+function actionColor(a) {
+  if (!a) return 'purple';
+  if (a.includes('error') || a.includes('failure')) return 'red';
+  if (a.includes('consolidate') || a.includes('audit')) return 'green';
+  if (a.includes('snapshot') || a.includes('restore')) return 'yellow';
+  return 'blue';
+}
+
+async function loadDomains() {
+  const tbody = document.getElementById('tbody-domains');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty">Загрузка...</td></tr>';
+  try {
+    const res = await fetch('/dashboard/domains', { headers });
+    const data = await res.json();
+    if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Нет данных</td></tr>'; return; }
+    tbody.innerHTML = data.items.map(d => `
+      <tr>
+        <td><span class="pill blue">${esc(d.domain)}</span></td>
+        <td class="mono">${d.l1}</td>
+        <td class="mono">${d.l2}</td>
+        <td class="mono">${d.l3_active}</td>
+        <td class="mono">${d.tools_active}</td>
+      </tr>
+    `).join('');
+  } catch(e) { tbody.innerHTML = `<tr><td colspan="5" class="empty">Ошибка: ${e.message}</td></tr>`; }
+}
+
+async function loadTools() {
+  const tbody = document.getElementById('tbody-tools');
+  tbody.innerHTML = '<tr><td colspan="6" class="empty">Загрузка...</td></tr>';
+  const sort = document.getElementById('tools-sort').value;
+  const type = document.getElementById('tools-type').value;
+  const url = `/dashboard/tools-registry?sort=${sort}&limit=300${type ? `&type_filter=${type}` : ''}`;
+  try {
+    const res = await fetch(url, { headers });
+    const data = await res.json();
+
+    // Totals
+    const t = data.totals || {};
+    document.getElementById('tt-total').textContent = t.total_instances ?? '—';
+    document.getElementById('tt-unique').textContent = t.unique_tools ?? '—';
+    document.getElementById('tt-domains').textContent = t.distinct_domains ?? '—';
+
+    // By-type breakdown
+    const byType = (data.by_type || []).map(b => `${esc(b.tool_type)}: ${b.cnt}`).join(' · ');
+    document.getElementById('tools-bytype').textContent = byType ? `по типам — ${byType}` : '';
+
+    if (!data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">Нет инструментов</td></tr>';
+      return;
+    }
+    const typeColors = { api: 'blue', script: 'yellow', prompt: 'purple', library: 'green', service: 'gray' };
+    tbody.innerHTML = data.items.map(t => `
+      <tr>
+        <td><strong style="color:#58a6ff;">${esc(t.tool_name)}</strong></td>
+        <td><span class="pill ${typeColors[t.tool_type] || 'purple'}">${esc(t.tool_type || '?')}</span></td>
+        <td class="mono">${t.instances}</td>
+        <td class="mono dim" title="${esc(t.domains.join(', '))}">${t.domains_breadth} <span style="opacity:.5;">${t.domains.slice(0, 3).map(d => esc(d.slice(0,8))).join(',')}${t.domains.length > 3 ? '…' : ''}</span></td>
+        <td class="mono dim">${esc(t.description || '—')}</td>
+        <td class="mono dim">${t.last_used ? new Date(t.last_used).toLocaleDateString('ru-RU') : '—'}</td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">Ошибка: ${e.message}</td></tr>`;
+  }
+}
+
+async function loadAB() {
+  try {
+    const ab = await (await fetch('/ab-stats')).json();
+    document.getElementById('ab-json').textContent = JSON.stringify(ab, null, 2);
+    const h = await (await fetch('/health')).json();
+    document.getElementById('llm-json').textContent = JSON.stringify(h.llm || {}, null, 2);
+  } catch(e) {
+    document.getElementById('ab-json').textContent = 'Ошибка: ' + e.message;
+  }
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+loadHealth();
+loadTimeline();
+setInterval(loadHealth, 5000);
+setInterval(() => {
+  const active = document.querySelector('nav.tabs button.active')?.dataset.tab;
+  if (active === 'events') loadEvents();
+  if (active === 'audit') loadAudit(false);
+}, 10000);
+</script>
+<script src="/static/theme.js"></script>
+</body>
+</html>

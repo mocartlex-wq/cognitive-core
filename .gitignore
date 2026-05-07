@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Environment (contains secrets)
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Claude Code
+.claude/
+
+# DeepSeek delegation outputs (могут содержать project-specific дампы)
+scripts/deepseek_out/
+
+# Личные dogfooding-данные владельца (НЕ публичные)
+dogfooding/20*.md
+dogfooding/weekly_review_20*.md
+dogfooding/archive/
+dogfooding/friction.md
+
+# Test caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# TLS-сертификаты (private keys NEVER в git!)
+nginx/certs/*.key
+nginx/certs/*.crt
+nginx/certs/*.pem
+
+# Backups directory
+backups/
+
+# Production env files
+.env.production
+.env.local-prod-test

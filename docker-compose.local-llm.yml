@@ -1,0 +1,72 @@
+# Cognitive Core — Local LLM overlay (Ollama)
+#
+# Использование (комбинируется с GPU overlay):
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.prod.yml \
+#     -f docker-compose.gpu.yml \
+#     -f docker-compose.local-llm.yml \
+#     up -d --build
+#
+# Что делает:
+#   - Поднимает Ollama-сервер с GPU
+#   - api получает env LOCAL_AI_ENABLED=true и OLLAMA_BASE_URL
+#   - Volume для моделей сохраняется между рестартами (~50GB на 14B Q5)
+#
+# После старта:
+#   docker exec cognitive_ollama ollama pull deepseek-r1:14b
+#   docker exec cognitive_ollama ollama pull qwen2.5:14b   # альтернатива
+#   docker exec cognitive_ollama ollama list
+#
+# Проверка GPU:
+#   docker exec cognitive_ollama nvidia-smi
+#
+# Переключить функции на ollama (отредактировать .env):
+#   LLM_DAILY_ANALYZER=ollama:deepseek-r1:14b
+#   docker compose restart api
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cognitive_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"           # Держим модель в VRAM 30 мин после последнего запроса
+      OLLAMA_NUM_PARALLEL: "2"           # Сколько одновременных запросов
+      OLLAMA_MAX_LOADED_MODELS: "2"      # Сколько моделей в VRAM одновременно (на 24GB можно 14B + 7B)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 24G
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    environment:
+      LOCAL_AI_ENABLED: "true"
+      OLLAMA_BASE_URL: "http://ollama:11434"
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+volumes:
+  ollama_models:
+    name: cognitive_ollama_models

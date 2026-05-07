@@ -1,0 +1,780 @@
+/* Apple Liquid Glass — design system overlay для Cognitive Core
+   Подключается ПОСЛЕ shared.css. Использует:
+   - тёмная градиентная база
+   - floating orbs в фоне
+   - frosted glass cards
+   - анимированный поток L1→L2→L3→L4 в hero
+   - SF Pro / системные шрифты
+*/
+
+:root {
+  /* Glass — DARK (default) — усиленный контраст для читаемости */
+  --glass-base-bg: #0a0e14;
+  --glass-bg: #161b22;
+  --glass-bg-strong: #1f2937;
+  --glass-bg-light: rgba(255, 255, 255, 0.04);
+  --glass-border: #30363d;
+  --glass-border-strong: #58a6ff;
+  --glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --glass-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --glass-text: #ffffff;
+  --glass-text-soft: rgba(255, 255, 255, 0.85);
+  --glass-text-dim: rgba(255, 255, 255, 0.65);
+  --glass-orb-1: #58a6ff;
+  --glass-orb-2: #bc8cff;
+  --glass-orb-3: #ff8c42;
+  --glass-orb-opacity: 0.15;
+
+  --apple-radius: 22px;
+  --apple-radius-sm: 14px;
+  --apple-radius-xl: 32px;
+}
+
+/* === LIGHT THEME — Apple system base #f5f5f7 + pastel orbs === */
+:root[data-theme="light"] {
+  --glass-base-bg: #f5f5f7;
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.82);
+  --glass-bg-light: rgba(255, 255, 255, 0.45);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-border-strong: rgba(0, 0, 0, 0.14);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 1px 0 rgba(255,255,255,0.6) inset;
+  --glass-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.12), 0 1px 0 rgba(255,255,255,0.7) inset;
+  --glass-text: #1d1d1f;
+  --glass-text-soft: rgba(29, 29, 31, 0.66);
+  --glass-text-dim: rgba(29, 29, 31, 0.45);
+  /* Pastel orbs для светлой темы — менее насыщенные */
+  --glass-orb-1: #a4cdff;
+  --glass-orb-2: #d8c4ff;
+  --glass-orb-3: #ffc7a3;
+  --glass-orb-opacity: 0.42;
+}
+
+/* Auto-detect prefers-color-scheme отключён — Cognitive Core всегда DARK по умолчанию.
+   Светлая тема доступна только при явном data-theme="light" (через theme-toggle button).
+   Отключение этого блока убирает баг "светлый фон у пользователя со светлой системной темой". */
+
+/* === SVG icon system === */
+.icon {
+  width: 20px; height: 20px;
+  stroke: currentColor; fill: none;
+  flex-shrink: 0; vertical-align: middle;
+}
+.icon-sm { width: 16px; height: 16px; }
+.icon-lg { width: 24px; height: 24px; }
+.icon-xl { width: 28px; height: 28px; }
+
+/* === Theme toggle button === */
+.theme-toggle {
+  background: rgba(255, 255, 255, 0.10);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  color: var(--glass-text-soft);
+  width: 32px; height: 32px; border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.theme-toggle:hover {
+  color: var(--glass-orb-1);
+  border-color: var(--glass-orb-1);
+  transform: rotate(15deg);
+}
+.theme-toggle .icon { width: 16px; height: 16px; }
+:root[data-theme="light"] .theme-toggle .icon-sun,
+:root:not([data-theme="light"]) .theme-toggle .icon-moon { display: none; }
+
+/* ========== Глобальный фон с floating orbs ========== */
+body.glass-mode {
+  background: var(--glass-base-bg);
+  color: var(--glass-text);
+  position: relative;
+  overflow-x: hidden;
+  font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+  transition: background 0.4s ease, color 0.4s ease;
+}
+
+body.glass-mode::before,
+body.glass-mode::after {
+  content: '';
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: var(--glass-orb-opacity);
+  will-change: transform;
+  transition: background 0.4s ease, opacity 0.4s ease;
+}
+
+/* Уменьшение нагрузки на GPU для пользователей с reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  body.glass-mode::before,
+  body.glass-mode::after,
+  body.glass-mode .orb-3 {
+    animation: none !important;
+  }
+}
+
+body.glass-mode::before {
+  width: 760px; height: 760px;
+  left: -200px; top: -240px;
+  background: radial-gradient(circle, var(--glass-orb-1) 0%, transparent 70%);
+  animation: orb-float-1 22s ease-in-out infinite;
+}
+
+body.glass-mode::after {
+  width: 640px; height: 640px;
+  right: -180px; top: 420px;
+  background: radial-gradient(circle, var(--glass-orb-2) 0%, transparent 70%);
+  animation: orb-float-2 28s ease-in-out infinite;
+}
+
+/* Третья орба — внизу */
+body.glass-mode .orb-3 {
+  position: fixed; pointer-events: none; z-index: 0;
+  width: 540px; height: 540px;
+  left: 30%; bottom: -200px;
+  border-radius: 50%; filter: blur(80px);
+  opacity: calc(var(--glass-orb-opacity) * 0.75);
+  background: radial-gradient(circle, var(--glass-orb-3) 0%, transparent 70%);
+  animation: orb-float-3 32s ease-in-out infinite;
+  transition: background 0.4s ease, opacity 0.4s ease;
+}
+
+/* === НЕЙРОННАЯ СЕТЬ (поверх орб, под контентом) === */
+.neuron-bg {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.45;
+  mix-blend-mode: screen;
+  transition: opacity 0.4s ease;
+}
+:root[data-theme="light"] .neuron-bg {
+  opacity: 0.28;
+  mix-blend-mode: multiply;
+}
+.neuron-bg svg, .neuron-bg object {
+  width: 100%; height: 100%;
+  display: block;
+}
+
+@keyframes orb-float-1 {
+  0%, 100% { transform: translate(0, 0); }
+  33%      { transform: translate(80px, 60px); }
+  66%      { transform: translate(-40px, 100px); }
+}
+@keyframes orb-float-2 {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(-120px, -80px); }
+}
+@keyframes orb-float-3 {
+  0%, 100% { transform: translate(0, 0); }
+  40%      { transform: translate(60px, -40px); }
+  80%      { transform: translate(-100px, 30px); }
+}
+
+/* Контент должен быть выше декоративных слоёв (.orb-3, .neuron-bg) — они z-index:0.
+   Но НЕ применяем position:relative к top-bar (у него sticky из shared.css)
+   и НЕ к самим декоративным слоям (у них fixed). */
+body.glass-mode > main,
+body.glass-mode > .glass-wrap,
+body.glass-mode > section,
+body.glass-mode > footer { position: relative; z-index: 1; }
+
+/* Top-bar явно sticky с высоким z-index — поверх контента и декораций */
+body.glass-mode > .top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+/* ========== Glass-классы — для cards/buttons/strips ========== */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--apple-radius);
+  box-shadow: var(--glass-shadow);
+}
+.glass-strong {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--apple-radius);
+  box-shadow: var(--glass-shadow-lg);
+}
+.glass-light {
+  background: var(--glass-bg-light);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--apple-radius-sm);
+}
+
+/* ========== Top bar в glass-режиме ========== */
+body.glass-mode .top-bar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-bottom: 1px solid var(--glass-border);
+  padding: 14px 28px;
+  transition: background 0.4s ease;
+}
+body.glass-mode .top-bar .brand-name { color: var(--glass-text); }
+body.glass-mode .top-bar .top-nav a { color: var(--glass-text-soft); }
+body.glass-mode .top-bar .top-nav a:hover { color: var(--glass-text); }
+body.glass-mode .top-nav a {
+  border-radius: 10px;
+}
+body.glass-mode .top-nav a.active {
+  background: rgba(88, 166, 255, 0.15);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+body.glass-mode .brand-icon {
+  background: linear-gradient(135deg, #58a6ff, #bc8cff);
+  box-shadow: 0 4px 16px rgba(88, 166, 255, 0.45);
+}
+
+/* ========== Hero в glass-стиле ========== */
+.glass-hero {
+  text-align: center;
+  padding: 80px 32px 64px;
+  position: relative;
+}
+.glass-hero h1 {
+  font-size: 84px;
+  font-weight: 700;
+  letter-spacing: -3px;
+  line-height: 1;
+  margin-bottom: 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #b8c5d6 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+@media (max-width: 700px) { .glass-hero h1 { font-size: 52px; } }
+.glass-hero .tagline {
+  font-size: 21px;
+  color: rgba(230, 237, 243, 0.78);
+  max-width: 640px; margin: 0 auto 40px;
+  line-height: 1.45; font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.glass-hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+/* ========== Glass buttons ========== */
+.glass-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 28px; border-radius: 999px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer; border: none;
+  font-family: inherit;
+  text-decoration: none;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  letter-spacing: -0.01em;
+}
+.glass-btn-primary {
+  background: linear-gradient(135deg, #58a6ff 0%, #4d8fdf 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(88, 166, 255, 0.35), 0 1px 0 rgba(255,255,255,0.18) inset;
+}
+.glass-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(88, 166, 255, 0.5), 0 1px 0 rgba(255,255,255,0.25) inset;
+}
+.glass-btn-ghost {
+  background: rgba(255, 255, 255, 0.10);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border-strong);
+  color: var(--text);
+}
+.glass-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+/* ========== Live pulse strip ========== */
+.glass-pulse {
+  display: flex; gap: 0; justify-content: center; align-items: stretch;
+  margin: 0 auto 60px; padding: 24px 8px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--apple-radius-xl);
+  box-shadow: var(--glass-shadow);
+  flex-wrap: wrap; max-width: 980px;
+}
+.glass-pulse-item {
+  flex: 1; min-width: 130px;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 24px;
+  border-right: 1px solid var(--glass-border);
+}
+.glass-pulse-item:last-child { border-right: none; }
+.glass-pulse-num {
+  font-size: 36px; font-weight: 700;
+  letter-spacing: -1.5px; line-height: 1.1;
+  color: #ffffff;
+  font-feature-settings: "tnum";
+}
+.glass-pulse-lbl {
+  font-size: 11px; color: rgba(230, 237, 243, 0.75);
+  text-transform: uppercase; letter-spacing: 0.7px;
+  margin-top: 6px; font-weight: 500;
+}
+@media (max-width: 700px) {
+  .glass-pulse-item { border-right: none; padding: 12px 16px; min-width: 45%; }
+}
+
+/* ========== Animated flow L1→L4 ========== */
+.glass-flow {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  max-width: 1100px; margin: 0 auto 64px;
+  padding: 8px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--apple-radius-xl);
+  box-shadow: var(--glass-shadow);
+  overflow: hidden;
+}
+@media (max-width: 800px) { .glass-flow { grid-template-columns: 1fr; } }
+
+.glass-flow-node {
+  padding: 22px 16px; text-align: center;
+  position: relative; z-index: 2;
+  border-radius: var(--apple-radius-sm);
+  transition: background 0.2s;
+}
+.glass-flow-node:hover {
+  background: rgba(255, 255, 255, 0.10);
+}
+.glass-flow-tag {
+  display: inline-block; padding: 3px 12px;
+  font-size: 10px; font-weight: 700;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(88,166,255,0.25), rgba(188,140,255,0.25));
+  color: #fff; letter-spacing: 0.8px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.glass-flow-name { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+.glass-flow-desc { font-size: 12px; color: rgba(230, 237, 243, 0.6); line-height: 1.45; }
+
+/* Анимированные частицы поток */
+.glass-flow-particles {
+  position: absolute; inset: 0;
+  pointer-events: none; overflow: hidden;
+  border-radius: var(--apple-radius-xl);
+  z-index: 1;
+}
+.particle {
+  position: absolute;
+  width: 6px; height: 6px;
+  background: radial-gradient(circle, #58a6ff 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(1px);
+  opacity: 0;
+  animation: particle-flow var(--p-dur) linear infinite;
+  animation-delay: var(--p-delay);
+  top: var(--p-top);
+}
+@keyframes particle-flow {
+  0% { left: -10px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+/* ========== Action cards ========== */
+.glass-actions {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; max-width: 1100px; margin: 0 auto 56px;
+}
+@media (max-width: 800px) { .glass-actions { grid-template-columns: 1fr; } }
+.glass-action-card {
+  padding: 26px 22px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--apple-radius);
+  text-decoration: none; color: var(--text);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer; display: block;
+  box-shadow: var(--glass-shadow);
+}
+.glass-action-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--glass-border-strong);
+  box-shadow: var(--glass-shadow-lg);
+}
+.glass-action-icon {
+  width: 44px; height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(88,166,255,0.25), rgba(188,140,255,0.15));
+  border: 1px solid rgba(255,255,255,0.12);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; margin-bottom: 16px;
+  color: #fff;
+}
+.glass-action-title { font-size: 17px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.01em; }
+.glass-action-desc { font-size: 13px; color: rgba(230, 237, 243, 0.82); line-height: 1.55; }
+
+/* ========== FAQ glass ========== */
+.glass-faq {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--apple-radius);
+  padding: 8px; max-width: 1100px; margin: 0 auto 48px;
+  box-shadow: var(--glass-shadow);
+}
+.glass-faq details {
+  border-bottom: 1px solid var(--glass-border);
+  padding: 16px 22px; transition: background 0.15s;
+  border-radius: var(--apple-radius-sm);
+}
+.glass-faq details:last-child { border-bottom: none; }
+.glass-faq details:hover { background: rgba(255, 255, 255, 0.10); }
+.glass-faq details[open] { background: rgba(255, 255, 255, 0.10); }
+.glass-faq summary {
+  cursor: pointer; font-size: 15px; font-weight: 500;
+  list-style: none; padding-right: 28px; position: relative;
+  color: #fff; letter-spacing: -0.01em;
+}
+.glass-faq summary::-webkit-details-marker { display: none; }
+.glass-faq summary::after {
+  content: ''; position: absolute; right: 0; top: 50%;
+  width: 18px; height: 18px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  transition: all 0.25s;
+}
+.glass-faq summary::before {
+  content: '+'; position: absolute; right: 4px; top: 50%;
+  transform: translateY(-50%); color: rgba(255,255,255,0.7);
+  font-weight: 300; font-size: 16px; z-index: 2;
+  transition: transform 0.25s;
+}
+.glass-faq details[open] summary::before { transform: translateY(-50%) rotate(45deg); }
+.glass-faq details > p, .glass-faq details > div {
+  margin-top: 14px; color: rgba(230, 237, 243, 0.7);
+  font-size: 13.5px; line-height: 1.65;
+}
+.glass-faq code {
+  background: rgba(255,255,255,0.08); padding: 2px 7px; border-radius: 5px;
+  font-family: var(--mono); font-size: 12px;
+  border: 1px solid var(--glass-border);
+}
+
+/* ========== Footer ========== */
+.glass-foot {
+  text-align: center;
+  padding: 40px 24px 64px;
+  color: rgba(230, 237, 243, 0.75);
+  font-size: 12px;
+}
+
+/* ========== Performance overrides ==========
+   Отключаем backdrop-filter blur — он:
+   1) Сильно нагружает GPU
+   2) Не работает корректно с Dark Reader / Force Dark Mode
+   3) Делает карточки полупрозрачными (плохо читается)
+   Используем solid фоны из --glass-bg вместо. */
+body.glass-mode *,
+body.glass-mode *::before,
+body.glass-mode *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Карточки получают solid фон */
+body.glass-mode .glass,
+body.glass-mode .glass-pulse,
+body.glass-mode .glass-flow,
+body.glass-mode .glass-action-card,
+body.glass-mode .glass-faq,
+body.glass-mode .endpoint-card,
+body.glass-mode .stat,
+body.glass-mode .card {
+  background: var(--glass-bg) !important;
+}
+
+/* ========== Section titles ========== */
+.glass-section-h {
+  text-align: center; margin: 0 auto 28px; max-width: 700px;
+}
+.glass-section-h h2 {
+  font-size: 32px; font-weight: 700;
+  letter-spacing: -1.2px; line-height: 1.2;
+  margin-bottom: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #c8d2dd 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.glass-section-h p {
+  color: rgba(230, 237, 243, 0.6); font-size: 15px;
+  letter-spacing: -0.005em;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   COHERENCE LAYER — единый дизайн-язык для всех 3 страниц
+   (home / sandbox / dashboard). Принципы по DeepSeek-консультации:
+   1) L3 — центр вселенной, везде с зелёным glow
+   2) Layer-centric accent на всех элементах относящихся к слоям
+   3) Glass-treatment единый: blur 30px cards / 40px bg / 50px modals
+   4) Motion 200-300ms cubic-bezier для micro, prefers-reduced-motion respect
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* === Layer accent system — переменные на root для повторного использования === */
+:root {
+  --layer-l1: #58a6ff;
+  --layer-l1-soft: rgba(88, 166, 255, 0.15);
+  --layer-l1-glow: rgba(88, 166, 255, 0.35);
+  --layer-l2: #bc8cff;
+  --layer-l2-soft: rgba(188, 140, 255, 0.15);
+  --layer-l2-glow: rgba(188, 140, 255, 0.35);
+  --layer-l3: #3fb950;
+  --layer-l3-soft: rgba(63, 185, 80, 0.15);
+  --layer-l3-glow: rgba(63, 185, 80, 0.40);
+  --layer-l4: #ff8c42;
+  --layer-l4-soft: rgba(255, 140, 66, 0.15);
+  --layer-l4-glow: rgba(255, 140, 66, 0.35);
+  --layer-op: #58a6ff;
+  --layer-op-soft: rgba(88, 166, 255, 0.18);
+  --layer-tools: #d29922;
+  --layer-tools-soft: rgba(210, 153, 34, 0.15);
+
+  /* Унификация blur уровней — DS-консультация */
+  --blur-card: blur(30px) saturate(180%);
+  --blur-bg:   blur(40px) saturate(160%);
+  --blur-modal: blur(50px) saturate(200%);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-fast: 0.18s;
+  --motion-base: 0.25s;
+  --motion-slow: 0.45s;
+}
+
+/* === Утилитные классы accent-* — навешиваются на любой блок === */
+.accent-l1 { border-color: var(--layer-l1-soft) !important; }
+.accent-l2 { border-color: var(--layer-l2-soft) !important; }
+.accent-l3 { border-color: var(--layer-l3-soft) !important; box-shadow: 0 0 24px -4px var(--layer-l3-glow) !important; }
+.accent-l4 { border-color: var(--layer-l4-soft) !important; }
+.accent-op { border-color: var(--layer-op-soft) !important; }
+.accent-l1:hover { border-color: var(--layer-l1) !important; box-shadow: 0 6px 24px -8px var(--layer-l1-glow) !important; }
+.accent-l2:hover { border-color: var(--layer-l2) !important; box-shadow: 0 6px 24px -8px var(--layer-l2-glow) !important; }
+.accent-l3:hover { border-color: var(--layer-l3) !important; box-shadow: 0 8px 32px -6px var(--layer-l3-glow) !important; }
+.accent-l4:hover { border-color: var(--layer-l4) !important; box-shadow: 0 6px 24px -8px var(--layer-l4-glow) !important; }
+.accent-op:hover { border-color: var(--layer-op) !important; box-shadow: 0 6px 24px -8px var(--layer-op-soft) !important; }
+
+/* === Универсальный fade-in для секций при загрузке (page-level) === */
+@keyframes coh-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.coh-stagger > * {
+  animation: coh-fade-up 0.7s var(--ease-out) backwards;
+}
+.coh-stagger > *:nth-child(1)  { animation-delay: 0.05s; }
+.coh-stagger > *:nth-child(2)  { animation-delay: 0.12s; }
+.coh-stagger > *:nth-child(3)  { animation-delay: 0.19s; }
+.coh-stagger > *:nth-child(4)  { animation-delay: 0.26s; }
+.coh-stagger > *:nth-child(5)  { animation-delay: 0.33s; }
+.coh-stagger > *:nth-child(6)  { animation-delay: 0.40s; }
+.coh-stagger > *:nth-child(7)  { animation-delay: 0.47s; }
+.coh-stagger > *:nth-child(8)  { animation-delay: 0.54s; }
+.coh-stagger > *:nth-child(n+9) { animation-delay: 0.6s; }
+
+/* === Глобальные улучшения типографики === */
+body.glass-mode {
+  font-feature-settings: "ss01", "cv11", "tnum";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+body.glass-mode h1, body.glass-mode h2, body.glass-mode h3 {
+  letter-spacing: -0.02em; line-height: 1.2;
+}
+
+/* === Sandbox stage-num — раскрашиваем по стадии (вместо одного цвета) === */
+body.glass-mode .stage:nth-of-type(1) .stage-num,
+body.glass-mode .stage[data-layer="l1"] .stage-num {
+  background: linear-gradient(135deg, var(--layer-l1-soft), rgba(255,255,255,0.04));
+  border-color: var(--layer-l1);
+  color: var(--layer-l1);
+}
+body.glass-mode .stage:nth-of-type(2) .stage-num,
+body.glass-mode .stage[data-layer="l2"] .stage-num {
+  background: linear-gradient(135deg, var(--layer-l2-soft), rgba(255,255,255,0.04));
+  border-color: var(--layer-l2);
+  color: var(--layer-l2);
+}
+body.glass-mode .stage:nth-of-type(3) .stage-num,
+body.glass-mode .stage[data-layer="l3"] .stage-num {
+  background: linear-gradient(135deg, var(--layer-l3-soft), rgba(255,255,255,0.04));
+  border-color: var(--layer-l3);
+  color: var(--layer-l3);
+  box-shadow: 0 0 20px -2px var(--layer-l3-glow);
+}
+body.glass-mode .stage:nth-of-type(4) .stage-num,
+body.glass-mode .stage[data-layer="l4"] .stage-num {
+  background: linear-gradient(135deg, var(--layer-l4-soft), rgba(255,255,255,0.04));
+  border-color: var(--layer-l4);
+  color: var(--layer-l4);
+}
+body.glass-mode .stage:nth-of-type(5) .stage-num,
+body.glass-mode .stage[data-layer="op"] .stage-num {
+  background: linear-gradient(135deg, var(--layer-op-soft), rgba(255,255,255,0.04));
+  border-color: var(--layer-op);
+  color: var(--layer-op);
+}
+
+/* === Sandbox endpoint cards — hover поднятие, цветовой акцент по слою === */
+body.glass-mode .endpoint-card {
+  transition: transform var(--motion-base) var(--ease-out),
+              border-color var(--motion-base),
+              box-shadow var(--motion-base);
+}
+body.glass-mode .endpoint-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 36px -16px rgba(88,166,255,0.35);
+}
+body.glass-mode .stage:nth-of-type(3) .endpoint-card:hover {
+  box-shadow: 0 12px 36px -12px var(--layer-l3-glow);
+  border-color: var(--layer-l3);
+}
+
+/* === Dashboard tabs — цвет активной вкладки контекстный === */
+body.glass-mode nav.tabs button {
+  position: relative;
+  transition: all var(--motion-fast) var(--ease-out);
+}
+body.glass-mode nav.tabs button.active::after {
+  content: "";
+  position: absolute;
+  bottom: -8px; left: 20%; right: 20%;
+  height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--layer-l1), var(--layer-l3));
+  animation: tab-slide-in 0.3s var(--ease-out);
+}
+@keyframes tab-slide-in {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+/* === Dashboard stat cards — типографика и числа моно === */
+body.glass-mode .stat {
+  position: relative;
+  overflow: hidden;
+}
+body.glass-mode .stat::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--layer-l1) 25%,
+    var(--layer-l3) 50%,
+    var(--layer-l4) 75%,
+    transparent 100%);
+  opacity: 0.4;
+  transition: opacity var(--motion-base);
+}
+body.glass-mode .stat:hover::before { opacity: 1; }
+body.glass-mode .stat-val {
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Dashboard cards с заголовком L1/L2/L3/L4 в заголовке — цветной accent === */
+body.glass-mode .card-title:has(+ * [data-layer="l1"]),
+body.glass-mode .card[data-layer="l1"] .card-title { color: var(--layer-l1); }
+body.glass-mode .card[data-layer="l2"] .card-title { color: var(--layer-l2); }
+body.glass-mode .card[data-layer="l3"] .card-title { color: var(--layer-l3); }
+body.glass-mode .card[data-layer="l4"] .card-title { color: var(--layer-l4); }
+
+/* === Универсальный living-dot — pulsing indicator для "real-time" блоков === */
+.living-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--layer-l3);
+  box-shadow: 0 0 10px var(--layer-l3-glow);
+  animation: living-pulse 2s ease-in-out infinite;
+  margin-right: 6px; vertical-align: middle;
+}
+.living-dot.l1 { background: var(--layer-l1); box-shadow: 0 0 10px var(--layer-l1-glow); }
+.living-dot.l2 { background: var(--layer-l2); box-shadow: 0 0 10px var(--layer-l2-glow); }
+.living-dot.l4 { background: var(--layer-l4); box-shadow: 0 0 10px var(--layer-l4-glow); }
+.living-dot.op { background: var(--layer-op); box-shadow: 0 0 10px var(--layer-op-soft); animation-duration: 1.4s; }
+@keyframes living-pulse {
+  0%, 100% { transform: scale(1);    opacity: 0.85; }
+  50%      { transform: scale(1.25); opacity: 1; }
+}
+
+/* === Глобальные блики через scroll — subtle glass shimmer на section headers === */
+.glass-section-h h2 {
+  position: relative;
+  display: inline-block;
+  background-size: 200% 100%;
+  background: linear-gradient(90deg,
+    #ffffff 0%,
+    #c8d2dd 30%,
+    var(--layer-l3) 50%,
+    #c8d2dd 70%,
+    #ffffff 100%) !important;
+  background-size: 200% 100% !important;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 12s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 0% 0%; }
+  to   { background-position: 200% 0%; }
+}
+
+/* === Кнопки primary с mini-shimmer на hover === */
+body.glass-mode .glass-btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+body.glass-mode .glass-btn-primary::after {
+  content: "";
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+  transition: left 0.6s var(--ease-out);
+}
+body.glass-mode .glass-btn-primary:hover::after { left: 110%; }
+
+/* === Reduced motion — все анимации coherence-layer отключаются === */
+@media (prefers-reduced-motion: reduce) {
+  .coh-stagger > *,
+  .glass-section-h h2,
+  .living-dot,
+  body.glass-mode .glass-btn-primary::after,
+  body.glass-mode nav.tabs button.active::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

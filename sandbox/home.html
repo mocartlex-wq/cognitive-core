@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cognitive Core</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="theme-color" content="#0a0e14">
+<link rel="stylesheet" href="/static/shared.css?v=20260506a">
+<link rel="stylesheet" href="/static/glass.css?v=20260506a">
+<style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }</style>
+<link rel="stylesheet" href="/static/vendor/shepherd.css">
+<style>
+  /* Page-specific overrides */
+  main.glass-wrap { max-width: 1180px; margin: 0 auto; padding: 32px 28px 80px; }
+
+  /* ============ Flow with particles ============ */
+  .glass-flow {
+    position: relative;
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 14px; max-width: 1100px; margin: 0 auto 64px;
+    padding: 36px 16px 28px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius-xl);
+    box-shadow: var(--glass-shadow);
+    overflow: hidden;
+    min-height: 220px;
+  }
+  @media (max-width: 800px) { .glass-flow { grid-template-columns: 1fr; min-height: auto; } }
+
+  .flow-vol {
+    margin-top: 10px;
+    font-size: 18px; font-weight: 700;
+    font-feature-settings: "tnum";
+    color: #fff; letter-spacing: -0.5px;
+  }
+  .glass-flow-node[data-layer="op"] .flow-vol {
+    color: #58a6ff; font-size: 12px;
+    background: rgba(88,166,255,0.15);
+    padding: 2px 10px; border-radius: 99px;
+    border: 1px solid rgba(88,166,255,0.35);
+    display: inline-block; margin-top: 12px;
+  }
+  /* Цветовые акценты для каждого слоя — рамка снизу */
+  .glass-flow-node {
+    position: relative; z-index: 2;
+    text-align: center; padding: 18px 12px 16px;
+    border-radius: var(--apple-radius-sm);
+    background: rgba(13,17,23,0.4);
+    border: 1px solid var(--glass-border);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass-flow-node:hover {
+    transform: translateY(-3px);
+    border-color: var(--glass-border-strong);
+  }
+  .glass-flow-node[data-layer="l1"] { border-bottom: 2px solid #58a6ff; }
+  .glass-flow-node[data-layer="l2"] { border-bottom: 2px solid #bc8cff; }
+  .glass-flow-node[data-layer="l3"] { border-bottom: 2px solid #3fb950; }
+  .glass-flow-node[data-layer="l4"] { border-bottom: 2px solid #ff8c42; }
+  .glass-flow-node[data-layer="op"] { border-bottom: 2px solid #58a6ff; background: rgba(88,166,255,0.05); }
+
+  /* === L3 — завихрение звёзд ===
+     L3 — точка расхождения. Знание раздваивается: одна копия в L4 (архив),
+     вторая в OP (живая сессия). Подчёркиваем через 3 орбиты звёздочек,
+     вращающихся в РАЗНЫЕ стороны и с разной скоростью.
+     Цвета: зелёный (своё), оранжевый (L4-отлёт), голубой (OP-живая сессия). */
+  .glass-flow-node[data-layer="l3"] {
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(63,185,80,0.25),
+      0 0 22px -4px rgba(63,185,80,0.30);
+    animation: l3-breathe 4.5s ease-in-out infinite;
+  }
+  .glass-flow-node[data-layer="l3"]::after {
+    content: "ядро";
+    position: absolute;
+    bottom: 6px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; font-weight: 600;
+    letter-spacing: 0.18em;
+    color: rgba(63,185,80,0.55);
+    text-transform: uppercase;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .glass-flow-node[data-layer="l3"] .glass-flow-tag {
+    position: relative; z-index: 4;
+    box-shadow: 0 0 0 0 rgba(63,185,80,0.6);
+    animation: l3-tag-pulse 2.4s ease-out infinite;
+  }
+  .glass-flow-node[data-layer="l3"]:hover {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow:
+      0 0 0 1px rgba(63,185,80,0.55),
+      0 0 32px -2px rgba(63,185,80,0.55);
+  }
+  .glass-flow-node[data-layer="l3"]:hover .l3-orbit { animation-duration: 4s, 7s, 11s; }
+
+  /* === Контейнер орбит — на всю карточку, по центру === */
+  .l3-stars {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    overflow: hidden;
+  }
+  .l3-orbit {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 0; height: 0;
+    transform-origin: 0 0;
+  }
+  /* Внутренняя орбита — 6 зелёных точек, быстрая, против часовой */
+  .l3-orbit.inner  { animation: l3-spin-ccw 7s linear infinite; }
+  /* Средняя — 8 оранжевых (как L4), нормальная скорость, по часовой */
+  .l3-orbit.middle { animation: l3-spin-cw  11s linear infinite; }
+  /* Внешняя — 10 голубых (как OP), медленная, против часовой */
+  .l3-orbit.outer  { animation: l3-spin-ccw 17s linear infinite; }
+  .l3-star {
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    transform-origin: 0 0;
+  }
+  .l3-orbit.inner  .l3-star { background: #3fb950; box-shadow: 0 0 6px 1px rgba(63,185,80,0.7); }
+  .l3-orbit.middle .l3-star { background: #ff8c42; box-shadow: 0 0 5px 1px rgba(255,140,66,0.6); width: 2px; height: 2px; }
+  .l3-orbit.outer  .l3-star { background: #58a6ff; box-shadow: 0 0 5px 1px rgba(88,166,255,0.6); width: 2px; height: 2px; opacity: 0.85; }
+
+  @keyframes l3-spin-cw  { from { transform: rotate(0deg);   } to { transform: rotate(360deg);  } }
+  @keyframes l3-spin-ccw { from { transform: rotate(0deg);   } to { transform: rotate(-360deg); } }
+  @keyframes l3-breathe {
+    0%, 100% {
+      box-shadow:
+        0 0 0 1px rgba(63,185,80,0.25),
+        0 0 22px -4px rgba(63,185,80,0.30);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1px rgba(63,185,80,0.45),
+        0 0 32px -2px rgba(63,185,80,0.50);
+    }
+  }
+  @keyframes l3-tag-pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(63,185,80,0.55); }
+    70%  { box-shadow: 0 0 0 14px rgba(63,185,80,0); }
+    100% { box-shadow: 0 0 0 0   rgba(63,185,80,0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .glass-flow-node[data-layer="l3"],
+    .l3-orbit,
+    .glass-flow-node[data-layer="l3"] .glass-flow-tag {
+      animation: none;
+    }
+  }
+
+  /* Сквозной канал частиц через всю воронку */
+  .flow-track {
+    position: absolute; inset: 0;
+    pointer-events: none; z-index: 1; overflow: hidden;
+  }
+  @media (max-width: 800px) {
+    .flow-track { display: none; }
+  }
+
+  .light {
+    position: absolute;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    opacity: 0;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-delay: var(--delay, 0s);
+    animation-duration: var(--dur, 8s);
+  }
+
+  /* === ТИП 1: SHORT — синий, гаснет на L1→L2 (шум, отсеивается) ===
+     От 8% до 28% — между концом L1 и началом L2.
+     Большинство частиц этого типа: показывает "много шума на входе" */
+  .light.t-short {
+    background: radial-gradient(circle, #ffffff 0%, #58a6ff 60%, transparent 100%);
+    box-shadow: 0 0 6px #58a6ff;
+    top: var(--y, 50%);
+    animation-name: track-short;
+  }
+  @keyframes track-short {
+    0%   { left: 0%; opacity: 0; }
+    10%  { opacity: 1; }
+    50%  { left: 28%; opacity: 1; }
+    65%  { left: 30%; opacity: 0; transform: scale(0.3); }
+    100% { left: 30%; opacity: 0; }
+  }
+
+  /* === ТИП 2: MEDIUM — фиолетовый, гаснет на L2→L3 (тоже фильтруется) ===
+     От 0% до 50% — между L1, L2 и до начала L3 */
+  .light.t-medium {
+    background: radial-gradient(circle, #ffffff 0%, #bc8cff 60%, transparent 100%);
+    box-shadow: 0 0 7px #bc8cff;
+    top: var(--y, 50%);
+    animation-name: track-medium;
+  }
+  @keyframes track-medium {
+    0%   { left: 0%; opacity: 0; }
+    8%   { opacity: 1; }
+    70%  { left: 50%; opacity: 1; }
+    82%  { left: 52%; opacity: 0; transform: scale(0.3); }
+    100% { left: 52%; opacity: 0; }
+  }
+
+  /* === ТИП 3: LONG — зелёный, доходит до L3 (становится знанием) ===
+     От 0% до 60% — выживает фильтры */
+  .light.t-long {
+    background: radial-gradient(circle, #ffffff 0%, #3fb950 60%, transparent 100%);
+    box-shadow: 0 0 9px #3fb950;
+    top: var(--y, 50%);
+    animation-name: track-long;
+  }
+  @keyframes track-long {
+    0%   { left: 0%; opacity: 0; }
+    6%   { opacity: 1; }
+    90%  { left: 60%; opacity: 1; }
+    100% { left: 62%; opacity: 0; }
+  }
+
+  /* === ТИП 4: ARCHIVE — оранжевый, ОТ L3 ВВЕРХ к L4 (редкий снапшот) ===
+     От 60% до 80% по горизонтали + по вертикали вверх */
+  .light.t-archive {
+    background: radial-gradient(circle, #ffffff 0%, #ff8c42 60%, transparent 100%);
+    box-shadow: 0 0 10px #ff8c42;
+    animation-name: track-archive;
+  }
+  @keyframes track-archive {
+    0%   { left: 58%; top: 50%; opacity: 0; }
+    8%   { opacity: 1; }
+    100% { left: 78%; top: 12%; opacity: 0; }
+  }
+
+  /* === ТИП 5: OP — голубой, ОТ L3 ВНИЗ-ВПРАВО к OP (быстрая память) ===
+     От 60% до 95% по горизонтали + вниз */
+  .light.t-op {
+    background: radial-gradient(circle, #ffffff 0%, #58a6ff 60%, transparent 100%);
+    box-shadow: 0 0 10px #58a6ff;
+    animation-name: track-op;
+  }
+  @keyframes track-op {
+    0%   { left: 58%; top: 50%; opacity: 0; }
+    8%   { opacity: 1; }
+    100% { left: 95%; top: 78%; opacity: 0; }
+  }
+
+  /* === ТИП 6: FEED-FROM-L1 — белый/синий, ВЫЛЕТАЕТ из центра L1 в L3 ===
+     По дуге через L2, поглощается L3 (там подхватывается завихрением). */
+  .light.feed-l1 {
+    width: 4px; height: 4px;
+    background: radial-gradient(circle, #ffffff 0%, #58a6ff 70%, transparent 100%);
+    box-shadow: 0 0 10px #58a6ff, 0 0 20px rgba(88,166,255,0.4);
+    animation-name: feed-from-l1;
+  }
+  @keyframes feed-from-l1 {
+    0%   { left: 10%; top: 60%;  opacity: 0; transform: scale(0.4); }
+    8%   { left: 11%; top: 56%;  opacity: 0.7; transform: scale(1); }
+    35%  { left: 22%; top: 38%;  opacity: 1; }                          /* подъём над L2 */
+    65%  { left: 38%; top: 42%;  opacity: 1; }
+    90%  { left: 49%; top: 50%;  opacity: 0.8; transform: scale(1.3); } /* центр L3 — рост */
+    100% { left: 50%; top: 50%;  opacity: 0; transform: scale(0.2); }   /* поглощено */
+  }
+  /* === ТИП 7: FEED-FROM-L2 — фиолетовый/белый, ВЫЛЕТАЕТ из центра L2 в L3 === */
+  .light.feed-l2 {
+    width: 3px; height: 3px;
+    background: radial-gradient(circle, #ffffff 0%, #bc8cff 70%, transparent 100%);
+    box-shadow: 0 0 9px #bc8cff, 0 0 18px rgba(188,140,255,0.4);
+    animation-name: feed-from-l2;
+  }
+  @keyframes feed-from-l2 {
+    0%   { left: 28%; top: 55%; opacity: 0; transform: scale(0.4); }
+    10%  { left: 29%; top: 50%; opacity: 0.8; transform: scale(1); }
+    50%  { left: 38%; top: 38%; opacity: 1; }                           /* дуга вверх */
+    85%  { left: 48%; top: 49%; opacity: 1; transform: scale(1.4); }    /* в центр L3 */
+    100% { left: 50%; top: 50%; opacity: 0; transform: scale(0.2); }    /* поглощено */
+  }
+
+  /* Demo modal в glass-стиле */
+  .demo-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(5, 8, 16, 0.78);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  .demo-overlay.show { display: flex; }
+  .demo-modal {
+    background: rgba(22, 27, 34, 0.92);
+    -webkit-backdrop-filter: blur(40px) saturate(200%); backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid var(--glass-border-strong);
+    border-radius: var(--apple-radius);
+    padding: 32px; max-width: 680px; width: 92%; max-height: 82vh; overflow: auto;
+    box-shadow: var(--glass-shadow-lg);
+  }
+  .demo-modal h3 {
+    font-size: 22px; margin-bottom: 8px; font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .demo-modal .d-sub { color: rgba(230, 237, 243, 0.68); font-size: 14px; margin-bottom: 22px; }
+  .demo-progress { display: grid; gap: 8px; margin-top: 16px; }
+  .demo-step-row {
+    display: flex; gap: 12px; align-items: center;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    font-size: 13px; transition: all 0.2s;
+  }
+  .demo-step-row.active { border-color: rgba(88,166,255,0.5); background: rgba(88,166,255,0.08); }
+  .demo-step-row.done { border-color: rgba(63,185,80,0.4); }
+  .demo-step-row.error { border-color: rgba(248,81,73,0.5); }
+  .demo-step-icon { width: 22px; text-align: center; flex-shrink: 0; }
+  .demo-step-text { flex: 1; }
+  .demo-step-time { font-family: var(--mono); font-size: 11px; color: rgba(230,237,243,0.5); }
+  .spinner {
+    width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.15);
+    border-top-color: #58a6ff; border-radius: 50%;
+    animation: spin 0.8s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .demo-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+
+  /* Tour button */
+  .tour-btn {
+    background: rgba(255,255,255,0.05);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    color: rgba(230,237,243,0.7);
+    width: 28px; height: 28px; border-radius: 50%;
+    cursor: pointer; font-size: 12px; font-weight: 700;
+    transition: all 0.15s;
+  }
+  .tour-btn:hover { color: #58a6ff; border-color: rgba(88,166,255,0.5); }
+
+  /* ════════════════════════════════════════════════════════
+     ОБЩИЙ АПГРЕЙД ДИЗАЙНА — связность, иерархия, glow по слоям
+     ════════════════════════════════════════════════════════ */
+
+  /* === HERO: глубина в заголовке + плавное появление === */
+  .glass-hero h1 {
+    background: linear-gradient(135deg,
+      #ffffff 0%,
+      #e6edf3 30%,
+      #58a6ff 65%,
+      #3fb950 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 30px rgba(88,166,255,0.15));
+    animation: hero-fade-in 0.9s ease-out;
+  }
+  .glass-hero .tagline {
+    animation: hero-fade-in 1.1s ease-out 0.15s both;
+  }
+  .glass-hero-actions {
+    animation: hero-fade-in 1.2s ease-out 0.3s both;
+  }
+  @keyframes hero-fade-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* === PULSE: цветовые акценты под каждый слой === */
+  .glass-pulse-item {
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.25s, border-color 0.25s, box-shadow 0.25s;
+  }
+  .glass-pulse-item::after {
+    content: ""; position: absolute;
+    bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 40%; height: 2px; border-radius: 2px;
+    transition: width 0.3s, opacity 0.3s, background 0.3s;
+    opacity: 0.6;
+  }
+  .glass-pulse-item:hover {
+    transform: translateY(-2px);
+    border-color: var(--glass-border-strong);
+  }
+  .glass-pulse-item:hover::after { width: 75%; opacity: 1; }
+  .glass-pulse-item:nth-child(1)::after { background: #58a6ff; }   /* L1 */
+  .glass-pulse-item:nth-child(2)::after { background: #bc8cff; }   /* L2 */
+  .glass-pulse-item:nth-child(3)::after { background: #3fb950; }   /* L3 */
+  .glass-pulse-item:nth-child(4)::after { background: #d29922; }   /* tools — янтарный */
+  .glass-pulse-item:nth-child(5)::after { background: #ff8c42; }   /* L4 */
+  /* L3-pulse — особенный: лёгкий зелёный glow вокруг числа */
+  .glass-pulse-item:nth-child(3) {
+    background: linear-gradient(180deg, rgba(63,185,80,0.04), transparent 60%);
+  }
+  .glass-pulse-item:nth-child(3) .glass-pulse-num {
+    text-shadow: 0 0 16px rgba(63,185,80,0.25);
+  }
+
+  /* === FLOW NODES (не L3) — лёгкий living-индикатор для связности ===
+     Каждая карточка получает мерцающую точку в углу tag — система
+     "дышит" не только в L3. Это тонко: 1 точка, slow pulse, по своей
+     цветовой схеме слоя. === */
+  .glass-flow-node[data-layer="l1"] .glass-flow-tag,
+  .glass-flow-node[data-layer="l2"] .glass-flow-tag,
+  .glass-flow-node[data-layer="l4"] .glass-flow-tag,
+  .glass-flow-node[data-layer="op"] .glass-flow-tag {
+    position: relative;
+  }
+  .glass-flow-node[data-layer="l1"] .glass-flow-tag::after,
+  .glass-flow-node[data-layer="l2"] .glass-flow-tag::after,
+  .glass-flow-node[data-layer="l4"] .glass-flow-tag::after,
+  .glass-flow-node[data-layer="op"] .glass-flow-tag::after {
+    content: "";
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    animation: dot-blink 3.5s ease-in-out infinite;
+  }
+  .glass-flow-node[data-layer="l1"] .glass-flow-tag::after { background: #58a6ff; box-shadow: 0 0 6px #58a6ff; }
+  .glass-flow-node[data-layer="l2"] .glass-flow-tag::after { background: #bc8cff; box-shadow: 0 0 6px #bc8cff; animation-delay: -0.7s; }
+  .glass-flow-node[data-layer="l4"] .glass-flow-tag::after { background: #ff8c42; box-shadow: 0 0 6px #ff8c42; animation-delay: -2.0s; }
+  .glass-flow-node[data-layer="op"] .glass-flow-tag::after { background: #58a6ff; box-shadow: 0 0 8px #58a6ff; animation: op-heartbeat 1.4s ease-in-out infinite; }
+
+  @keyframes dot-blink {
+    0%, 70%, 100% { opacity: 0.35; transform: scale(1); }
+    40%           { opacity: 1;    transform: scale(1.4); }
+  }
+  /* OP — это RT-канал, должен пульсировать как сердце, чаще остальных */
+  @keyframes op-heartbeat {
+    0%, 100% { transform: scale(1);   opacity: 0.7; }
+    25%      { transform: scale(1.5); opacity: 1; }
+    50%      { transform: scale(1);   opacity: 0.7; }
+    75%      { transform: scale(1.3); opacity: 0.95; }
+  }
+
+  /* L1 — "входной поток" — на hover слегка ускоряет blink, как будто
+     карточку коснулись и она оживает быстрее */
+  .glass-flow-node[data-layer="l1"]:hover .glass-flow-tag::after,
+  .glass-flow-node[data-layer="l2"]:hover .glass-flow-tag::after,
+  .glass-flow-node[data-layer="l4"]:hover .glass-flow-tag::after {
+    animation-duration: 1.5s;
+  }
+
+  /* === ACTIONS CARDS: цветной hover-border + transform === */
+  .glass-action-card {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.3s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+  .glass-action-card::before {
+    content: ""; position: absolute;
+    top: 0; left: -100%;
+    width: 100%; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(88,166,255,0.6), transparent);
+    transition: left 0.6s ease;
+  }
+  .glass-action-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(88,166,255,0.4);
+    box-shadow: 0 12px 36px -12px rgba(88,166,255,0.25);
+  }
+  .glass-action-card:hover::before { left: 100%; }
+  .glass-action-card .glass-action-icon {
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .glass-action-card:hover .glass-action-icon {
+    transform: scale(1.08) rotate(-3deg);
+  }
+
+  /* === FAQ: spacing + smooth open/close === */
+  .glass-faq details {
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .glass-faq details:hover { border-color: rgba(88,166,255,0.3); }
+  .glass-faq details[open] { background: rgba(88,166,255,0.04); }
+  .glass-faq summary {
+    cursor: pointer;
+    transition: color 0.2s;
+  }
+  .glass-faq details[open] summary { color: #58a6ff; }
+  .glass-faq summary::marker,
+  .glass-faq summary::-webkit-details-marker { color: rgba(88,166,255,0.5); }
+
+  /* === STATUS DOTS: размер + плавность === */
+  .top-status .dot {
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .top-status .dot.ok    { box-shadow: 0 0 6px rgba(63,185,80,0.6); }
+  .top-status .dot.err   { box-shadow: 0 0 6px rgba(248,81,73,0.6); }
+  .top-status .dot.unknown { opacity: 0.5; }
+
+  /* === SECTION HEADERS: subtle accent line === */
+  .glass-section-h {
+    position: relative;
+  }
+  .glass-section-h::before {
+    content: ""; position: absolute;
+    left: 0; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 22px;
+    background: linear-gradient(180deg, #58a6ff, #3fb950);
+    border-radius: 3px;
+    opacity: 0.7;
+  }
+  .glass-section-h h2 { padding-left: 14px; }
+
+  /* === FOOT: тоньше + центрировано === */
+  .glass-foot {
+    text-align: center;
+    opacity: 0.55;
+    transition: opacity 0.3s;
+  }
+  .glass-foot:hover { opacity: 0.9; }
+
+  /* === PRINT — чтобы не было артефактов при распечатке === */
+  @media print {
+    .l3-stars, .flow-track, .orb-3 { display: none; }
+  }
+
+  /* Shepherd overrides — glass */
+  .shepherd-element {
+    background: rgba(22,27,34,0.92);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid var(--glass-border-strong);
+    border-radius: var(--apple-radius-sm);
+    max-width: 380px;
+    box-shadow: var(--glass-shadow-lg);
+  }
+  .shepherd-text { color: var(--text) !important; font-size: 13px !important; padding: 16px 18px !important; line-height: 1.65 !important; }
+  .shepherd-button { background: linear-gradient(135deg, #58a6ff, #4d8fdf) !important; color: #fff !important; border-radius: 999px !important; padding: 7px 16px !important; font-size: 12px !important; font-weight: 600 !important; }
+  .shepherd-button.shepherd-button-secondary { background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+  .shepherd-modal-overlay-container { fill: rgba(5,8,16,0.7); }
+</style>
+</head>
+<body class="glass-mode">
+<div class="orb-3"></div>
+
+<div class="top-bar">
+  <a class="brand" href="/">
+    <div class="brand-icon"><span class="brand-dot"></span></div>
+    <div>
+      <div class="brand-name">Cognitive Core</div>
+      <span class="brand-ver" id="ver">v?</span>
+    </div>
+  </a>
+  <nav class="top-nav">
+    <a href="/" class="active">Главная</a>
+    <a href="/ui">Дашборд</a>
+    <a href="/sandbox">API</a>
+  </nav>
+  <div class="top-status">
+    <span><span class="dot unknown" id="d-pg"></span><span class="dot unknown" id="d-rd"></span><span class="dot unknown" id="d-s3"></span></span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Сменить тему" aria-label="Сменить тему">
+      <svg class="icon icon-sun"><use href="#sun"/></svg>
+      <svg class="icon icon-moon"><use href="#moon"/></svg>
+    </button>
+    <button class="tour-btn" onclick="startCognitiveTour()" title="Тур">?</button>
+  </div>
+</div>
+
+<main class="glass-wrap">
+
+  <!-- ============ HERO ============ -->
+  <section class="glass-hero">
+    <h1>Cognitive Core</h1>
+    <p class="tagline">5-слойная самохостимая память для AI-агентов с автоматической консолидацией опыта в долгосрочные знания.</p>
+    <div class="glass-hero-actions">
+      <button class="glass-btn glass-btn-primary" onclick="openDemo()">Запустить демо</button>
+      <a href="/ui" class="glass-btn glass-btn-ghost">Открыть дашборд</a>
+    </div>
+  </section>
+
+  <!-- ============ LIVE PULSE ============ -->
+  <div class="glass-pulse">
+    <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-l1">—</div><div class="glass-pulse-lbl">L1 события</div></div>
+    <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-l2">—</div><div class="glass-pulse-lbl">L2 буферы</div></div>
+    <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-l3">—</div><div class="glass-pulse-lbl">L3 знания</div></div>
+    <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-tools">—</div><div class="glass-pulse-lbl">инструменты</div></div>
+    <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-l4">—</div><div class="glass-pulse-lbl">L4 снапшоты</div></div>
+  </div>
+
+  <!-- ============ FLOW ============ -->
+  <div class="glass-section-h">
+    <h2>Как память течёт и фильтруется</h2>
+    <p>Слева направо — поток мыслей. Чем дальше — тем плотнее фильтр и меньше частиц.</p>
+  </div>
+  <div class="glass-flow">
+    <!-- Сквозной канал частиц через всю воронку.
+         JS заполнит его частицами разных типов:
+         t-short  — много, гаснут после L1 (шум)
+         t-medium — меньше, гаснут после L2 (отсеяно куратором)
+         t-long   — мало, доходят до L3 (знания)
+         t-archive — редко, ответвляются вверх к L4
+         t-op     — несколько, ответвляются вниз к OP -->
+    <div class="flow-track" id="flow-track"></div>
+
+    <div class="glass-flow-node" data-layer="l1">
+      <span class="glass-flow-tag">L1</span>
+      <div class="glass-flow-name">Событие</div>
+      <div class="glass-flow-desc">Сырые записи агента</div>
+      <div class="flow-vol" id="vol-l1">—</div>
+    </div>
+    <div class="glass-flow-node" data-layer="l2">
+      <span class="glass-flow-tag">L2</span>
+      <div class="glass-flow-name">День</div>
+      <div class="glass-flow-desc">Daily LLM-свёртка</div>
+      <div class="flow-vol" id="vol-l2">—</div>
+    </div>
+    <div class="glass-flow-node" data-layer="l3">
+      <div class="l3-stars" id="l3-stars" aria-hidden="true">
+        <div class="l3-orbit inner"></div>
+        <div class="l3-orbit middle"></div>
+        <div class="l3-orbit outer"></div>
+      </div>
+      <span class="glass-flow-tag">L3</span>
+      <div class="glass-flow-name">Знание</div>
+      <div class="glass-flow-desc">Куратор: confidence ≥0.6, ≥2×</div>
+      <div class="flow-vol" id="vol-l3">—</div>
+    </div>
+    <div class="glass-flow-node" data-layer="l4">
+      <span class="glass-flow-tag">L4</span>
+      <div class="glass-flow-name">Архив</div>
+      <div class="glass-flow-desc">Снапшот в S3 — на восстановление</div>
+      <div class="flow-vol" id="vol-l4">—</div>
+    </div>
+    <div class="glass-flow-node" data-layer="op">
+      <span class="glass-flow-tag">OP</span>
+      <div class="glass-flow-name">Быстрая</div>
+      <div class="glass-flow-desc">KNN из L3 в живую сессию</div>
+      <div class="flow-vol">RT</div>
+    </div>
+  </div>
+
+  <!-- ============ ACTIONS ============ -->
+  <div class="glass-section-h">
+    <h2>Что можно сделать</h2>
+  </div>
+  <div class="glass-actions">
+    <a href="/ui" class="glass-action-card">
+      <div class="glass-action-icon"><svg class="icon icon-lg"><use href="#dashboard"/></svg></div>
+      <div class="glass-action-title">Дашборд</div>
+      <div class="glass-action-desc">Состояние памяти, графики, аудит, обозреватель знаний и доменов.</div>
+    </a>
+    <a href="/sandbox" class="glass-action-card">
+      <div class="glass-action-icon"><svg class="icon icon-lg"><use href="#api"/></svg></div>
+      <div class="glass-action-title">API-песочница</div>
+      <div class="glass-action-desc">Все эндпоинты по этапам жизненного цикла. Для разработчиков.</div>
+    </a>
+    <a href="javascript:openDemo()" class="glass-action-card">
+      <div class="glass-action-icon"><svg class="icon icon-lg"><use href="#play"/></svg></div>
+      <div class="glass-action-title">Демо за 2 минуты</div>
+      <div class="glass-action-desc">Реальный прогон: 18 событий → анализ → 29 новых знаний в L3.</div>
+    </a>
+  </div>
+
+  <!-- ============ FAQ ============ -->
+  <div class="glass-section-h">
+    <h2>Частые вопросы</h2>
+  </div>
+  <div class="glass-faq">
+    <details>
+      <summary>Зачем 5 слоёв вместо одной vector-DB?</summary>
+      <p>Vector-DB запоминает всё подряд — и важное, и шум. Здесь между слоями стоят LLM-куратор и фильтры:
+      сырое событие пройдёт в долгосрочную память только если повторилось минимум 2 раза за неделю и confidence > 0.6.
+      Это снимает с агента работу по «чистке» собственной памяти.</p>
+    </details>
+    <details>
+      <summary>Что такое OP и куда смотреть как разработчик?</summary>
+      <p>OP — рабочее пространство в моменте. Агент задаёт <code>POST /operative/query</code> с вопросом, получает
+      релевантные знания + инструменты по KNN-поиску. В сессии Redis 24 часа. Закрытие сессии может вернуть
+      результат работы обратно в L1 (обратная петля).</p>
+    </details>
+    <details>
+      <summary>Как подключить из Claude Desktop / Cursor?</summary>
+      <p>В каталоге <code>mcp_server/</code> готовый MCP-сервер. Добавьте в <code>claude_desktop_config.json</code>
+      запуск через <code>python -m mcp_server.server</code>. Полная инструкция в <code>mcp_server/QUICKSTART.md</code>.</p>
+    </details>
+    <details>
+      <summary>Куда смотреть при сбое?</summary>
+      <p>Дашборд → вкладка «Аудит L5» с фильтром «Только ошибки». Логи API: <code>docker logs cognitive_api</code>.
+      Если KNN не возвращает результаты — векторы восстанавливаются из pgvector автоматически
+      командой <code>POST /memory/restore-redis</code>.</p>
+    </details>
+    <details>
+      <summary>Как залить свои данные?</summary>
+      <p>Откройте API-песочницу (этап 1) и отправьте <code>POST /events</code> с любым JSON в payload. Через ~10 сек
+      запустите daily, через минуту — weekly. Знания появятся в L3 и станут искомыми через KNN.
+      Или через Python SDK <code>cognitive-client</code>, или через MCP в Claude Desktop.</p>
+    </details>
+  </div>
+
+  <div class="glass-foot">
+    Cognitive Core <span id="ver-foot">v0.4.0</span> · uptime <span id="uptime">—</span>
+  </div>
+</main>
+
+<!-- Demo modal -->
+<div class="demo-overlay" id="demo-overlay" onclick="if(event.target.id==='demo-overlay')closeDemo()">
+  <div class="demo-modal">
+    <h3>Полный цикл памяти</h3>
+    <div class="d-sub">
+      Сейчас зальём 18 событий, прогоним daily/weekly через DeepSeek и сделаем KNN-запросы. Займёт ~1-2 минуты.
+    </div>
+    <div id="demo-progress" class="demo-progress"></div>
+    <div class="demo-actions">
+      <button class="glass-btn glass-btn-ghost" id="demo-close" onclick="closeDemo()">Закрыть</button>
+      <button class="glass-btn glass-btn-primary" id="demo-start" onclick="runDemo()">Запустить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== Сквозной поток светлячков ======
+// Воронка: много частиц на старте → часть гаснет после L1, часть после L2,
+// единицы доходят до L3, ещё реже отбрасываются вверх в L4 (архив)
+// или вниз в OP (быстрая). Цвет = тип траектории.
+function initParticles() {
+  const track = document.getElementById('flow-track');
+  if (!track) return;
+  track.innerHTML = '';
+
+  // Объёмы: показывают что входной поток густой → каждый фильтр прорежает
+  const types = [
+    { cls: 't-short',   count: 40, durMin: 4, durMax: 7 },   // шум, гаснет на L1→L2
+    { cls: 't-medium',  count: 18, durMin: 5, durMax: 8 },   // отсеяно куратором на L2→L3
+    { cls: 't-long',    count: 6,  durMin: 6, durMax: 10 },  // выжило, дошло до L3
+    { cls: 'feed-l1',   count: 5,  durMin: 5, durMax: 8 },   // искры из L1 → L3 (по дуге)
+    { cls: 'feed-l2',   count: 4,  durMin: 4, durMax: 7 },   // искры из L2 → L3
+    { cls: 't-archive', count: 3,  durMin: 5, durMax: 8 },   // редкий снапшот L3→L4
+    { cls: 't-op',      count: 7,  durMin: 4, durMax: 7 },   // KNN-запросы L3→OP
+  ];
+
+  types.forEach(t => {
+    for (let i = 0; i < t.count; i++) {
+      const p = document.createElement('div');
+      p.className = 'light ' + t.cls;
+      const dur = t.durMin + Math.random() * (t.durMax - t.durMin);
+      const delay = -Math.random() * dur;
+      // Вертикальный разброс — по высоте flow-track
+      const y = 30 + Math.random() * 40;
+      p.style.setProperty('--dur', dur + 's');
+      p.style.setProperty('--delay', delay + 's');
+      p.style.setProperty('--y', y + '%');
+      track.appendChild(p);
+    }
+  });
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    document.getElementById('ver').textContent = 'v' + (d.version || '?');
+    document.getElementById('ver-foot').textContent = 'v' + (d.version || '?');
+    const setDot = (id, ok) => document.getElementById(id).className = 'dot ' + (ok ? 'ok' : 'err');
+    setDot('d-pg', d.services?.postgres === 'ok');
+    setDot('d-rd', d.services?.redis === 'ok');
+    setDot('d-s3', d.services?.minio === 'ok');
+    const L = d.layers || {};
+    document.getElementById('p-l1').textContent = (L.l1 ?? '—').toLocaleString('ru-RU');
+    document.getElementById('p-l2').textContent = (L.l2 ?? '—').toLocaleString('ru-RU');
+    document.getElementById('p-l3').textContent = (L.l3_knowledge ?? '—').toLocaleString('ru-RU');
+    document.getElementById('p-tools').textContent = (L.l3_tools ?? '—').toLocaleString('ru-RU');
+    document.getElementById('p-l4').textContent = (L.l4 ?? '—').toLocaleString('ru-RU');
+
+    // ====== Объёмы под слоями flow ======
+    const fmt = (n) => n.toLocaleString('ru-RU');
+    const l1 = L.l1 ?? 0, l2 = L.l2 ?? 0, l3 = L.l3_knowledge ?? 0, l4 = L.l4 ?? 0;
+    const setVol = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+    setVol('vol-l1', l1);
+    setVol('vol-l2', l2);
+    setVol('vol-l3', l3);
+    setVol('vol-l4', l4);
+
+    const up = d.uptime_seconds || 0;
+    const h = Math.floor(up / 3600), m = Math.floor((up % 3600) / 60);
+    document.getElementById('uptime').textContent = `${h}h ${m}m`;
+  } catch(e) { console.error(e); }
+}
+
+function openDemo() {
+  document.getElementById('demo-progress').innerHTML = '';
+  document.getElementById('demo-overlay').classList.add('show');
+  document.getElementById('demo-start').disabled = false;
+  document.getElementById('demo-start').textContent = 'Запустить';
+}
+function closeDemo() {
+  document.getElementById('demo-overlay').classList.remove('show');
+}
+
+async function runDemo() {
+  const btn = document.getElementById('demo-start');
+  const progress = document.getElementById('demo-progress');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Выполняется...';
+  progress.innerHTML = '';
+
+  const stepEl = (text) => {
+    const el = document.createElement('div');
+    el.className = 'demo-step-row active';
+    el.innerHTML = `<span class="demo-step-icon"><span class="spinner"></span></span><span class="demo-step-text">${text}</span><span class="demo-step-time"></span>`;
+    progress.appendChild(el);
+    progress.scrollTop = progress.scrollHeight;
+    return el;
+  };
+  const finishStep = (el, ok, suffix='') => {
+    el.classList.remove('active');
+    el.classList.add(ok ? 'done' : 'error');
+    el.querySelector('.demo-step-icon').textContent = ok ? '✓' : '✗';
+    if (suffix) el.querySelector('.demo-step-time').textContent = suffix;
+  };
+
+  try {
+    const t0 = performance.now();
+    const res = await fetch('/demo/run', { method: 'POST' });
+    if (!res.body) throw new Error('No streaming response');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEl = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+
+        if (event.type === 'step_start') {
+          currentEl = stepEl(event.message);
+        } else if (event.type === 'step_done') {
+          if (currentEl) finishStep(currentEl, true, event.duration_ms ? `${event.duration_ms} ms` : '');
+        } else if (event.type === 'step_error') {
+          if (currentEl) finishStep(currentEl, false, event.error || '');
+        } else if (event.type === 'final') {
+          const totalMs = Math.round(performance.now() - t0);
+          const summary = stepEl(`Готово за ${(totalMs/1000).toFixed(1)} сек. ${event.summary || ''}`);
+          finishStep(summary, true);
+          loadStatus();
+        }
+      }
+    }
+    btn.textContent = 'Готово';
+  } catch(e) {
+    const errEl = stepEl('Ошибка: ' + e.message);
+    finishStep(errEl, false);
+    btn.textContent = 'Закрыть';
+  }
+}
+
+// === L3 — расставить звёзды по 3 орбитам вокруг центра карточки ===
+function initL3Stars() {
+  const orbits = [
+    { sel: '.l3-orbit.inner',  count: 6,  radius: 38 },
+    { sel: '.l3-orbit.middle', count: 8,  radius: 58 },
+    { sel: '.l3-orbit.outer',  count: 10, radius: 80 },
+  ];
+  orbits.forEach(({ sel, count, radius }) => {
+    const orbit = document.querySelector(sel);
+    if (!orbit) return;
+    for (let i = 0; i < count; i++) {
+      const star = document.createElement('span');
+      star.className = 'l3-star';
+      const angle = (360 / count) * i;
+      // Позиционируем точку на конце радиуса от центра карточки
+      star.style.transform = `rotate(${angle}deg) translate(${radius}px) rotate(${-angle}deg)`;
+      orbit.appendChild(star);
+    }
+  });
+}
+
+initParticles();
+initL3Stars();
+loadStatus();
+setInterval(loadStatus, 5000);
+</script>
+<script src="/static/theme.js"></script>
+<script src="/static/vendor/shepherd.min.js"></script>
+<script src="/static/tour.js"></script>
+
+</body>
+</html>

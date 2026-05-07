@@ -1,0 +1,7 @@
+=== Cognitive Core Agent API Keys ===
+agent_designer:  fc9a6aa56e7b43a788acbf3e8fb46bd1bf264aaacc876790bb4fe6ac88a65244
+agent_developer: 5832c45e1ff8b33e4d8d38cab833c7c7f6926dcb893b28d96f1f45551a50012e
+
+Server: 192.168.0.118
+API: http://192.168.0.118:9001
+Generated: 2026-05-05T09:21:13+00:00

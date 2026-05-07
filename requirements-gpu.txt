@@ -1,0 +1,3 @@
+# GPU-only дополнения. Заменяет CPU onnxruntime который ставится с fastembed.
+# Не включать в основной requirements.txt — иначе CPU-only хосты будут тянуть лишние 200MB CUDA libs.
+onnxruntime-gpu==1.20.*
