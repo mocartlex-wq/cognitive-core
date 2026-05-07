@@ -11,7 +11,13 @@ PREV="${1:?prev sha required}"
 NEW="${2:?new sha required}"
 
 REPO_DIR="${COGNITIVE_REPO_DIR:-/opt/cognitive-core}"
+# Base + prod overlay; локальный override (например docker-compose.override.yml на сервере
+# определяет mcp-сайдкар) подхватывается, если файл существует. Override в .gitignore —
+# это нормально, у каждой машины он свой.
 COMPOSE_FILES="-f docker-compose.yml -f docker-compose.prod.yml"
+if [ -f "$REPO_DIR/docker-compose.override.yml" ]; then
+    COMPOSE_FILES="$COMPOSE_FILES -f docker-compose.override.yml"
+fi
 
 cd "$REPO_DIR"
 
