@@ -14,6 +14,8 @@ from app.db.redis import init_redis, close_redis
 from app.db.s3 import init_s3
 from app.services.metrics import track_http, log_event
 
+__version__ = "0.5.0"
+
 _start_time: datetime | None = None
 _scheduler_task: asyncio.Task | None = None
 _outbox_publisher = None  # OutboxPublisher instance
@@ -24,7 +26,7 @@ async def lifespan(app: FastAPI):
     """Инициализация всех подключений при старте."""
     global _scheduler_task, _start_time, _outbox_publisher
     _start_time = datetime.now(timezone.utc)
-    log_event("info", "Starting Cognitive Core", version="0.2.0")
+    log_event("info", "Starting Cognitive Core", version=__version__)
     await init_db()
     await init_redis()
     init_s3()
@@ -60,7 +62,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Cognitive Core",
     description="5-слойная система памяти с AI-куратором",
-    version="0.2.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -206,7 +208,7 @@ async def health():
 
     return {
         "healthy": all_ok,
-        "version": "0.2.0",
+        "version": __version__,
         "services": status,
         "layers": layers,
         "db_size_mb": db_size_mb,
