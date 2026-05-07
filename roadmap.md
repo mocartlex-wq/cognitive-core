@@ -232,25 +232,38 @@ git init (30мин)
 
 **Цель:** MVP набор примитивов для inter-agent communication поверх Cognitive Core, без полноценного chat-UI или workflow-engine.
 
-**MVP scope (после DS-консультации сужен до 4 ядерных примитивов):**
+**MVP scope** (финальный после двух раундов DS):
+
+Делится на два слоя — durable agent-protocol (через L1) и fast realtime (через Redis L0).
+
+**Durable layer — agent protocol:**
 
 | # | Задача | Эффорт | Done-критерий |
 |---|---|---|---|
-| 1 | Agent identity / registry endpoint (`POST /agents/register`) | 4 часа | каждый агент имеет уникальный agent_id + project + capabilities в `agent_states` |
-| 2 | Direct messages (events с `domain=agent_inbox`, `payload.to=<recipient>`) | 1 день | агент A пишет, агент B видит через `cognitive_recall` или `GET /agents/<id>/inbox` |
-| 3 | Presence + heartbeat (агент пишет `last_heartbeat` + `current_task` каждые 30 сек) | 4 часа | `GET /agents/online?project=X` показывает who's online + что делает |
-| 4 | Realtime push через SSE (`GET /agents/<id>/stream`) | 1 день | новые messages приходят без polling |
-| 5 | Per-agent rate-limit на write-операции | 4 часа | spam от одного бот-агента не валит общий поток |
-| 6 | Mini-CLI обвязка для Python (cognitive-client) | 4 часа | агент в одну строку: `client.message(to="B", text="...")`, `client.online("project")` |
-| 7 | Тесты на concurrent messages + race conditions на agent_states | 1 день | покрыто 30+ тестами |
+| 1 | Agent identity / registry (`POST /agents/register`) | 4 часа | уникальный agent_id + project + capabilities в `agent_states` |
+| 2 | Direct messages (durable, через L1 events `domain=agent_inbox`) | 1 день | агент A пишет, агент B видит через `cognitive_recall` или `GET /agents/<id>/inbox`, переживает рестарт |
+| 3 | Realtime push через SSE (`GET /agents/<id>/stream`) | 1 день | сообщения приходят без polling |
+| 4 | Per-agent rate-limit на write-операции | 4 часа | spam от одного агента не валит общий поток |
 
-**Отложено в v0.5.6 (после первого использования MVP):**
+**Fast L0 layer (Redis) — все 5 примитивов:**
 
-| # | Задача | Когда брать |
+| # | Примитив | Эффорт | Use-case |
+|---|---|---|---|
+| 5 | Blackboard (Redis hash `project:<name>:state` + TTL) | 4 часа | общее состояние проекта, current_branch / phase / blockers |
+| 6 | Presence + heartbeat (Redis hash с TTL 60s, ping каждые 30s) | 4 часа | `GET /agents/online?project=X` |
+| 7 | Scratchpad (Redis LIST capped 1000, TTL 7 дней) | 4 часа | быстрый координационный чат проекта |
+| 8 | Pub/Sub channels по project | 4 часа | мгновенные уведомления (commit, deploy, build done) |
+| 9 | Coordination locks (Redis SETNX с TTL) | 4 часа | take-lock-before-edit на shared files |
+
+**Обвязка и тесты:**
+
+| # | Задача | Эффорт |
 |---|---|---|
-| 8 | Broadcast / project channels | если N директмесседжей становятся ущербом |
-| 9 | Coordination locks (advisory) | если ловим race-conditions на shared files в реальной работе |
-| 10 | Web chat-UI для observability | если CLI неудобно — nice-to-have |
+| 10 | `cognitive-client` Python SDK: `heartbeat()`, `lock()`, `chat()`, `state[]`, `events.subscribe()` | 1 день |
+| 11 | Тесты на concurrent messages, race conditions на locks, presence TTL | 1 день |
+| 12 | Документация — `MULTI_AGENT.md` с примерами + `AGENT_HANDOFF.md` (готов) + `FAST_MEMORY.md` (готов) | 4 часа |
+
+**Эффорт суммарно:** ~7-8 рабочих дней.
 
 **Definition of Done v0.5.5:** запускаем 3 агента на разных машинах, каждый видит presence остальных через `GET /agents/online`, шлёт direct messages, новые messages приходят push-ом через SSE без polling-а. Документация — в `MULTI_AGENT.md`.
 
