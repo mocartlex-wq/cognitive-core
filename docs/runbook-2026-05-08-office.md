@@ -1,7 +1,18 @@
 # Runbook 2026-05-08 — офисная сессия
 
-Owner возвращается в офис 2026-05-08 — будет LAN-доступ к серверу через `192.168.0.118`.
-Этот runbook закрывает все sudo-задачи которые накопились пока WG/Tailscale/WAN-SSH не работали.
+> **STATUS: COMPLETED 2026-05-08 ~07:30 UTC.** Все задачи выполнены. Этот документ остаётся как post-mortem + reference для будущих похожих ситуаций.
+
+Owner вернулся в офис 2026-05-08 — был LAN-доступ к серверу через `192.168.0.118`.
+Этот runbook закрыл все sudo-задачи которые накопились пока WG/Tailscale/WAN-SSH не работали.
+
+## Реальная причина вчерашнего блока (post-mortem)
+
+Вчерашняя гипотеза «fail2ban забанил общий NAT 207.211.215.149» оказалась **неверной**:
+- На сервере fail2ban не установлен вообще (`fail2ban-client: command not found`)
+- Реальная причина: **TP-LINK не имел port-forward для 22**, поэтому никакой WAN-клиент не мог дойти до sshd. Все ходили через Tailscale subnet routing → 192.168.0.118. Когда TS упал — WAN-канала просто не существовало.
+- AdGuard VPN exits показывали тот же общий IP `207.211.215.149` потому что это **выходной шлюз AdGuard**, не общий NAT провайдера. Это сбило диагностику.
+
+Урок: проверять цепочку маршрутизации (port-forward → UFW → sshd → fail2ban) **сверху вниз**, а не снизу вверх. См. `feedback_emergency_channel_design.md`.
 
 ## Контекст (что сегодня случилось)
 
@@ -107,9 +118,33 @@ curl -s -X POST -H "X-API-Key: 06861b566ab1c2d468d9284175051378f934968abefc5a847
   }'
 ```
 
-### 5. OOB SSH-порт 2222 (v0.5.0-prod task #9)
+### 5. OOB SSH-порт 2222 (v0.5.0-prod task #9) — DONE 2026-05-08
 
-Чтобы не повторился сегодняшний сценарий (главный 22 забанен → нет SSH вообще), поднимаем альтернативный порт.
+Применённый setup (отличается от изначально запланированного — fail2ban нет, поэтому отдельный jail не нужен):
+
+```bash
+# UFW
+sudo ufw allow 2222/tcp comment "OOB SSH emergency channel"
+
+# sshd Match-block (только key-auth, AllowUsers, MaxAuthTries=3)
+sudo tee /etc/ssh/sshd_config.d/cognitive-oob-2222.conf > /dev/null << 'CONF'
+Match LocalPort 2222
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitRootLogin no
+    AllowUsers salex
+    MaxAuthTries 3
+CONF
+sudo sshd -t && sudo systemctl reload ssh
+
+# TP-LINK Virtual Server: 2222 → 192.168.0.118:2222 TCP (через web-UI 192.168.0.1)
+```
+
+Тестировано 2026-05-08 07:27 UTC через AdGuard VPN exit (Datacamp Frankfurt) — OK.
+
+Использование из дома: `ssh -p 2222 -i ~/.ssh/cogcore_lan salex@94.181.169.239`
+
+**Важно: MaxStartups и LoginGraceTime — global-only директивы**, в Match-block их класть нельзя (sshd reload падает с status=255).
 
 #### 5.1. sshd
 
