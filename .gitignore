@@ -58,3 +58,7 @@ backups/
 # Production env files
 .env.production
 .env.local-prod-test
+
+# Local edit backups created by sed -i and similar (e.g. .bak.20260508-065910)
+*.bak
+*.bak.[0-9]*
