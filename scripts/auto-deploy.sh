@@ -53,14 +53,14 @@ if ! git diff-index --quiet HEAD 2>/dev/null; then
     DIRTY_FILES=$(git status --short 2>/dev/null | head -5 | tr '\n' '|')
     log "ABORT: working tree dirty, refusing to pull. Run 'sudo git reset --hard origin/main' after committing your changes."
     log "dirty files: $DIRTY_FILES"
-    SENTINEL=/var/run/cognitive-deploy-dirty.alerted
+    SENTINEL=/var/run/cognitive/deploy-dirty.alerted
     if [ ! -f "$SENTINEL" ] || [ $(( $(date +%s) - $(stat -c %Y "$SENTINEL" 2>/dev/null || echo 0) )) -gt 3600 ]; then
         /usr/local/bin/cognitive-notify.sh "auto-deploy: server tree DIRTY, pull blocked. Run: sudo git reset --hard origin/main. Files: $DIRTY_FILES" 2>/dev/null
         touch "$SENTINEL"
     fi
     exit 0
 fi
-rm -f /var/run/cognitive-deploy-dirty.alerted 2>/dev/null
+rm -f /var/run/cognitive/deploy-dirty.alerted 2>/dev/null
 
 # Не паникуем если git fetch упал по сети — попробуем в следующий тик
 if ! git fetch --quiet origin "$BRANCH" 2>&1; then
