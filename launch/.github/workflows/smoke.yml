@@ -1,0 +1,85 @@
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"   # daily 05:17 UTC — catches Docker/dependency drift
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify required tools
+        run: |
+          docker --version
+          docker compose version
+          jq --version
+          make --version | head -1
+
+      - name: Validate compose file
+        run: |
+          cp .env.example .env
+          sed -i \
+            -e "s|CHANGE_ME_postgres_password|ci_pwd_$(openssl rand -hex 8)|" \
+            -e "s|CHANGE_ME_minio_access_key|ci_$(openssl rand -hex 6)|" \
+            -e "s|CHANGE_ME_minio_secret_key|ci_$(openssl rand -hex 12)|" \
+            .env
+          docker compose -f docker-compose.public.yml config --quiet
+
+      - name: Validate OpenAPI spec
+        run: |
+          pip install --quiet openapi-spec-validator
+          python -m openapi_spec_validator openapi/rooms.yaml
+
+      - name: ShellCheck the scripts
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./scripts
+          severity: warning
+
+      - name: Bring up the stack
+        run: |
+          docker compose -f docker-compose.public.yml up -d
+          # wait for healthchecks
+          for i in $(seq 1 60); do
+            unhealthy=$(docker compose -f docker-compose.public.yml ps --format json | \
+              jq -r 'select(.Health=="unhealthy" or .Health=="starting") | .Name' | wc -l)
+            [ "$unhealthy" -eq 0 ] && break
+            sleep 2
+          done
+          docker compose -f docker-compose.public.yml ps
+
+      - name: Run smoke test
+        run: bash ./scripts/smoke-test.sh
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.public.yml logs --tail 100
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.public.yml down -v
+
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install --quiet ruff
+      - run: ruff check mcp-wrapper/ extras/
+
+  docs-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v17
+        with:
+          globs: "**/*.md"
+          config: ".markdownlint.json"

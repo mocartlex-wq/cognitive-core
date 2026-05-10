@@ -1,0 +1,142 @@
+# Cognitive Core — example nginx config for the `edge` profile.
+# Copy to ./nginx/nginx.conf, adjust server_name + cert paths, then `make up-edge`.
+#
+# Includes:
+#   * TLS termination (Let's Encrypt friendly)
+#   * Rate limit per X-Room-Key (rooms) and per IP (api)
+#   * CORS for browser-based agents
+#   * Long-poll friendly proxy_read_timeout for /rooms/*/ask
+#   * WebSocket upgrade for NATS WS
+
+user  nginx;
+worker_processes auto;
+events { worker_connections 4096; }
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+    server_tokens off;
+
+    # ── Rate limit zones ──────────────────────────────────────────────
+    # 20 req/s per X-Room-Key, 50 burst, no delay (fast-fail extras).
+    limit_req_zone $http_x_room_key zone=room_key:10m rate=20r/s;
+    # 100 req/min per IP for /rooms create + general API.
+    limit_req_zone $binary_remote_addr zone=ip_general:10m rate=100r/m;
+
+    # ── Logging ───────────────────────────────────────────────────────
+    log_format main '$remote_addr - $remote_user [$time_local] '
+                    '"$request" $status $body_bytes_sent '
+                    '"$http_referer" "$http_user_agent" '
+                    'rt=$request_time uct=$upstream_connect_time';
+    access_log /var/log/nginx/access.log main;
+    error_log  /var/log/nginx/error.log warn;
+
+    # ── Upstreams ────────────────────────────────────────────────────
+    upstream cogcore_api    { server api:8000;     keepalive 32; }
+    upstream cogcore_rooms  { server rooms:9098;   keepalive 32; }
+    upstream cogcore_mcp    { server mcp:8765;     keepalive 8;  }
+    upstream cogcore_nats_ws { server nats:8443;   keepalive 16; }
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+
+    # ── HTTP redirect ────────────────────────────────────────────────
+    server {
+        listen 80 default_server;
+        server_name _;
+        location /.well-known/acme-challenge/ { root /var/www/certbot; }
+        location / { return 301 https://$host$request_uri; }
+    }
+
+    # ── HTTPS main ───────────────────────────────────────────────────
+    server {
+        listen 443 ssl http2;
+        server_name your-domain.example;     # ← edit me
+
+        ssl_certificate     /etc/letsencrypt/live/your-domain.example/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/your-domain.example/privkey.pem;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+        ssl_session_cache   shared:SSL:10m;
+
+        # Browser-friendly CORS (safe defaults — tighten in production).
+        add_header Access-Control-Allow-Origin  $http_origin always;
+        add_header Access-Control-Allow-Methods 'GET,POST,OPTIONS,DELETE,PATCH' always;
+        add_header Access-Control-Allow-Headers 'Authorization,Content-Type,X-Room-Key,X-API-Key' always;
+        add_header Access-Control-Max-Age 86400 always;
+
+        # Generic OPTIONS preflight
+        if ($request_method = OPTIONS) {
+            return 204;
+        }
+
+        # ── Rooms (highest traffic + long-poll) ────────────────────
+        location /rooms {
+            limit_req zone=room_key burst=50 nodelay;
+            limit_req zone=ip_general burst=200 nodelay;
+            limit_req_status 429;
+
+            proxy_pass http://cogcore_rooms;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Long-poll friendly: /ask can hang up to 60s.
+            proxy_read_timeout 75s;
+            proxy_send_timeout 75s;
+            proxy_buffering off;     # stream events, don't buffer
+        }
+
+        # ── Rooms web UI ──────────────────────────────────────────
+        location /ui {
+            proxy_pass http://cogcore_rooms;
+            proxy_set_header Host $host;
+        }
+
+        # ── Cognitive API (memory) ────────────────────────────────
+        location / {
+            limit_req zone=ip_general burst=200 nodelay;
+            proxy_pass http://cogcore_api;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 60s;
+        }
+
+        # ── MCP SSE (Claude Code remote) ──────────────────────────
+        location /mcp/ {
+            proxy_pass http://cogcore_mcp/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+            # SSE — disable buffering, long timeouts.
+            proxy_buffering off;
+            proxy_cache off;
+            chunked_transfer_encoding off;
+            proxy_read_timeout 1h;
+        }
+
+        # ── NATS WebSocket (wake-on-message Variant 2) ────────────
+        location /nats-ws {
+            proxy_pass http://cogcore_nats_ws/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            proxy_read_timeout 1h;
+        }
+
+        # ── Healthcheck for blackbox monitor ──────────────────────
+        location = /health {
+            access_log off;
+            proxy_pass http://cogcore_api/health;
+        }
+    }
+}

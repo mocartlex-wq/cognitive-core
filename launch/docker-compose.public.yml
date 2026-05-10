@@ -1,0 +1,200 @@
+# Cognitive Core — public quickstart compose (DD-launch Day 1).
+#
+# One-file deploy: postgres, redis, minio, nats(WS), api, mcp, rooms, pg-to-nats, nginx.
+# Designed for self-host on Linux/macOS with Docker 20.10+.
+#
+# Quickstart:
+#   cp .env.example .env
+#   make up
+#   open http://localhost:9001/docs
+#
+# Customize per .env. Production hardening: see docs/HARDENING.md.
+
+x-restart: &restart unless-stopped
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # ----- Storage -----
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cognitive_core}
+      POSTGRES_USER: ${POSTGRES_USER:-cognitive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required — see .env.example}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./extras/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cognitive} -d ${POSTGRES_DB:-cognitive_core}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: *restart
+    logging: *logging
+
+  redis:
+    # redis-stack provides RediSearch (FT.* commands) used by the API for
+    # the operative-index search. Plain redis:7-alpine breaks startup.
+    image: redis/redis-stack-server:latest
+    command: >
+      redis-stack-server
+      --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
+      --save 3600 1 300 100 60 10000
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: *restart
+    logging: *logging
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY required}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9002:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: *restart
+    logging: *logging
+
+  nats:
+    image: nats:2.10-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - nats_data:/data
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+      - "127.0.0.1:8443:8443"
+    restart: *restart
+    logging: *logging
+
+  # ----- App -----
+  api:
+    image: ${IMAGE_API:-ghcr.io/cognitive-core/api:latest}
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cognitive}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cognitive_core}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-l4-snapshots}
+      S3_SECURE: "false"
+    ports:
+      - "${API_PORT:-9001}:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      minio:    { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: *restart
+    logging: *logging
+
+  mcp:
+    image: ${IMAGE_API:-ghcr.io/cognitive-core/api:latest}
+    command: python -u -m mcp_server.server --sse
+    environment:
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8765"
+      COGNITIVE_API_URL: "http://api:8000"
+      CC_IN_CONTAINER: "1"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8765:8765"
+    depends_on:
+      api: { condition: service_started }
+    restart: *restart
+    logging: *logging
+
+  rooms:
+    build: ./extras
+    image: ${IMAGE_EXTRAS:-cognitive-core-extras:latest}
+    command: python -u /app/extras/cognitive-rooms.py
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cognitive}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cognitive_core}
+      ROOMS_HOST: "0.0.0.0"
+      ROOMS_PORT: "9098"
+      PROXY_FALLBACK_AFTER: "${PROXY_FALLBACK_AFTER:-5}"
+    volumes:
+      - ./extras:/app/extras:ro
+    ports:
+      - "${ROOMS_PORT:-9098}:9098"
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: *restart
+    logging: *logging
+
+  pg-to-nats:
+    build: ./extras
+    image: ${IMAGE_EXTRAS:-cognitive-core-extras:latest}
+    command: python -u /app/extras/cognitive-pg-to-nats.py
+    environment:
+      PG_DSN: postgresql://${POSTGRES_USER:-cognitive}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cognitive_core}
+      NATS_URL: nats://nats:4222
+      HEALTH_PORT: "9097"
+    volumes:
+      - ./extras:/app/extras:ro
+      - pg_nats_state:/var/lib/cognitive
+    ports:
+      - "127.0.0.1:9097:9097"
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats:     { condition: service_started }
+    restart: *restart
+    logging: *logging
+
+  # ----- Edge (optional, comment out for dev) -----
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["edge"]   # `make up-edge` to enable
+    depends_on:
+      api: { condition: service_started }
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+    restart: *restart
+    logging: *logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  nats_data:
+  pg_nats_state:
+  nginx_logs:

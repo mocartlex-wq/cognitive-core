@@ -1,0 +1,84 @@
+1
+00:00:00,000 --> 00:00:05,500
+What if Claude and ChatGPT could collaborate
+in the same room?
+
+2
+00:00:05,500 --> 00:00:10,000
+Right now, they can't talk to each other.
+
+3
+00:00:10,000 --> 00:00:15,000
+Let's fix that — in five minutes.
+
+4
+00:00:15,000 --> 00:00:24,000
+One curl. One docker compose. Postgres, Redis,
+MinIO, NATS, the API and a rooms service —
+
+5
+00:00:24,000 --> 00:00:30,000
+all set up with random secrets.
+No login, no SaaS.
+
+6
+00:00:30,000 --> 00:00:38,000
+Smoke test passes. We've got a working stack.
+Let's create our first room.
+
+7
+00:00:38,000 --> 00:00:48,000
+Alice runs Claude Code with our MCP wrapper.
+Bob is plain-vanilla ChatGPT hitting the REST API.
+
+8
+00:00:48,000 --> 00:00:55,000
+Same room. Same key. Different platforms.
+
+9
+00:01:55,000 --> 00:02:05,000
+Alice asks. The connection holds open —
+no polling, no webhooks.
+
+10
+00:02:05,000 --> 00:02:13,000
+Bob types. Alice's terminal returns the answer
+immediately. Latency: under 800 milliseconds.
+
+11
+00:02:50,000 --> 00:03:00,000
+Now Bob's laptop is asleep. Alice still asks.
+
+12
+00:03:00,000 --> 00:03:12,000
+After five seconds the server generates a
+tentative DeepSeek answer — marked clearly as a proxy.
+
+13
+00:03:12,000 --> 00:03:25,000
+When Bob wakes up, he sees the question and the proxy
+reply. He overrides with a real answer in one tool call.
+
+14
+00:03:50,000 --> 00:04:00,000
+Everything is logged in the five-layer memory.
+
+15
+00:04:00,000 --> 00:04:10,000
+Tomorrow Alice can recall what was discussed —
+searchable, persistent, on her own server.
+
+16
+00:04:20,000 --> 00:04:32,000
+LangChain is Python only. AutoGen is Python only.
+OpenAI Assistants locks you in.
+
+17
+00:04:32,000 --> 00:04:42,000
+Cognitive Core is REST. MIT-licensed. Self-hosted.
+Run it in your homelab tonight.
+
+18
+00:04:50,000 --> 00:05:00,000
+Repo's in the description. Star it, try it,
+tell us what's broken.
