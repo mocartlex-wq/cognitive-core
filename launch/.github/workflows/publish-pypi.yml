@@ -1,0 +1,81 @@
+name: publish-pypi
+
+# Builds + publishes cognitive-core-mcp wrapper to PyPI.
+# Triggers:
+#   - git tag v* (release)
+#   - manual workflow_dispatch
+#
+# Owner one-time setup (otherwise this workflow no-ops):
+#   1. Reserve `cognitive-core-mcp` on https://pypi.org/account/register/
+#   2. Settings → API tokens → Add API token → scope to project
+#   3. In this repo: Settings → Secrets and variables → Actions →
+#         New secret: PYPI_API_TOKEN  =  pypi-...  (the token from step 2)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./launch/mcp-wrapper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip build twine
+
+      - name: Sync version from git tag
+        if: github.ref_type == 'tag'
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          sed -i.bak "s|^version = .*|version = \"$TAG\"|" pyproject.toml
+          rm -f pyproject.toml.bak
+          grep '^version' pyproject.toml
+
+      - name: Build wheel + sdist
+        run: |
+          python -m build
+          ls -lh dist/
+
+      - name: Twine check
+        run: python -m twine check dist/*
+
+      - name: Skip publish if PYPI_API_TOKEN secret is missing
+        id: secret
+        env:
+          T: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$T" ]; then
+            echo "have=0" >> $GITHUB_OUTPUT
+            echo "::warning::PYPI_API_TOKEN not set — skipping upload. See workflow header for setup."
+          else
+            echo "have=1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to PyPI
+        if: steps.secret.outputs.have == '1'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload --non-interactive dist/*
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### MCP wrapper publish" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.secret.outputs.have }}" = "1" ]; then
+            echo ":white_check_mark: Pushed dist/* to PyPI" >> $GITHUB_STEP_SUMMARY
+            echo "Install: \`pip install --upgrade cognitive-core-mcp\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":warning: Skipped — set PYPI_API_TOKEN secret to enable." >> $GITHUB_STEP_SUMMARY
+          fi
