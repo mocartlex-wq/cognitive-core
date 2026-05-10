@@ -149,6 +149,7 @@ services:
       PROXY_FALLBACK_AFTER: "${PROXY_FALLBACK_AFTER:-5}"
     volumes:
       - ./extras:/app/extras:ro
+      - ./docs:/app/extras/docs:ro
     ports:
       - "${ROOMS_PORT:-9098}:9098"
     depends_on:
