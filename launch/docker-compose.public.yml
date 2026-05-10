@@ -96,7 +96,7 @@ services:
 
   # ----- App -----
   api:
-    image: ${IMAGE_API:-ghcr.io/cognitive-core/api:latest}
+    image: ${IMAGE_API:-ghcr.io/mocartlex-wq/cognitive-core-api:latest}
     env_file:
       - .env
     environment:
@@ -120,7 +120,7 @@ services:
     logging: *logging
 
   mcp:
-    image: ${IMAGE_API:-ghcr.io/cognitive-core/api:latest}
+    image: ${IMAGE_API:-ghcr.io/mocartlex-wq/cognitive-core-api:latest}
     command: python -u -m mcp_server.server --sse
     environment:
       MCP_HOST: "0.0.0.0"
@@ -138,7 +138,7 @@ services:
 
   rooms:
     build: ./extras
-    image: ${IMAGE_EXTRAS:-cognitive-core-extras:latest}
+    image: ${IMAGE_EXTRAS:-ghcr.io/mocartlex-wq/cognitive-core-extras:latest}
     command: python -u /app/extras/cognitive-rooms.py
     env_file:
       - .env
@@ -159,7 +159,7 @@ services:
 
   pg-to-nats:
     build: ./extras
-    image: ${IMAGE_EXTRAS:-cognitive-core-extras:latest}
+    image: ${IMAGE_EXTRAS:-ghcr.io/mocartlex-wq/cognitive-core-extras:latest}
     command: python -u /app/extras/cognitive-pg-to-nats.py
     environment:
       PG_DSN: postgresql://${POSTGRES_USER:-cognitive}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cognitive_core}
