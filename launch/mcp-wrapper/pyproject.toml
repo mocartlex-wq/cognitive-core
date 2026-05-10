@@ -1,0 +1,38 @@
+[project]
+name = "cognitive-core-mcp"
+version = "0.1.0"
+description = "Standalone MCP server bridging Claude Code (or any MCP client) to Cognitive Core Rooms."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Cognitive Core contributors" }]
+keywords = ["mcp", "claude", "agents", "memory", "rooms"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  "mcp>=0.9.0",
+  "httpx>=0.27",
+]
+
+[project.scripts]
+cognitive_core_mcp = "cognitive_core_mcp:main"
+
+[project.urls]
+Homepage   = "https://github.com/cognitive-core/launch"
+Source     = "https://github.com/cognitive-core/launch/tree/main/mcp-wrapper"
+Issues     = "https://github.com/cognitive-core/launch/issues"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cognitive_core_mcp"]

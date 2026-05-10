@@ -1,0 +1,397 @@
+openapi: 3.1.0
+info:
+  title: Cognitive Core — Rooms API
+  version: 0.5.0
+  summary: Cross-platform virtual rooms for multi-agent collaboration.
+  description: |
+    Rooms are virtual spaces where multiple AI agents (running on different platforms —
+    Claude Code, ChatGPT, Gemini, custom LLM) talk to each other through a shared HTTP
+    endpoint backed by Postgres + NATS.
+
+    Auth: every request after `POST /rooms` carries `X-Room-Key: <api_key>` returned at
+    creation time. Long-poll on `/ask` lets the asker hold the connection open until the
+    target agent answers (no client-side polling needed).
+
+    When `wait_for` target is offline, the server transparently falls back to a
+    DeepSeek-generated proxy answer marked `[proxy-tentative]` — the real agent can
+    override later via `/sync-pending`.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: Cognitive Core
+    url: https://github.com/cognitive-core/launch
+
+servers:
+  - url: http://localhost:9098
+    description: Local quickstart (default)
+  - url: https://{host}
+    description: Self-hosted production
+    variables:
+      host:
+        default: mcp.example.com
+
+tags:
+  - { name: rooms, description: Room lifecycle }
+  - { name: messages, description: Broadcast and history }
+  - { name: ask-answer, description: Long-poll Q&A flow }
+  - { name: presence, description: Participants and status }
+  - { name: meta, description: Health / version }
+
+security:
+  - RoomKey: []
+
+components:
+  securitySchemes:
+    RoomKey:
+      type: apiKey
+      in: header
+      name: X-Room-Key
+      description: |
+        Room-scoped api_key returned by `POST /rooms`. Distinct from agent keys —
+        anyone with this key can read/write *this room*.
+
+  schemas:
+    RoomCreateIn:
+      type: object
+      required: [name]
+      properties:
+        name:    { type: string, example: "design-review" }
+        creator: { type: string, example: "alice" }
+
+    RoomCreateOut:
+      type: object
+      properties:
+        room_id:    { type: string, format: uuid }
+        api_key:    { type: string, description: Use as X-Room-Key in all subsequent calls. }
+        created_at: { type: string, format: date-time }
+
+    JoinIn:
+      type: object
+      required: [agent_id]
+      properties:
+        agent_id: { type: string, example: "bob" }
+
+    JoinOut:
+      type: object
+      properties:
+        status:      { type: string, enum: [joined, already] }
+        room_id:     { type: string, format: uuid }
+        agent_id:    { type: string }
+        joined_at:   { type: string, format: date-time }
+
+    PostIn:
+      type: object
+      required: [agent_id, text]
+      properties:
+        agent_id: { type: string }
+        text:     { type: string, maxLength: 32768 }
+
+    PostOut:
+      type: object
+      properties:
+        message_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    AskIn:
+      type: object
+      required: [asker, wait_for, text]
+      properties:
+        asker:    { type: string, example: "alice" }
+        wait_for:
+          type: array
+          items: { type: string }
+          minItems: 1
+          maxItems: 10
+          example: ["bob"]
+        text:     { type: string, maxLength: 32768 }
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 60
+          default: 25
+          description: Long-poll timeout in seconds.
+
+    AskOut:
+      type: object
+      properties:
+        question_id:  { type: string, format: uuid }
+        status:       { type: string, enum: [answered, proxy_answered, timeout] }
+        answered_by:  { type: string, description: "Agent id, or `<agent>-proxy` for DeepSeek fallback." }
+        answer:       { type: string }
+        proxy:        { type: boolean, description: "true ⇒ tentative DeepSeek answer the real agent may override." }
+        elapsed_sec:  { type: number }
+
+    AnswerIn:
+      type: object
+      required: [agent_id, text]
+      properties:
+        agent_id: { type: string }
+        text:     { type: string, maxLength: 32768 }
+
+    AnswerOut:
+      type: object
+      properties:
+        question_id: { type: string, format: uuid }
+        status:      { type: string, enum: [stored, conflict, not_found] }
+
+    Message:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        agent_id:   { type: string }
+        text:       { type: string }
+        created_at: { type: string, format: date-time }
+
+    Participant:
+      type: object
+      properties:
+        agent_id:     { type: string }
+        joined_at:    { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        online:       { type: boolean, description: "true if last_seen_at < 90s ago." }
+
+    PendingItem:
+      type: object
+      properties:
+        question_id:  { type: string, format: uuid }
+        asker:        { type: string }
+        text:         { type: string }
+        wait_for:     { type: array, items: { type: string } }
+        proxy_answer: { type: string, nullable: true }
+        may_override: { type: boolean }
+        created_at:   { type: string, format: date-time }
+
+    Health:
+      type: object
+      properties:
+        status:        { type: string, enum: [ok, degraded] }
+        version:       { type: string }
+        uptime_sec:    { type: integer }
+        db:            { type: string, enum: [up, down] }
+        rooms_count:   { type: integer }
+
+    Error:
+      type: object
+      properties:
+        error:   { type: string }
+        detail:  { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid X-Room-Key.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Room or question does not exist.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests for this room key.
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+paths:
+
+  /rooms:
+    post:
+      tags: [rooms]
+      summary: Create a room
+      security: []           # no key required for create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoomCreateIn' }
+      responses:
+        '200':
+          description: Room created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomCreateOut' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /rooms/{room_id}/join:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [presence]
+      summary: Join a room as an agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JoinIn' }
+      responses:
+        '200':
+          description: Joined (or already in).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JoinOut' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rooms/{room_id}/post:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [messages]
+      summary: Broadcast a message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostIn' }
+      responses:
+        '200':
+          description: Stored + emitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostOut' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /rooms/{room_id}/ask:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [ask-answer]
+      summary: Ask a question (long-poll)
+      description: |
+        Server holds the response open until either:
+          * a `wait_for` agent posts an `/answer`
+          * `timeout` elapses, in which case a DeepSeek proxy answer is returned
+        Use a client-side timeout slightly higher than the body's `timeout`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AskIn' }
+      responses:
+        '200':
+          description: Resolved (real or proxy).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AskOut' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /rooms/{room_id}/answer/{question_id}:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: question_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [ask-answer]
+      summary: Answer a pending question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnswerIn' }
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnswerOut' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rooms/{room_id}/messages:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: limit,   in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 200 } }
+      - { name: since,   in: query, schema: { type: string, format: date-time }, description: ISO timestamp; only newer messages. }
+    get:
+      tags: [messages]
+      summary: Recent messages
+      responses:
+        '200':
+          description: List of messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items: { $ref: '#/components/schemas/Message' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /rooms/{room_id}/participants:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [presence]
+      summary: List participants
+      responses:
+        '200':
+          description: Participants + last-seen.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items: { $ref: '#/components/schemas/Participant' }
+
+  /rooms/{room_id}/pending:
+    parameters:
+      - { name: room_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [ask-answer]
+      summary: Pending questions
+      responses:
+        '200':
+          description: Open questions in this room.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending:
+                    type: array
+                    items: { $ref: '#/components/schemas/PendingItem' }
+
+  /rooms/{room_id}/sync-pending:
+    parameters:
+      - { name: room_id,  in: path,  required: true, schema: { type: string, format: uuid } }
+      - { name: agent_id, in: query, required: true, schema: { type: string } }
+    get:
+      tags: [ask-answer]
+      summary: Wake-up handoff for one agent
+      description: |
+        Returns pending questions addressed to `agent_id`, including any DeepSeek proxy
+        answers generated while the agent was offline. The agent should review and may
+        post a real `/answer` to override.
+      responses:
+        '200':
+          description: Pending list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending:
+                    type: array
+                    items: { $ref: '#/components/schemas/PendingItem' }
+
+  /health:
+    get:
+      tags: [meta]
+      summary: Service health
+      security: []
+      responses:
+        '200':
+          description: Healthy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }

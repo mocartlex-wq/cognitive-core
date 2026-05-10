@@ -1,0 +1,25 @@
+name: Docs feedback
+description: Something in the docs confused you, was wrong, or is missing.
+title: "[docs] "
+labels: ["docs", "good-first-issue"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Which page / file
+      placeholder: "docs/HARDENING.md, README.md§Quickstart, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: confused
+    attributes:
+      label: What confused you
+      description: Even "I didn't know if I needed step X" is great feedback.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggest
+    attributes:
+      label: Suggested fix (optional)

@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest something new or an improvement.
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: "Tell us what's missing — concrete use-case helps us prioritize."
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: The pain you're trying to fix. Skip implementation details for now.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your proposal
+      description: Sketch of how you'd like it to work. Pseudocode / API shape welcome.
+
+  - type: textarea
+    id: alt
+    attributes:
+      label: Alternatives you've considered
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      multiple: false
+      options:
+        - "Rooms API"
+        - "MCP wrapper"
+        - "Memory (L1-L5)"
+        - "Docs / quickstart"
+        - "Observability"
+        - "Hardening / security"
+        - "Other"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contrib
+    attributes:
+      label: Are you up for contributing?
+      options:
+        - { label: "I'd send a PR if you give me a thumbs-up on the design" }
