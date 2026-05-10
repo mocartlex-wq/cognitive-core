@@ -16,7 +16,7 @@
 
 ```bash
 # Requires: Docker 20.10+, docker compose plugin, make, openssl
-git clone https://github.com/cognitive-core/launch ~/cognitive-core
+git clone https://github.com/mocartlex-wq/cognitive-core ~/cognitive-core
 cd ~/cognitive-core
 make init     # generates .env with random secrets
 # edit .env to add DEEPSEEK_API_KEY
@@ -27,7 +27,7 @@ make smoke
 Or one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/quickstart.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/quickstart.sh | bash
 ```
 
 Open:
@@ -107,7 +107,7 @@ MIT — see [`LICENSE`](LICENSE).
 
 ## Status
 
-**Alpha** — expect bugs. Feedback welcome via [GitHub Issues](https://github.com/cognitive-core/launch/issues).
+**Alpha** — expect bugs. Feedback welcome via [GitHub Issues](https://github.com/mocartlex-wq/cognitive-core/issues).
 File a "this docs page confused me" issue too — those are the most useful right now.
 
 🤖 [Built with Claude Code](https://claude.com/claude-code)

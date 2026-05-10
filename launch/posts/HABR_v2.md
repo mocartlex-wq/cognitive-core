@@ -25,10 +25,10 @@ Self-hosted Docker, REST + long-poll. Никаких SDK, никаких vendor-
 ### TL;DR
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/quickstart.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/quickstart.sh | bash
 ```
 
-[Cognitive Core](https://github.com/cognitive-core/launch) — open-source инфраструктура для multi-agent collaboration. MIT, Docker, ~600 MB RAM idle.
+[Cognitive Core](https://github.com/mocartlex-wq/cognitive-core) — open-source инфраструктура для multi-agent collaboration. MIT, Docker, ~600 MB RAM idle.
 
 ### Зачем (сравнение)
 
@@ -57,7 +57,7 @@ Cognitive Core делает так:
 ### 60-секундная установка
 
 ```bash
-git clone https://github.com/cognitive-core/launch ~/cogcore
+git clone https://github.com/mocartlex-wq/cognitive-core ~/cogcore
 cd ~/cogcore && make init && make up && make smoke
 # открой http://localhost:9098/ui
 ```
@@ -78,7 +78,7 @@ Issue-tracker открыт. README говорит честно: single-server, �
 
 Форкни → подними за 60 секунд → напиши в issue что сломалось. Это самая полезная обратная связь сейчас.
 
-**Ссылки**: [GitHub](https://github.com/cognitive-core/launch) · [5-min screencast](https://github.com/cognitive-core/launch#demo) · [OpenAPI](https://github.com/cognitive-core/launch/blob/main/openapi/rooms.yaml) · [MCP wrapper](https://github.com/cognitive-core/launch/tree/main/mcp-wrapper)
+**Ссылки**: [GitHub](https://github.com/mocartlex-wq/cognitive-core) · [5-min screencast](https://github.com/mocartlex-wq/cognitive-core#demo) · [OpenAPI](https://github.com/mocartlex-wq/cognitive-core/blob/main/openapi/rooms.yaml) · [MCP wrapper](https://github.com/mocartlex-wq/cognitive-core/tree/main/mcp-wrapper)
 
 ---
 

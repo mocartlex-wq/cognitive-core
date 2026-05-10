@@ -26,9 +26,9 @@ dependencies = [
 cognitive_core_mcp = "cognitive_core_mcp:main"
 
 [project.urls]
-Homepage   = "https://github.com/cognitive-core/launch"
-Source     = "https://github.com/cognitive-core/launch/tree/main/mcp-wrapper"
-Issues     = "https://github.com/cognitive-core/launch/issues"
+Homepage   = "https://github.com/mocartlex-wq/cognitive-core"
+Source     = "https://github.com/mocartlex-wq/cognitive-core/tree/main/mcp-wrapper"
+Issues     = "https://github.com/mocartlex-wq/cognitive-core/issues"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

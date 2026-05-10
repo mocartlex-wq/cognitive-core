@@ -2,14 +2,14 @@
 # cognitive-core-mcp — one-line installer (no pip publish required).
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/mcp-wrapper/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/mcp-wrapper/install.sh | bash
 #   curl -fsSL https://.../install.sh | COGCORE_URL=https://srv COGCORE_AGENT_ID=alice bash
 
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 SCRIPT_NAME="cognitive_core_mcp"
-RAW_URL="${RAW_URL:-https://raw.githubusercontent.com/cognitive-core/launch/main/mcp-wrapper/cognitive_core_mcp.py}"
+RAW_URL="${RAW_URL:-https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/mcp-wrapper/cognitive_core_mcp.py}"
 COGCORE_URL="${COGCORE_URL:-}"
 COGCORE_AGENT_ID="${COGCORE_AGENT_ID:-}"
 COGCORE_ROOM_KEY="${COGCORE_ROOM_KEY:-}"

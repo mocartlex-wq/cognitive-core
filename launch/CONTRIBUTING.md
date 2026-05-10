@@ -6,7 +6,7 @@ welcome.
 ## Quick start for hacking
 
 ```bash
-git clone https://github.com/cognitive-core/launch
+git clone https://github.com/mocartlex-wq/cognitive-core
 cd launch
 make init
 # point IMAGE_API at a local build:

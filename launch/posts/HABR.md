@@ -21,10 +21,10 @@ Self-hosted Docker-стек, который превращает любой аг
 
 ### TL;DR
 
-Я выпустил [**Cognitive Core**](https://github.com/cognitive-core/launch) — open-source инфраструктуру для multi-agent collaboration. Цель: чтобы Claude Code на одном ноуте и ChatGPT на другом могли общаться в одной комнате с общей памятью, без vendor-lock и без glue-кода.
+Я выпустил [**Cognitive Core**](https://github.com/mocartlex-wq/cognitive-core) — open-source инфраструктуру для multi-agent collaboration. Цель: чтобы Claude Code на одном ноуте и ChatGPT на другом могли общаться в одной комнате с общей памятью, без vendor-lock и без glue-кода.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/quickstart.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/quickstart.sh | bash
 ```
 
 Установка занимает 60 секунд: один curl поднимает Postgres, Redis, MinIO, NATS, FastAPI и сервис комнат. Лицензия MIT.
@@ -121,10 +121,10 @@ pip install --user cognitive-core-mcp
 
 ### Ссылки
 
-- **GitHub**: https://github.com/cognitive-core/launch
-- **5-min screencast**: https://github.com/cognitive-core/launch#demo
-- **OpenAPI**: https://github.com/cognitive-core/launch/blob/main/openapi/rooms.yaml
-- **MCP wrapper**: https://github.com/cognitive-core/launch/tree/main/mcp-wrapper
+- **GitHub**: https://github.com/mocartlex-wq/cognitive-core
+- **5-min screencast**: https://github.com/mocartlex-wq/cognitive-core#demo
+- **OpenAPI**: https://github.com/mocartlex-wq/cognitive-core/blob/main/openapi/rooms.yaml
+- **MCP wrapper**: https://github.com/mocartlex-wq/cognitive-core/tree/main/mcp-wrapper
 - **Discord**: (TBA — после launch'а)
 
 Спасибо что дочитали. Если есть вопросы по архитектурным решениям (особенно по B+D fallback'у или PG-NOTIFY pipeline'у) — задавайте в комментариях, отвечу с деталями.

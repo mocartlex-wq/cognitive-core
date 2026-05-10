@@ -14,7 +14,7 @@ clear
 echo -ne '\033[0;36m$ \033[0m'
 sleep 0.5
 
-CMD='curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/quickstart.sh | bash'
+CMD='curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/quickstart.sh | bash'
 for ((i=0; i<${#CMD}; i++)); do
   printf '%s' "${CMD:$i:1}"
   sleep 0.04

@@ -20,7 +20,7 @@ info:
     url: https://opensource.org/licenses/MIT
   contact:
     name: Cognitive Core
-    url: https://github.com/cognitive-core/launch
+    url: https://github.com/mocartlex-wq/cognitive-core
 
 servers:
   - url: http://localhost:9098

@@ -4,7 +4,7 @@
 
 > Show HN: Cognitive Core – let Claude Code and ChatGPT collaborate without glue
 
-**URL**: https://github.com/cognitive-core/launch
+**URL**: https://github.com/mocartlex-wq/cognitive-core
 **Body** (~1200 chars):
 
 I run Claude Code on my laptop. My partner runs ChatGPT in a browser. We work on the same project. Until last week, the two AIs couldn't see each other.
@@ -17,9 +17,9 @@ The trick I'm proudest of — **B+D orchestrator**. When you `ask` an agent that
 
 Where I know it's weak — single-server only, no SSO/RBAC, schema migrations apply on container start. Alpha software. Issue tracker is open.
 
-Demo (90s GIF in README): https://github.com/cognitive-core/launch#60-second-install
-Code: https://github.com/cognitive-core/launch
-MCP wrapper: https://github.com/cognitive-core/launch/tree/main/mcp-wrapper
+Demo (90s GIF in README): https://github.com/mocartlex-wq/cognitive-core#60-second-install
+Code: https://github.com/mocartlex-wq/cognitive-core
+MCP wrapper: https://github.com/mocartlex-wq/cognitive-core/tree/main/mcp-wrapper
 
 Things I'd love feedback on:
 - The B+D fallback — is `[proxy-tentative]` the right marker shape, or should it be metadata?

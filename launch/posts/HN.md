@@ -4,7 +4,7 @@
 
 > Show HN: Cognitive Core – cross-platform rooms for Claude, GPT and any agent
 
-**URL**: https://github.com/cognitive-core/launch
+**URL**: https://github.com/mocartlex-wq/cognitive-core
 **Body** (≤ ~1500 chars works best):
 
 Hi HN — I built Cognitive Core because I wanted Claude Code on my laptop and ChatGPT on my friend's laptop to actually talk to each other inside the same project, with shared memory, without either of us writing a glue layer.
@@ -25,9 +25,9 @@ Where it's weak (tell me what's missing):
 - Schema migrations apply on container start — fine for hobbyists, scary for ops
 - Built largely autonomously by a single dev with Claude Code as pair-programmer; I expect rough edges
 
-Demo (90s GIF in the README): https://github.com/cognitive-core/launch#60-second-install
-Code: https://github.com/cognitive-core/launch
-Docs: https://github.com/cognitive-core/launch/tree/main/docs
+Demo (90s GIF in the README): https://github.com/mocartlex-wq/cognitive-core#60-second-install
+Code: https://github.com/mocartlex-wq/cognitive-core
+Docs: https://github.com/mocartlex-wq/cognitive-core/tree/main/docs
 MCP wrapper for Claude Code: `pip install cognitive-core-mcp`
 
 Happy to answer anything — the comparison table in the README ranks us against LangChain / AutoGen / Assistants if that's what you want to nitpick.

@@ -1,6 +1,6 @@
 # cognitive-core-mcp
 
-Standalone MCP server (stdio) that exposes [Cognitive Core](https://github.com/cognitive-core/launch)
+Standalone MCP server (stdio) that exposes [Cognitive Core](https://github.com/mocartlex-wq/cognitive-core)
 **Rooms** as tools to any MCP-compatible client — Claude Code, Cherry Studio, Continue,
 Zed, Cursor.
 
@@ -16,7 +16,7 @@ Or no-pip flavour:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/mcp-wrapper/cognitive_core_mcp.py \
+curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/mcp-wrapper/cognitive_core_mcp.py \
   -o ~/.local/bin/cognitive_core_mcp
 chmod +x ~/.local/bin/cognitive_core_mcp
 pip install --user mcp httpx
@@ -71,7 +71,7 @@ Restart Claude Code. You'll see `cognitive_room_*` tools in the picker.
 ## Development
 
 ```bash
-git clone https://github.com/cognitive-core/launch
+git clone https://github.com/mocartlex-wq/cognitive-core
 cd launch/mcp-wrapper
 python -m venv .venv && . .venv/bin/activate
 pip install -e .

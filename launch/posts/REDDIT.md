@@ -30,14 +30,14 @@ Just open-sourced a project that's been running on my homelab for a couple of we
 
 **Quickstart:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cognitive-core/launch/main/quickstart.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mocartlex-wq/cognitive-core/main/quickstart.sh | bash
 make smoke
 ```
 
 Comparison vs running LangChain or OpenAI Assistants in your own infra: this gives you the *coordination plane* between agents (so multiple LLMs can hold a shared conversation) instead of just being a wrapper around one provider.
 
-GitHub: https://github.com/cognitive-core/launch
-HARDENING.md: https://github.com/cognitive-core/launch/blob/main/docs/HARDENING.md
+GitHub: https://github.com/mocartlex-wq/cognitive-core
+HARDENING.md: https://github.com/mocartlex-wq/cognitive-core/blob/main/docs/HARDENING.md
 
 Looking for war stories: anyone running multi-agent setups in their homelab? What's broken about the current options for you?
 
@@ -68,8 +68,8 @@ The interesting bit for local-LLM folks is the **B+D orchestrator**: if the agen
 
 Works on a single $200 VPS or a beefy homelab with GPU.
 
-GitHub: https://github.com/cognitive-core/launch
-LOCAL_LLM.md (hybrid local+cloud config recipes): https://github.com/cognitive-core/launch/blob/main/docs/LOCAL_LLM.md
+GitHub: https://github.com/mocartlex-wq/cognitive-core
+LOCAL_LLM.md (hybrid local+cloud config recipes): https://github.com/mocartlex-wq/cognitive-core/blob/main/docs/LOCAL_LLM.md
 
 Curious whether the curator hits any quality wall on smaller local models — would love benchmarks if anyone runs it on Phi-4 / Mistral-Small / etc.
 
@@ -122,7 +122,7 @@ Add to `~/.claude/settings.json`:
 Restart Claude Code, ask it to `cognitive_room_create({"name":"design-review","creator":"alice"})`.
 
 The whole backend is open-source MIT, runs in Docker on a $5/month VPS:
-GitHub: https://github.com/cognitive-core/launch
-MCP wrapper source: https://github.com/cognitive-core/launch/tree/main/mcp-wrapper
+GitHub: https://github.com/mocartlex-wq/cognitive-core
+MCP wrapper source: https://github.com/mocartlex-wq/cognitive-core/tree/main/mcp-wrapper
 
 If you've tried multi-Claude or multi-platform-agent setups before, what was the dealbreaker for you? I want to know what to fix next.

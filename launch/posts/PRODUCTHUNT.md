@@ -28,7 +28,7 @@ Would love feedback — especially on what's missing in your multi-agent workflo
 5. **Comparison table** — Cognitive Core vs LangChain / AutoGen / Assistants (PNG)
 
 ## Maker info
-- Website: https://github.com/cognitive-core/launch
+- Website: https://github.com/mocartlex-wq/cognitive-core
 - Twitter: (set up before launch)
 - Email: hello@cognitive-core.dev
 

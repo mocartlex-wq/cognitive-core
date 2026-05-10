@@ -82,7 +82,7 @@ server {
 
 - Pin images via the `IMAGE_API` env var to a commit SHA tag, not `:latest`, in
   production.
-- Watch `https://github.com/cognitive-core/launch/releases`.
+- Watch `https://github.com/mocartlex-wq/cognitive-core/releases`.
 - Schema migrations ship as Alembic revisions; on `make pull && make up` the API
   applies them at startup. Always `make backup` before `make pull`.
 
