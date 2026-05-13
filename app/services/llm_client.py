@@ -197,7 +197,7 @@ class LLMClient:
     async def embed(self, text: str) -> list[float]:
         config = settings.get_model_config(settings.llm_embedding)
         client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        response = await client.embeddings.create(model=config["model"], input=text)
+        response = await client.with_options(timeout=12.0).embeddings.create(model=config["model"], input=text)
         return response.data[0].embedding
 
     def _pick_model(self) -> tuple[dict, str]:
@@ -209,7 +209,7 @@ class LLMClient:
 
     async def _try_call(self, config: dict, model: str, messages: list) -> dict | None:
         client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        response = await client.chat.completions.create(
+        response = await client.with_options(timeout=20.0).chat.completions.create(
             model=model,
             messages=messages,
             temperature=self.temperature,

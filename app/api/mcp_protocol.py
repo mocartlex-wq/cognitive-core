@@ -503,17 +503,22 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         return await _call_self(request, "GET", f"/agents/{agent_id}/history", params=params, timeout_s=5.0)
 
     if name == "cognitive_my_events":
-        # Raw L1 events from this agent
+        # Raw L1 events from this agent — fetch /dashboard/recent-events + filter
         agent_id = await _resolve_agent(request)
-        params = {
-            "agent": agent_id,
-            "limit": min(max(int(a.get("limit", 20)), 1), 200),
-        }
-        # Try /events list endpoint, fall back gracefully
-        result = await _call_self(request, "GET", "/events", params=params, timeout_s=5.0)
-        if isinstance(result, dict) and result.get("_status") in (404, None) and "_error" not in result:
-            # Endpoint may not exist, try alternative
-            result = await _call_self(request, "GET", "/dashboard/events", params=params, timeout_s=5.0)
+        limit = min(max(int(a.get("limit", 20)), 1), 200)
+        # Fetch a wider window then filter in Python (endpoint has no agent filter)
+        result = await _call_self(
+            request, "GET", "/dashboard/recent-events",
+            params={"limit": min(limit * 5, 500)}, timeout_s=5.0,
+        )
+        # /dashboard/recent-events returns {"items": [...], "count": N}
+        # Items have field "agent" (not "source_agent")
+        if isinstance(result, dict) and "items" in result:
+            events = [
+                e for e in result.get("items", [])
+                if e.get("agent") == agent_id or e.get("source_agent") == agent_id
+            ][:limit]
+            return {"agent_id": agent_id, "count": len(events), "events": events}
         return result
 
     if name == "cognitive_agent_manifest":
