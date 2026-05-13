@@ -7,9 +7,123 @@
 <meta name="color-scheme" content="dark">
 <meta name="darkreader-lock">
 <meta name="theme-color" content="#0a0e14">
-<link rel="stylesheet" href="/static/shared.css?v=20260506a">
-<link rel="stylesheet" href="/static/glass.css?v=20260506a">
-<style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }</style>
+<link rel="stylesheet" href="/static/shared.css?v=20260512o">
+<link rel="stylesheet" href="/static/glass.css?v=20260512o">
+<style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }
+
+
+  /* === Growth dashboard (v2 redesigned 2026-05-12) === */
+  .growth-block {
+    margin: 30px auto 0; max-width: 820px; padding: 22px 24px 18px;
+    background: var(--glass-bg); backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border); border-radius: 16px;
+    box-shadow: var(--glass-shadow);
+  }
+  .growth-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; gap: 16px; flex-wrap: wrap;
+  }
+  .growth-head .title {
+    font-size: 12px; font-weight: 600; letter-spacing: 1.4px;
+    color: var(--glass-text-dim); text-transform: uppercase;
+  }
+  .growth-head .period {
+    display: inline-flex; gap: 2px; background: rgba(255,255,255,.04);
+    border: 1px solid var(--glass-border); border-radius: 8px; padding: 2px;
+  }
+  .growth-head .period button {
+    background: transparent; border: 0; color: var(--glass-text-soft);
+    padding: 5px 11px; border-radius: 6px; font-size: 11.5px; cursor: pointer;
+    font-weight: 500; transition: background .15s, color .15s;
+  }
+  .growth-head .period button:hover { color: var(--glass-text); }
+  .growth-head .period button.active {
+    background: rgba(88,166,255,.18); color: #fff;
+  }
+
+  .growth-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 640px) { .growth-stats { grid-template-columns: repeat(2, 1fr); } }
+  .gs-card {
+    background: rgba(255,255,255,.03); border: 1px solid var(--glass-border);
+    border-radius: 12px; padding: 10px 14px; position: relative;
+  }
+  .gs-card .lbl {
+    font-size: 11px; color: var(--glass-text-dim); text-transform: uppercase;
+    letter-spacing: .6px; margin-bottom: 4px;
+  }
+  .gs-card .val {
+    font-size: 26px; font-weight: 700; line-height: 1.1;
+    color: var(--glass-text); font-variant-numeric: tabular-nums;
+  }
+  .gs-card .delta {
+    font-size: 11px; color: var(--glass-text-soft); margin-top: 2px;
+    font-weight: 500;
+  }
+  .gs-card .delta.up { color: #3fb950; }
+  .gs-card .delta.down { color: #f85149; }
+  .gs-card.active .live {
+    position: absolute; top: 12px; right: 12px; width: 8px; height: 8px;
+    border-radius: 50%; background: #3fb950;
+    box-shadow: 0 0 10px rgba(63,185,80,.8);
+    animation: pulse 2s infinite;
+  }
+
+  .growth-chart-wrap { position: relative; padding-left: 36px; padding-bottom: 22px; }
+  .growth-chart {
+    width: 100%; height: 110px; display: block;
+    overflow: visible;
+  }
+  .growth-chart .grid-line { stroke: rgba(255,255,255,.05); stroke-width: 1; }
+  .growth-chart .bar {
+    fill: url(#barGrad); rx: 1; transition: opacity .15s;
+  }
+  .growth-chart .bar:hover { opacity: 1; filter: brightness(1.4); }
+  .growth-chart .bar.today { fill: url(#barGradHot); }
+  .growth-chart .agent-dot {
+    fill: #bc8cff; stroke: rgba(0,0,0,.4); stroke-width: 1;
+    filter: drop-shadow(0 0 4px rgba(188,140,255,.55));
+  }
+  .growth-yaxis {
+    position: absolute; left: 0; top: 0; bottom: 22px; width: 32px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    font-size: 10px; color: var(--glass-text-dim); text-align: right;
+    padding-right: 6px; font-variant-numeric: tabular-nums;
+  }
+  .growth-xaxis {
+    position: absolute; left: 36px; right: 0; bottom: 0;
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--glass-text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .growth-tooltip {
+    position: absolute; pointer-events: none; opacity: 0;
+    background: rgba(0,0,0,.92); color: #fff; padding: 8px 12px;
+    border-radius: 8px; font-size: 12px; line-height: 1.5;
+    border: 1px solid rgba(255,255,255,.1); white-space: nowrap;
+    transform: translate(-50%, -110%); z-index: 10;
+    transition: opacity .15s; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  }
+  .growth-tooltip.show { opacity: 1; }
+  .growth-tooltip .date { color: var(--glass-text-dim); font-size: 11px;
+                          margin-bottom: 3px; }
+  .growth-tooltip .events { color: #58a6ff; font-weight: 600; }
+  .growth-tooltip .agents { color: #bc8cff; font-weight: 600; }
+  .growth-legend {
+    display: flex; justify-content: center; gap: 22px; margin-top: 12px;
+    font-size: 11.5px; color: var(--glass-text-soft);
+  }
+  .growth-legend .swatch {
+    width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+    vertical-align: middle; margin-right: 5px;
+  }
+  .growth-legend .swatch.events { background: linear-gradient(180deg,#58a6ff,#1f6fdb); }
+  .growth-legend .swatch.agents { background: #bc8cff; border-radius: 50%; }
+
+</style>
 <link rel="stylesheet" href="/static/vendor/shepherd.css">
 <style>
   /* Page-specific overrides */
@@ -547,7 +661,8 @@
   </a>
   <nav class="top-nav">
     <a href="/" class="active">Главная</a>
-    <a href="/ui">Дашборд</a>
+    <a href="/ui/team">AI-чат</a>
+    <a href="/ui">Комнаты</a>
     <a href="/sandbox">API</a>
   </nav>
   <div class="top-status">
@@ -567,8 +682,9 @@
     <h1>Cognitive Core</h1>
     <p class="tagline">5-слойная самохостимая память для AI-агентов с автоматической консолидацией опыта в долгосрочные знания.</p>
     <div class="glass-hero-actions">
-      <button class="glass-btn glass-btn-primary" onclick="openDemo()">Запустить демо</button>
-      <a href="/ui" class="glass-btn glass-btn-ghost">Открыть дашборд</a>
+      <a href="/ui/team" class="glass-btn glass-btn-primary">💬 Открыть AI-чат</a>
+      <a href="/ui" class="glass-btn glass-btn-ghost">📥 Войти в комнату</a>
+      <button class="glass-btn glass-btn-ghost" onclick="openDemo()" style="margin-left:8px">▶ Демо 2 мин</button>
     </div>
   </section>
 
@@ -580,6 +696,69 @@
     <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-tools">—</div><div class="glass-pulse-lbl">инструменты</div></div>
     <div class="glass-pulse-item"><div class="glass-pulse-num" id="p-l4">—</div><div class="glass-pulse-lbl">L4 снапшоты</div></div>
   </div>
+  <!-- Growth dashboard v2 (added 2026-05-12) -->
+  <section class="growth-block" id="growth-block">
+    <div class="growth-head">
+      <div class="title">Тенденция роста</div>
+      <div class="period" role="tablist">
+        <button data-range="7" type="button">7 дн</button>
+        <button data-range="14" type="button">14 дн</button>
+        <button data-range="30" type="button" class="active">30 дн</button>
+      </div>
+    </div>
+    <div class="growth-stats">
+      <div class="gs-card active">
+        <div class="live"></div>
+        <div class="lbl">Сейчас онлайн</div>
+        <div class="val" id="gs-active">—</div>
+        <div class="delta" id="gs-active-d">heartbeat за 5 мин</div>
+      </div>
+      <div class="gs-card">
+        <div class="lbl">Активны за неделю</div>
+        <div class="val" id="gs-week">—</div>
+        <div class="delta" id="gs-week-d">уникальных агентов</div>
+      </div>
+      <div class="gs-card">
+        <div class="lbl">Всего агентов</div>
+        <div class="val" id="gs-total">—</div>
+        <div class="delta" id="gs-total-d">за всё время</div>
+      </div>
+      <div class="gs-card">
+        <div class="lbl">Событий <span id="gs-period-lbl">30 дней</span></div>
+        <div class="val" id="gs-events">—</div>
+        <div class="delta" id="gs-events-d"></div>
+      </div>
+    </div>
+    <div class="growth-chart-wrap">
+      <div class="growth-yaxis" id="g-yaxis">
+        <span>0</span><span>0</span><span>0</span>
+      </div>
+      <svg class="growth-chart" id="growth-svg" viewBox="0 0 720 110" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#58a6ff" stop-opacity=".95"/>
+            <stop offset="100%" stop-color="#1f6fdb" stop-opacity=".6"/>
+          </linearGradient>
+          <linearGradient id="barGradHot" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3fb950" stop-opacity="1"/>
+            <stop offset="100%" stop-color="#2a8c39" stop-opacity=".7"/>
+          </linearGradient>
+        </defs>
+        <g id="grid"></g>
+        <g id="bars"></g>
+        <g id="agent-dots"></g>
+      </svg>
+      <div class="growth-xaxis" id="g-xaxis"></div>
+      <div class="growth-tooltip" id="g-tip"></div>
+    </div>
+    <div class="growth-legend">
+      <span><span class="swatch events"></span>L1 события / день</span>
+      <span><span class="swatch agents"></span>Уникальных агентов / день</span>
+      <span style="color: var(--glass-text-dim)">сегодня — <span style="color:#3fb950">зелёный</span></span>
+    </div>
+  </section>
+
+
 
   <!-- ============ FLOW ============ -->
   <div class="glass-section-h">
@@ -638,10 +817,15 @@
     <h2>Что можно сделать</h2>
   </div>
   <div class="glass-actions">
+    <a href="/ui/team" class="glass-action-card" style="border:2px solid rgba(74,125,255,0.5)">
+      <div class="glass-action-icon">💬</div>
+      <div class="glass-action-title">AI-чат с командой</div>
+      <div class="glass-action-desc">Поговори с тремя AI-помощниками: market-analyst, tech-разработчик, или general helper. Работает с телефона.</div>
+    </a>
     <a href="/ui" class="glass-action-card">
-      <div class="glass-action-icon"><svg class="icon icon-lg"><use href="#dashboard"/></svg></div>
-      <div class="glass-action-title">Дашборд</div>
-      <div class="glass-action-desc">Состояние памяти, графики, аудит, обозреватель знаний и доменов.</div>
+      <div class="glass-action-icon">🏠</div>
+      <div class="glass-action-title">Комнаты</div>
+      <div class="glass-action-desc">Войди в существующую комнату по room-key или создай новую через API. Координация нескольких агентов в одной комнате.</div>
     </a>
     <a href="/sandbox" class="glass-action-card">
       <div class="glass-action-icon"><svg class="icon icon-lg"><use href="#api"/></svg></div>
@@ -884,6 +1068,150 @@ setInterval(loadStatus, 5000);
 <script src="/static/theme.js"></script>
 <script src="/static/vendor/shepherd.min.js"></script>
 <script src="/static/tour.js"></script>
+
+
+
+
+<script>
+// Growth dashboard v2 (added 2026-05-12)
+(function(){
+  let raw = null;
+  let currentRange = 30;
+  const W = 720, H = 110, padTop = 8, padBottom = 4;
+  const $ = id => document.getElementById(id);
+  const fmt = n => (n||0).toLocaleString('ru-RU');
+  const monthRu = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+  const labelDay = isoStr => {
+    const d = new Date(isoStr);
+    return d.getDate() + ' ' + monthRu[d.getMonth()];
+  };
+
+  async function fetchStats() {
+    try {
+      const r = await fetch('/ui/team/stats');
+      if (!r.ok) return;
+      raw = await r.json();
+      render();
+    } catch(e) { console.warn('growth fetch err', e); }
+  }
+
+  function render() {
+    if (!raw) return;
+    const days = currentRange;
+    // Build day grid back N days from today
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0,10);
+    const map = {};
+    (raw.by_day || []).forEach(it => { map[it.day] = it; });
+    const series = [];
+    for (let i = days-1; i >= 0; i--) {
+      const dt = new Date(now); dt.setDate(now.getDate() - i);
+      const key = dt.toISOString().slice(0,10);
+      const found = map[key];
+      series.push({
+        day: key,
+        label: labelDay(key),
+        events: found?.events || 0,
+        agents: found?.agents || 0,
+        isToday: key === todayStr,
+      });
+    }
+    const maxE = Math.max(1, ...series.map(s=>s.events));
+    const totalE = series.reduce((a,b)=>a+b.events, 0);
+
+    // Stats cards
+    $('gs-active').textContent = fmt(raw.agents_online !== undefined ? raw.agents_online : raw.agents_1d);
+    $('gs-week').textContent = fmt(raw.agents_7d);
+    $('gs-total').textContent = fmt(raw.agents_total);
+    $('gs-events').textContent = fmt(totalE);
+    $('gs-period-lbl').textContent = days + ' дн';
+    // Average per day
+    const avg = (totalE / days).toFixed(1);
+    $('gs-events-d').textContent = '≈ ' + avg + '/день';
+
+    // Y-axis ticks (3 levels: 0, max/2, max)
+    $('g-yaxis').innerHTML =
+      '<span>'+fmt(maxE)+'</span>' +
+      '<span>'+fmt(Math.round(maxE/2))+'</span>' +
+      '<span>0</span>';
+
+    // X-axis (4 evenly-spaced date labels)
+    const idx = [0, Math.floor(days*0.33), Math.floor(days*0.66), days-1];
+    $('g-xaxis').innerHTML = idx.map(i =>
+      '<span>'+series[i].label+'</span>'
+    ).join('');
+
+    // Bars
+    const N = series.length;
+    const gap = 2;
+    const barW = (W / N) - gap;
+    const yE = v => H - padBottom - (v/maxE) * (H - padTop - padBottom);
+
+    let barsHtml = '';
+    let dotsHtml = '';
+    let gridHtml = '';
+    // Grid (3 horizontal lines)
+    for (let level=0; level<=2; level++) {
+      const y = padTop + (level * (H - padTop - padBottom) / 2);
+      gridHtml += `<line class="grid-line" x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}"/>`;
+    }
+
+    series.forEach((s, i) => {
+      const x = i * (W / N);
+      const y = yE(s.events);
+      const barH = Math.max(0.5, H - padBottom - y);
+      const todayCls = s.isToday ? ' today' : '';
+      barsHtml += `<rect class="bar${todayCls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" data-i="${i}" rx="1"/>`;
+      // Agent dot above bar
+      if (s.agents > 0) {
+        const dotR = 2 + s.agents * 0.8; // 2-5px based on agent count
+        const dotY = Math.max(padTop+2, y - 5);
+        dotsHtml += `<circle class="agent-dot" cx="${(x+barW/2).toFixed(1)}" cy="${dotY.toFixed(1)}" r="${Math.min(4.5,dotR).toFixed(1)}" data-i="${i}"/>`;
+      }
+    });
+
+    document.getElementById('grid').innerHTML = gridHtml;
+    document.getElementById('bars').innerHTML = barsHtml;
+    document.getElementById('agent-dots').innerHTML = dotsHtml;
+
+    // Tooltip handlers
+    const tip = $('g-tip');
+    const wrap = document.querySelector('.growth-chart-wrap');
+    const showTip = (i, x, y) => {
+      const s = series[i];
+      tip.innerHTML = `<div class="date">${s.label}</div>
+        <div class="events">▎L1 событий: ${fmt(s.events)}</div>
+        <div class="agents">●  агентов: ${fmt(s.agents)}</div>`;
+      tip.style.left = x + 'px';
+      tip.style.top = y + 'px';
+      tip.classList.add('show');
+    };
+    const hideTip = () => tip.classList.remove('show');
+    wrap.querySelectorAll('.bar,.agent-dot').forEach(el => {
+      el.addEventListener('mouseenter', e => {
+        const i = +el.dataset.i;
+        const rect = el.getBoundingClientRect();
+        const wrapRect = wrap.getBoundingClientRect();
+        showTip(i, rect.left + rect.width/2 - wrapRect.left, rect.top - wrapRect.top);
+      });
+      el.addEventListener('mouseleave', hideTip);
+    });
+  }
+
+  // Range buttons
+  document.querySelectorAll('.growth-head .period button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.growth-head .period button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      currentRange = +b.dataset.range;
+      document.getElementById("g-tip")?.classList.remove("show");
+      render();
+    });
+  });
+
+  fetchStats();
+})();
+</script>
 
 </body>
 </html>
