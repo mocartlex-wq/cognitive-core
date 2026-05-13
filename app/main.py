@@ -149,6 +149,8 @@ app.include_router(agents_collab_router)
 app.include_router(onboard_router)
 from app.api.replication import router as replication_router
 app.include_router(replication_router)
+from app.api.mcp_protocol import router as mcp_router
+app.include_router(mcp_router)
 
 
 @app.get("/ui")
