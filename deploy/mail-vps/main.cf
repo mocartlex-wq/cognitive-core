@@ -1,0 +1,88 @@
+# Postfix main.cf — outgoing-only relay для AImail
+# Placeholders заменяются setup.sh: __DOMAIN__, __HOSTNAME__
+#
+# Производит: исходящие письма от @__DOMAIN__ с DKIM-подписью.
+# НЕ принимает: внешний relay, входящие письма (только для аутентифицированных).
+
+# ── Базовые параметры ────────────────────────────────────────────────────
+myhostname              = __HOSTNAME__
+mydomain                = __DOMAIN__
+myorigin                = $mydomain
+mydestination           = localhost
+inet_interfaces         = all
+inet_protocols          = ipv4
+mailbox_size_limit      = 0
+recipient_delimiter     = +
+
+# Отключаем VRFY (анти-сканирование email-адресов)
+disable_vrfy_command    = yes
+
+# Используем имя сервера в HELO/EHLO (важно для антиспам-фильтров)
+smtp_helo_name          = __HOSTNAME__
+
+# ── TLS (Let's Encrypt) ──────────────────────────────────────────────────
+smtpd_tls_cert_file     = /etc/letsencrypt/live/__HOSTNAME__/fullchain.pem
+smtpd_tls_key_file      = /etc/letsencrypt/live/__HOSTNAME__/privkey.pem
+smtpd_tls_security_level = may
+smtpd_tls_loglevel      = 1
+smtpd_tls_received_header = yes
+
+smtp_tls_security_level = may
+smtp_tls_loglevel       = 1
+smtp_tls_CApath         = /etc/ssl/certs
+
+# Минимальные версии TLS — отрезаем устаревшие
+smtpd_tls_protocols     = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtp_tls_protocols      = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+
+# Современные шифры
+smtpd_tls_mandatory_ciphers = high
+tls_high_cipherlist     = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256
+
+# ── SASL (для submission на 587 — авторизация через Dovecot) ─────────────
+smtpd_sasl_type         = dovecot
+smtpd_sasl_path         = private/auth
+smtpd_sasl_auth_enable  = yes
+smtpd_sasl_local_domain = $myhostname
+
+# ── Restrictions: outgoing-only ──────────────────────────────────────────
+# Принимаем письма только от аутентифицированных клиентов.
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination
+
+smtpd_relay_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination
+
+smtpd_helo_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_invalid_helo_hostname,
+    reject_non_fqdn_helo_hostname
+
+smtpd_client_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated
+
+# Базовые «trusted» сети — только localhost (внешние идут через SASL)
+mynetworks              = 127.0.0.0/8 [::1]/128
+
+# ── OpenDKIM milter ──────────────────────────────────────────────────────
+milter_default_action   = accept
+milter_protocol         = 6
+smtpd_milters           = unix:/var/spool/postfix/opendkim/opendkim.sock
+non_smtpd_milters       = $smtpd_milters
+
+# ── Адресные ограничения ─────────────────────────────────────────────────
+message_size_limit      = 26214400        # 25 MB
+bounce_size_limit       = 65536
+maximal_queue_lifetime  = 5d
+bounce_queue_lifetime   = 1d
+
+# ── Логирование ──────────────────────────────────────────────────────────
+maillog_file            = /var/log/mail.log
+smtp_use_tls            = yes
+broken_sasl_auth_clients = yes

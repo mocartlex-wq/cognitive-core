@@ -1,0 +1,6 @@
+# OpenDKIM TrustedHosts — что считается «своим» (internal)
+127.0.0.1
+::1
+localhost
+__HOSTNAME__
+*.__DOMAIN__

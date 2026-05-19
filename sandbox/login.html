@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AImail — вход по ссылке из письма</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a73e8'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EA%3C/text%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #1a1a1a;
+      --muted: #6b7280;
+      --accent: #1a73e8;
+      --accent-hover: #1557b0;
+      --error: #d93025;
+      --success: #1e8e3e;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      padding: 36px 32px 28px;
+    }
+    .brand {
+      font-size: 13px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: center;
+      margin-bottom: 18px;
+    }
+    h1 {
+      font-size: 26px;
+      line-height: 1.25;
+      margin: 0 0 10px;
+      text-align: center;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 14.5px;
+      text-align: center;
+      margin: 0 0 28px;
+      line-height: 1.5;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input[type=email] {
+      width: 100%;
+      font-size: 16px;
+      padding: 14px 14px;
+      border-radius: 11px;
+      border: 1px solid var(--border);
+      background: #fafbfc;
+      transition: border-color 0.15s, background 0.15s;
+      -webkit-appearance: none;
+    }
+    input[type=email]:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: #fff;
+    }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      font-size: 16px;
+      font-weight: 600;
+      padding: 14px 16px;
+      border-radius: 11px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.05s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { opacity: 0.6; cursor: progress; }
+    .msg {
+      margin-top: 18px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      line-height: 1.45;
+      display: none;
+    }
+    .msg.ok { background: #e6f4ea; color: var(--success); display: block; }
+    .msg.err { background: #fce8e6; color: var(--error); display: block; }
+    .hint {
+      font-size: 12.5px;
+      color: var(--muted);
+      margin-top: 22px;
+      text-align: center;
+      line-height: 1.55;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">AImail</div>
+    <h1>Вход без пароля</h1>
+    <p class="subtitle">Введите адрес почты — пришлём ссылку для входа. Пароль не нужен.</p>
+
+    <form id="loginForm" autocomplete="on">
+      <label for="email">Адрес почты</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        autocomplete="email"
+        required
+        placeholder="вы@example.com"
+        spellcheck="false"
+        autocapitalize="off">
+      <button type="submit" id="submitBtn">Прислать ссылку</button>
+      <div id="msg" class="msg"></div>
+    </form>
+
+    <p class="hint">
+      Ссылка действительна 15 минут и работает один раз.<br>
+      Если письма нет — проверьте папку «Спам».
+    </p>
+  </main>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('submitBtn');
+    const msg = document.getElementById('msg');
+    const emailInput = document.getElementById('email');
+
+    function showMsg(text, kind) {
+      msg.textContent = text;
+      msg.className = 'msg ' + kind;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = emailInput.value.trim();
+      if (!email) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Отправляем…';
+      msg.className = 'msg';
+      msg.textContent = '';
+
+      try {
+        const r = await fetch('/auth/email/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+          credentials: 'same-origin',
+        });
+        if (r.ok) {
+          showMsg(
+            'Если адрес зарегистрирован — письмо со ссылкой на входящих в течение минуты. ' +
+            'Перейдите в почтовый ящик.',
+            'ok'
+          );
+          btn.textContent = 'Письмо отправлено';
+        } else {
+          let detail = 'Не получилось отправить письмо. Попробуйте чуть позже.';
+          try {
+            const j = await r.json();
+            if (j && j.detail) detail = j.detail;
+          } catch (_) {}
+          showMsg(detail, 'err');
+          btn.disabled = false;
+          btn.textContent = 'Прислать ссылку';
+        }
+      } catch (err) {
+        showMsg('Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
+        btn.disabled = false;
+        btn.textContent = 'Прислать ссылку';
+      }
+    });
+
+    // Если пришли с ошибкой verify (?error=expired) — покажем
+    const params = new URLSearchParams(location.search);
+    if (params.get('error') === 'expired') {
+      showMsg('Ссылка устарела или уже использована. Запросите новую.', 'err');
+    }
+  </script>
+</body>
+</html>
