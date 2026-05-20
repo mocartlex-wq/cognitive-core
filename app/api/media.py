@@ -27,10 +27,12 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
+from app.config import settings
 from app.db.postgres import get_pool
 from app.db.s3 import get_s3
 from app.security.middleware import require_admin
 from app.services.media_analyzer import (
+    analyze_audio,
     analyze_image,
     analyze_video,
     sanitize_filename,
@@ -42,8 +44,37 @@ router = APIRouter(prefix="/api/media", tags=["media"])
 # Constants
 MEDIA_BUCKET = "media-frames"
 MAX_UPLOAD_SIZE_MB = 200  # nginx body_size должен быть >= этого
+MAX_AUDIO_SIZE_MB = 50    # аудио — обычно небольшие файлы
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus"}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Auth helper: admin-cookie ИЛИ X-Owner-Key header
+# ─────────────────────────────────────────────────────────────────────────
+class _OwnerCtx:
+    """Маркер «owner-key auth» когда нет реальной session/user."""
+    user_id = "owner-key"
+    email = "owner-key@cognitive-core"
+    is_admin = True
+
+
+async def _check_admin_or_owner(request: Request):
+    """Авторизация: либо валидная admin-session, либо корректный X-Owner-Key.
+
+    Возвращает объект с .email / .user_id / .is_admin = True.
+    Бросает 401/403 если ни то ни другое.
+
+    Owner-key path нужен для cogmedia (Bash curl с лэптопа без сессии).
+    """
+    owner_key_header = request.headers.get("X-Owner-Key", "").strip()
+    expected = (settings.owner_api_key or "").strip()
+    if owner_key_header and expected and owner_key_header == expected:
+        return _OwnerCtx()
+
+    # Fallback на стандартную admin-сессию
+    return await require_admin(request)
 
 
 def _ensure_bucket():
@@ -83,7 +114,7 @@ async def _save_to_l1(payload: dict[str, Any]) -> str:
 # ─────────────────────────────────────────────────────────────────────────
 @router.post("/video")
 async def upload_video(request: Request, file: UploadFile = File(...)):
-    user = await require_admin(request)
+    user = await _check_admin_or_owner(request)
 
     # Валидация
     if not file.filename:
@@ -188,7 +219,7 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
 # ─────────────────────────────────────────────────────────────────────────
 @router.post("/image")
 async def upload_image(request: Request, file: UploadFile = File(...)):
-    user = await require_admin(request)
+    user = await _check_admin_or_owner(request)
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename отсутствует")
     ext = Path(file.filename).suffix.lower()
@@ -240,6 +271,78 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
             "url": url,
         }
         result["event_id"] = await _save_to_l1(result)
+        return result
+    finally:
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# POST /api/media/audio — только транскрипция (Whisper, без фреймов)
+# ─────────────────────────────────────────────────────────────────────────
+@router.post("/audio")
+async def upload_audio(request: Request, file: UploadFile = File(...)):
+    user = await _check_admin_or_owner(request)
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="filename отсутствует")
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_AUDIO_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"тип файла не поддерживается. Допустимые: {', '.join(ALLOWED_AUDIO_EXT)}",
+        )
+
+    media_id = uuid.uuid4().hex
+    safe_name = sanitize_filename(file.filename)
+    logger.info("audio upload start user=%s file=%s media_id=%s",
+                user.email, safe_name, media_id)
+
+    tmp_dir = tempfile.mkdtemp(prefix=f"upload_audio_{media_id}_")
+    tmp_path = os.path.join(tmp_dir, safe_name)
+    bytes_written = 0
+    try:
+        with open(tmp_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                bytes_written += len(chunk)
+                if bytes_written > MAX_AUDIO_SIZE_MB * 1024 * 1024:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"аудио > {MAX_AUDIO_SIZE_MB}MB",
+                    )
+                f.write(chunk)
+        await file.close()
+
+        try:
+            analysis = await analyze_audio(tmp_path)
+        except Exception as e:
+            logger.exception("analyze_audio failed")
+            raise HTTPException(status_code=500,
+                                detail=f"анализ упал: {type(e).__name__}: {str(e)[:200]}")
+
+        result = {
+            "media_id": media_id,
+            "kind": "audio",
+            "filename": safe_name,
+            "uploaded_by": user.email,
+            "user_id": user.user_id,
+            "uploaded_at": datetime.utcnow().isoformat(),
+            "size_bytes": bytes_written,
+            "duration_sec": analysis.get("duration_sec"),
+            "transcript": analysis.get("transcript"),
+            "language": analysis.get("language"),
+            "transcript_duration_ms": analysis.get("transcript_duration_ms"),
+        }
+        result["event_id"] = await _save_to_l1(result)
+        logger.info(
+            "audio analyzed media_id=%s duration=%.1fs lang=%s chars=%d",
+            media_id,
+            result.get("duration_sec") or 0,
+            result.get("language") or "?",
+            len(result.get("transcript") or ""),
+        )
         return result
     finally:
         try:

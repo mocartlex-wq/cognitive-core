@@ -213,6 +213,29 @@ async def analyze_video(
     return result
 
 
+async def analyze_audio(audio_path: str) -> dict:
+    """Только транскрипция аудио (без ffmpeg-frames) — для MP3/WAV/OGG/M4A.
+
+    Возвращает: {duration_sec, transcript, language, transcript_duration_ms}.
+    """
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(audio_path)
+
+    # Получаем длительность через ffprobe (быстро, работает с аудио тоже)
+    try:
+        duration = await asyncio.to_thread(_get_duration_sec, audio_path)
+    except Exception:
+        duration = None
+
+    text, lang, dur_ms = await asyncio.to_thread(_transcribe_sync, audio_path)
+    return {
+        "duration_sec": duration,
+        "transcript": text,
+        "language": lang,
+        "transcript_duration_ms": round(dur_ms, 1),
+    }
+
+
 async def analyze_image(image_path: str, *, max_width: int = 1600) -> dict:
     """Базовая обработка картинки: получить размеры + resize если >max_width.
 
