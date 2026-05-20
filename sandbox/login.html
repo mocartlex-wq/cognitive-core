@@ -180,8 +180,8 @@
   .hint a { color: var(--glass-orb-1); text-decoration: none; }
   .hint a:hover { text-decoration: underline; }
 
-  .step { display: none; }
-  .step.active { display: block; }
+  .login-step { display: none; }
+  .login-step.active { display: block; }
 
   .email-shown {
     text-align: center;
@@ -233,7 +233,7 @@
 <main class="login-wrap">
   <div class="login-card">
 
-    <section id="step1" class="step active">
+    <section id="step1" class="login-step active">
       <h1>Вход в Cognitive Core</h1>
       <p class="subtitle">Введите адрес почты — пришлём 6-значный код для входа.</p>
 
@@ -250,7 +250,7 @@
       </p>
     </section>
 
-    <section id="step2" class="step">
+    <section id="step2" class="login-step">
       <h1>Введите код</h1>
       <p class="email-shown" id="emailEcho">—</p>
       <p class="subtitle" id="codeSubtitle">Письмо отправлено. Введите 6 цифр.</p>
