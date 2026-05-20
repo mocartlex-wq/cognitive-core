@@ -279,6 +279,34 @@ async def send_email(
 # ─────────────────────────────────────────────────────────────────────────
 # Удобные обёртки поверх send_email() для конкретных типов писем
 # ─────────────────────────────────────────────────────────────────────────
+async def send_otp_code(
+    *,
+    email: str,
+    code: str,
+    ttl_minutes: int | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> SendResult:
+    """Отправить письмо с 6-значным OTP-кодом для входа (основной flow с 2026-05-20)."""
+    from app.services import email_templates
+
+    ttl = ttl_minutes or settings.magic_link_ttl_minutes or 15
+    subject, plain, html = email_templates.otp_code(
+        email=email,
+        code=code,
+        ttl_minutes=ttl,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return await send_email(
+        to=email,
+        subject=subject,
+        plain_text=plain,
+        html_text=html,
+        kind="otp_code",
+    )
+
+
 async def send_magic_link(
     *,
     email: str,
@@ -287,7 +315,7 @@ async def send_magic_link(
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> SendResult:
-    """Отправить magic-link письмо для входа."""
+    """Отправить magic-link письмо (legacy URL-flow)."""
     from app.services import email_templates
 
     ttl = ttl_minutes or settings.magic_link_ttl_minutes or 15

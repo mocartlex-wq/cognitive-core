@@ -55,7 +55,72 @@ def _wrap_html(title: str, inner_html: str, footer_html: str = "") -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 1. MAGIC-LINK письмо (вход / регистрация)
+# 1a. OTP-CODE письмо (вход по 6-значному коду) — основной flow с 2026-05-20
+# ─────────────────────────────────────────────────────────────────────────
+def otp_code(
+    *,
+    email: str,
+    code: str,
+    ttl_minutes: int = 15,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> tuple[str, str, str]:
+    """Письмо с одноразовым 6-значным кодом для входа.
+
+    Возвращает: (subject, plain_text, html)
+    """
+    safe_email = escape(email)
+    safe_code = escape(code)
+    ttl_human = f"{ttl_minutes} минут" if ttl_minutes != 1 else "1 минуту"
+
+    context_lines: list[str] = []
+    if ip_address:
+        context_lines.append(f"Адрес запроса: {escape(ip_address)}")
+    if user_agent:
+        ua_short = user_agent[:120] + ("…" if len(user_agent) > 120 else "")
+        context_lines.append(f"Устройство: {escape(ua_short)}")
+    context_block = ""
+    if context_lines:
+        context_block = (
+            "<p style=\"font-size:13px;color:#777;margin-top:24px;\">"
+            + "<br>".join(context_lines)
+            + "</p>"
+        )
+
+    subject = f"Код входа в AImail: {code}"
+
+    plain = (
+        f"Здравствуйте!\n"
+        f"\n"
+        f"Кто-то (надеемся, что вы) запросил вход в AImail для адреса {email}.\n"
+        f"Введите этот код на странице входа — он действителен {ttl_human}\n"
+        f"и работает один раз.\n"
+        f"\n"
+        f"    {code}\n"
+        f"\n"
+        f"Если это были не вы — просто проигнорируйте письмо, аккаунт не создан\n"
+        f"и доступа никто не получит.\n"
+        f"\n"
+        f"— AImail"
+    )
+
+    inner = f"""
+          <h1 style="font-size:22px;margin:0 0 16px 0;line-height:1.3;color:#1a1a1a;">Код входа в AImail</h1>
+          <p style="margin:0 0 18px 0;">Здравствуйте! Кто-то запросил вход для адреса <strong>{safe_email}</strong>.</p>
+          <p style="margin:0 0 16px 0;">Введите этот код на странице входа:</p>
+          <div style="margin:18px 0 8px 0;text-align:center;">
+            <div style="display:inline-block;padding:18px 32px;background:#f3f6fb;border:2px solid #d3dce8;border-radius:14px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:8px;color:#1a73e8;">{safe_code}</div>
+          </div>
+          <p style="margin:18px 0 6px 0;font-size:13px;color:#666;text-align:center;">Действителен {ttl_human}, работает один раз.</p>
+          {context_block}
+          <p style="margin:24px 0 0 0;font-size:13px;color:#777;">Если вы не запрашивали вход — просто игнорируйте письмо. Никаких действий не нужно.</p>
+"""
+    html = _wrap_html(subject, inner)
+    return subject, plain, html
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 1b. MAGIC-LINK письмо (legacy: ссылка из письма) — оставлено для backward-compat
 # ─────────────────────────────────────────────────────────────────────────
 def magic_link(
     *,

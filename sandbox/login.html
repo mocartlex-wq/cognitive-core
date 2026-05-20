@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>AImail — вход по ссылке из письма</title>
+  <title>AImail — вход по коду</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a73e8'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EA%3C/text%3E%3C/svg%3E">
   <style>
     :root {
@@ -55,7 +55,7 @@
       color: var(--muted);
       font-size: 14.5px;
       text-align: center;
-      margin: 0 0 28px;
+      margin: 0 0 24px;
       line-height: 1.5;
     }
     label {
@@ -71,14 +71,36 @@
       border-radius: 11px;
       border: 1px solid var(--border);
       background: #fafbfc;
-      transition: border-color 0.15s, background 0.15s;
       -webkit-appearance: none;
     }
-    input[type=email]:focus {
-      outline: none;
-      border-color: var(--accent);
-      background: #fff;
+    input[type=email]:focus { outline: none; border-color: var(--accent); background: #fff; }
+    .code-row {
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
     }
+    .code-input {
+      flex: 1;
+      max-width: 52px;
+      height: 64px;
+      text-align: center;
+      font-family: 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 30px;
+      font-weight: 600;
+      padding: 0;
+      border-radius: 11px;
+      border: 2px solid var(--border);
+      background: #fafbfc;
+      color: var(--text);
+      -webkit-appearance: none;
+      -moz-appearance: textfield;
+    }
+    .code-input::-webkit-outer-spin-button,
+    .code-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .code-input:focus { outline: none; border-color: var(--accent); background: #fff; }
     button {
       width: 100%;
       margin-top: 16px;
@@ -90,10 +112,16 @@
       background: var(--accent);
       color: #fff;
       cursor: pointer;
-      transition: background 0.15s, transform 0.05s;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--muted);
+      font-size: 13.5px;
+      padding: 10px;
+      margin-top: 12px;
     }
     button:hover:not(:disabled) { background: var(--accent-hover); }
-    button:active:not(:disabled) { transform: translateY(1px); }
+    button.secondary:hover:not(:disabled) { color: var(--accent); background: transparent; }
     button:disabled { opacity: 0.6; cursor: progress; }
     .msg {
       margin-top: 18px;
@@ -112,58 +140,122 @@
       text-align: center;
       line-height: 1.55;
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    .step { display: none; }
+    .step.active { display: block; }
+    .email-shown {
+      text-align: center;
+      font-size: 14.5px;
+      color: var(--text);
+      margin: 0 0 18px;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body>
   <main class="card">
     <div class="brand">AImail</div>
-    <h1>Вход без пароля</h1>
-    <p class="subtitle">Введите адрес почты — пришлём ссылку для входа. Пароль не нужен.</p>
 
-    <form id="loginForm" autocomplete="on">
-      <label for="email">Адрес почты</label>
-      <input
-        id="email"
-        name="email"
-        type="email"
-        autocomplete="email"
-        required
-        placeholder="вы@example.com"
-        spellcheck="false"
-        autocapitalize="off">
-      <button type="submit" id="submitBtn">Прислать ссылку</button>
-      <div id="msg" class="msg"></div>
-    </form>
+    <!-- Шаг 1: запросить код -->
+    <section id="step1" class="step active">
+      <h1>Вход в AImail</h1>
+      <p class="subtitle">Введите email — пришлём 6-значный код для входа.</p>
 
-    <p class="hint">
-      Ссылка действительна 15 минут и работает один раз.<br>
-      Если письма нет — проверьте папку «Спам».
-    </p>
+      <form id="emailForm" autocomplete="on">
+        <label for="email">Адрес почты</label>
+        <input id="email" name="email" type="email" autocomplete="email" required
+               placeholder="вы@example.com" spellcheck="false" autocapitalize="off">
+        <button type="submit" id="reqBtn">Прислать код</button>
+        <div id="reqMsg" class="msg"></div>
+      </form>
+
+      <p class="hint">
+        Код действителен 15 минут и работает один раз.
+      </p>
+    </section>
+
+    <!-- Шаг 2: ввести код -->
+    <section id="step2" class="step">
+      <h1>Введите код</h1>
+      <p class="email-shown" id="emailEcho">—</p>
+      <p class="subtitle" id="codeSubtitle">Проверьте почту — там 6 цифр.</p>
+
+      <form id="codeForm" autocomplete="one-time-code">
+        <div class="code-row" id="codeRow">
+          <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" data-i="0">
+          <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="1">
+          <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="2">
+          <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="3">
+          <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="4">
+          <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="5">
+        </div>
+        <button type="submit" id="vrfBtn">Войти</button>
+        <button type="button" class="secondary" id="backBtn">← Изменить email</button>
+        <div id="vrfMsg" class="msg"></div>
+      </form>
+
+      <p class="hint" id="resendHint">
+        Не пришло письмо? Проверьте «Спам». <a href="#" id="resendLink">Прислать новый код</a>
+      </p>
+    </section>
   </main>
 
   <script>
-    const form = document.getElementById('loginForm');
-    const btn = document.getElementById('submitBtn');
-    const msg = document.getElementById('msg');
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
     const emailInput = document.getElementById('email');
+    const reqBtn = document.getElementById('reqBtn');
+    const reqMsg = document.getElementById('reqMsg');
+    const vrfBtn = document.getElementById('vrfBtn');
+    const vrfMsg = document.getElementById('vrfMsg');
+    const emailEcho = document.getElementById('emailEcho');
+    const codeInputs = Array.from(document.querySelectorAll('.code-input'));
 
-    function showMsg(text, kind) {
-      msg.textContent = text;
-      msg.className = 'msg ' + kind;
+    function setMsg(el, text, kind) { el.textContent = text; el.className = 'msg ' + (kind || ''); }
+    function goStep(n) {
+      step1.classList.toggle('active', n === 1);
+      step2.classList.toggle('active', n === 2);
+    }
+    function getCode() {
+      return codeInputs.map(i => i.value).join('');
+    }
+    function clearCode() {
+      codeInputs.forEach(i => { i.value = ''; });
+      codeInputs[0].focus();
     }
 
-    form.addEventListener('submit', async (e) => {
+    // Управление 6 input-полями для кода: автопереход + paste + backspace
+    codeInputs.forEach((input, idx) => {
+      input.addEventListener('input', (e) => {
+        const v = e.target.value.replace(/\D/g, '');
+        e.target.value = v;
+        if (v && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
+        if (getCode().length === 6) document.getElementById('codeForm').dispatchEvent(new Event('submit'));
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !input.value && idx > 0) codeInputs[idx - 1].focus();
+        if (e.key === 'ArrowLeft' && idx > 0) codeInputs[idx - 1].focus();
+        if (e.key === 'ArrowRight' && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
+      });
+      input.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+        if (!text) return;
+        for (let i = 0; i < codeInputs.length; i++) {
+          codeInputs[i].value = text[i] || '';
+        }
+        if (text.length >= 6) document.getElementById('codeForm').dispatchEvent(new Event('submit'));
+        else codeInputs[Math.min(text.length, codeInputs.length - 1)].focus();
+      });
+    });
+
+    // Шаг 1: запросить код
+    document.getElementById('emailForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = emailInput.value.trim();
       if (!email) return;
-
-      btn.disabled = true;
-      btn.textContent = 'Отправляем…';
-      msg.className = 'msg';
-      msg.textContent = '';
-
+      reqBtn.disabled = true;
+      reqBtn.textContent = 'Отправляем…';
+      reqMsg.className = 'msg';
       try {
         const r = await fetch('/auth/email/request', {
           method: 'POST',
@@ -172,33 +264,74 @@
           credentials: 'same-origin',
         });
         if (r.ok) {
-          showMsg(
-            'Если адрес зарегистрирован — письмо со ссылкой на входящих в течение минуты. ' +
-            'Перейдите в почтовый ящик.',
-            'ok'
-          );
-          btn.textContent = 'Письмо отправлено';
+          emailEcho.textContent = email;
+          document.getElementById('codeSubtitle').textContent = 'Письмо отправлено на ваш адрес. Введите 6 цифр из него.';
+          goStep(2);
+          setTimeout(() => codeInputs[0].focus(), 100);
+          reqBtn.disabled = false;
+          reqBtn.textContent = 'Прислать код';
         } else {
-          let detail = 'Не получилось отправить письмо. Попробуйте чуть позже.';
-          try {
-            const j = await r.json();
-            if (j && j.detail) detail = j.detail;
-          } catch (_) {}
-          showMsg(detail, 'err');
-          btn.disabled = false;
-          btn.textContent = 'Прислать ссылку';
+          let detail = 'Не получилось отправить код. Попробуйте чуть позже.';
+          try { const j = await r.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
+          setMsg(reqMsg, detail, 'err');
+          reqBtn.disabled = false;
+          reqBtn.textContent = 'Прислать код';
         }
       } catch (err) {
-        showMsg('Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
-        btn.disabled = false;
-        btn.textContent = 'Прислать ссылку';
+        setMsg(reqMsg, 'Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
+        reqBtn.disabled = false;
+        reqBtn.textContent = 'Прислать код';
       }
     });
 
-    // Если пришли с ошибкой verify (?error=expired) — покажем
-    const params = new URLSearchParams(location.search);
-    if (params.get('error') === 'expired') {
-      showMsg('Ссылка устарела или уже использована. Запросите новую.', 'err');
+    // Шаг 2: проверить код
+    document.getElementById('codeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code = getCode();
+      const email = emailInput.value.trim();
+      if (code.length !== 6 || !email) return;
+      vrfBtn.disabled = true;
+      vrfBtn.textContent = 'Входим…';
+      vrfMsg.className = 'msg';
+      try {
+        const r = await fetch('/auth/email/code/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code }),
+          credentials: 'same-origin',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.ok) {
+          setMsg(vrfMsg, 'Готово, переходим в профиль…', 'ok');
+          setTimeout(() => { location.href = '/ui/profile'; }, 400);
+        } else {
+          setMsg(vrfMsg, j.detail || 'Неверный или истёкший код.', 'err');
+          clearCode();
+          vrfBtn.disabled = false;
+          vrfBtn.textContent = 'Войти';
+        }
+      } catch (err) {
+        setMsg(vrfMsg, 'Сеть недоступна. Попробуйте снова.', 'err');
+        vrfBtn.disabled = false;
+        vrfBtn.textContent = 'Войти';
+      }
+    });
+
+    document.getElementById('backBtn').addEventListener('click', () => {
+      clearCode();
+      vrfMsg.className = 'msg';
+      goStep(1);
+      emailInput.focus();
+    });
+
+    document.getElementById('resendLink').addEventListener('click', async (e) => {
+      e.preventDefault();
+      reqBtn.click ? null : null;
+      document.getElementById('emailForm').dispatchEvent(new Event('submit'));
+    });
+
+    if (new URLSearchParams(location.search).get('error') === 'expired') {
+      setMsg(reqMsg, 'Старая ссылка устарела. Запросите новый код.', 'err');
     }
   </script>
 </body>

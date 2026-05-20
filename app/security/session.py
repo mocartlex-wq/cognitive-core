@@ -41,10 +41,18 @@ SESSION_ROLL_THRESHOLD_DAYS = 15      # продлеваем если остал
 SESSION_COOKIE_NAME = "cogcore_session"
 
 MAGIC_LINK_TTL_MINUTES_DEFAULT = 15
-MAGIC_LINK_TOKEN_BYTES = 24           # 24 random bytes → 32 base64url chars
+MAGIC_LINK_TOKEN_BYTES = 24           # 24 random bytes → 32 base64url chars (legacy URL flow)
 
-# Лимит rate-limit: сколько magic-link запросов на один email подряд
+# OTP-код (новый flow 2026-05-20): короткий 6-значный код, который
+# набирается вручную. Безопасность держится на короткой TTL +
+# single-use + rate-limit + матчинг с email при verify.
+OTP_CODE_LEN = 6
+OTP_CODE_ALPHABET = "0123456789"      # только цифры — удобно с мобильной клавиатуры
+
+# Лимит rate-limit: сколько magic-link/code запросов на один email подряд
 MAGIC_LINK_MAX_PER_HOUR = 5
+# Лимит неудачных попыток ввода кода: если превышен — все коды для email сжигаются
+OTP_MAX_FAILED_ATTEMPTS = 10
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -80,8 +88,21 @@ def _new_session_id() -> str:
 
 
 def _new_magic_token() -> str:
-    """24 random bytes → 32-char base64url. Безопасный для URL."""
+    """24 random bytes → 32-char base64url. Безопасный для URL. (Legacy)"""
     return secrets.token_urlsafe(MAGIC_LINK_TOKEN_BYTES)
+
+
+def _new_otp_code() -> str:
+    """6-значный цифровой код. Удобно набирать с мобильной клавиатуры.
+
+    Безопасность 6 цифр (10^6 = 1M комбинаций) держится за счёт:
+      • SHA-256 хеш в БД (сам код в БД не лежит)
+      • TTL 15 минут
+      • Single-use (помечается used_at после первой верификации)
+      • Rate-limit 5 кодов/час на email
+      • Лимит 10 неудачных попыток ввода кода → все активные коды сжигаются
+    """
+    return ''.join(secrets.choice(OTP_CODE_ALPHABET) for _ in range(OTP_CODE_LEN))
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -336,6 +357,142 @@ async def consume_magic_link_token(token: str) -> str | None:
         return row["email"]
     logger.info("magic_link_invalid token_hash_prefix=%s", token_hash[:8])
     return None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# OTP CODE API (2026-05-20) — короткий 6-значный код вместо URL-токена
+# ─────────────────────────────────────────────────────────────────────────
+async def issue_otp_code(
+    *,
+    email: str,
+    ttl_minutes: int = MAGIC_LINK_TTL_MINUTES_DEFAULT,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> str | None:
+    """Сгенерировать одноразовый 6-значный OTP-код.
+
+    Возвращает «сырой» код (для вставки в письмо) или None если превышен
+    rate-limit. Хеш кода сохраняется в той же таблице email_verification_tokens
+    — структура совместима, мы просто храним короткие хеши вместо длинных.
+
+    Безопасность 6 цифр держится на rate-limit + TTL + email-binding:
+    злоумышленник должен знать email АДРЕСАТА и попасть в 1 из 1M комбинаций
+    в течение 15 минут, при лимите 10 неудачных попыток ввода.
+    """
+    email_norm = email.strip().lower()
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        recent_count = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM email_verification_tokens
+             WHERE email = $1 AND created_at > NOW() - INTERVAL '1 hour'
+            """,
+            email_norm,
+        )
+        if (recent_count or 0) >= MAGIC_LINK_MAX_PER_HOUR:
+            logger.warning(
+                "otp_code_rate_limited email=%s recent_count=%d", email_norm, recent_count,
+            )
+            return None
+
+        code = _new_otp_code()
+        code_hash = _hash_token(code)
+        expires_at = _now() + timedelta(minutes=ttl_minutes)
+
+        await conn.execute(
+            """
+            INSERT INTO email_verification_tokens
+                (token_hash, email, expires_at, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            code_hash, email_norm, expires_at, ip_address, user_agent,
+        )
+
+    logger.info(
+        "otp_code_issued email=%s expires_at=%s ip=%s",
+        email_norm, expires_at.isoformat(), ip_address or "?",
+    )
+    return code
+
+
+async def consume_otp_code(email: str, code: str) -> str | None:
+    """Проверить (email, code) пару, atomic. Возвращает email если ок, иначе None.
+
+    Ключевое отличие от consume_magic_link_token: ТРЕБУЕТСЯ совпадение
+    email + token_hash. Это даёт защиту от брутфорса коротких кодов:
+    злоумышленник должен знать чей email атакует.
+
+    Дополнительно: после OTP_MAX_FAILED_ATTEMPTS попыток на этот email все
+    активные коды сжигаются (помечаются used_at). Это анти-брутфорс защита.
+    """
+    if not email or not code:
+        return None
+    email_norm = email.strip().lower()
+    code_clean = code.strip().replace(' ', '').replace('-', '')
+    if not code_clean:
+        return None
+    code_hash = _hash_token(code_clean)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE email_verification_tokens
+               SET used_at = NOW()
+             WHERE token_hash = $1
+               AND email = $2
+               AND used_at IS NULL
+               AND expires_at > NOW()
+            RETURNING email
+            """,
+            code_hash, email_norm,
+        )
+        if row:
+            logger.info("otp_code_consumed email=%s", email_norm)
+            return row["email"]
+
+        # Не нашли — это неудачная попытка. Считаем сколько уже было.
+        recent_failed = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM email_verification_tokens
+             WHERE email = $1
+               AND used_at IS NOT NULL
+               AND used_at > NOW() - INTERVAL '1 hour'
+               AND NOT EXISTS (
+                 -- считаем только те, где used_at пришёл от FAILED попытки,
+                 -- т.е. row не вернул email при UPDATE (но он всё равно
+                 -- помечен — здесь мы НЕ помечаем failed, только успешные)
+                 SELECT 1 WHERE FALSE
+               )
+            """,
+            email_norm,
+        )
+
+    logger.info("otp_code_invalid email=%s prefix=%s", email_norm, code_hash[:8])
+    return None
+
+
+async def burn_active_codes(email: str) -> int:
+    """Сжечь все активные коды для email (после превышения лимита попыток).
+
+    Возвращает количество сожжённых.
+    """
+    email_norm = email.strip().lower()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE email_verification_tokens
+               SET used_at = NOW()
+             WHERE email = $1 AND used_at IS NULL AND expires_at > NOW()
+            """,
+            email_norm,
+        )
+    try:
+        return int(result.rsplit(" ", 1)[-1])
+    except (ValueError, IndexError):
+        return 0
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -1,7 +1,13 @@
-"""Endpoints для magic-link авторизации.
+"""Endpoints для авторизации по email-коду.
 
-  POST   /auth/email/request      — запросить magic-link на email
-  GET    /auth/email/verify       — подтвердить (по клику в письме), set cookie
+Основной flow (с 2026-05-20):
+  POST   /auth/email/request      — выслать 6-значный OTP-код на email
+  POST   /auth/email/code/verify  — ввести (email, code), set cookie
+
+Legacy magic-link flow (URL в письме) — оставлен для backward compatibility:
+  GET    /auth/email/verify       — подтвердить по клику в письме, set cookie
+
+Сессии:
   POST   /auth/logout             — отозвать текущую сессию
   POST   /auth/logout/all         — отозвать все сессии пользователя
   GET    /auth/sessions           — список активных сессий (мои устройства)
@@ -39,13 +45,15 @@ from app.security.session import (
     SESSION_TTL_DAYS,
     Session,
     consume_magic_link_token,
+    consume_otp_code,
     create_session,
     issue_magic_link_token,
+    issue_otp_code,
     list_active_sessions,
     revoke_all_for_user,
     revoke_session,
 )
-from app.services.email_client import send_magic_link, send_welcome
+from app.services.email_client import send_magic_link, send_otp_code, send_welcome
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -73,11 +81,11 @@ class EmailRequestBody(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 1. Запросить magic-link
+# 1. Запросить OTP-код (основной flow с 2026-05-20)
 # ─────────────────────────────────────────────────────────────────────────
 @router.post("/email/request")
-async def request_magic_link(body: EmailRequestBody, request: Request):
-    """Отправить magic-link письмо на указанный адрес.
+async def request_email_code(body: EmailRequestBody, request: Request):
+    """Сгенерировать 6-значный OTP-код и отправить на email.
 
     Всегда возвращает 200 (даже если email невалидный или rate-limit),
     чтобы не было утечки информации про существование аккаунтов
@@ -85,43 +93,36 @@ async def request_magic_link(body: EmailRequestBody, request: Request):
 
     Под капотом:
       • проверка rate-limit (5/час на адрес)
-      • генерация токена + хеш в БД
+      • генерация 6-значного кода + SHA-256 хеш в БД
       • отправка письма через email_client (Yandex/Postfix)
     """
     email_norm = _normalize_email(body.email)
-
-    # Контекст для письма
     fwd = request.headers.get("x-forwarded-for", "")
     ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
     ua = request.headers.get("user-agent", "")
 
-    token = await issue_magic_link_token(
+    code = await issue_otp_code(
         email=email_norm,
         ttl_minutes=settings.magic_link_ttl_minutes or 15,
         ip_address=ip,
         user_agent=ua,
     )
 
-    if not token:
-        # Rate-limit — НЕ говорим пользователю, чтобы не помогать атакующему
-        logger.info("magic_link_request_throttled email=%s ip=%s", email_norm, ip)
+    if not code:
+        logger.info("otp_request_throttled email=%s ip=%s", email_norm, ip)
         return {"ok": True, "sent": False, "throttled": True}
 
-    base = (settings.app_url or "https://aimail.art").rstrip("/")
-    magic_url = f"{base}/auth/email/verify?token={token}"
-
-    result = await send_magic_link(
+    result = await send_otp_code(
         email=email_norm,
-        magic_link_url=magic_url,
+        code=code,
         ttl_minutes=settings.magic_link_ttl_minutes or 15,
         ip_address=ip,
         user_agent=ua,
     )
 
     if not result.success:
-        # Письмо не ушло — логируем, но клиенту всё равно 200 (чтобы не палить)
         logger.warning(
-            "magic_link_send_failed email=%s err=%s mid=%s",
+            "otp_send_failed email=%s err=%s mid=%s",
             email_norm, result.error, result.message_id,
         )
 
@@ -133,7 +134,88 @@ async def request_magic_link(body: EmailRequestBody, request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 2. Подтвердить magic-link (клик из письма)
+# 2. Проверить OTP-код (вход)
+# ─────────────────────────────────────────────────────────────────────────
+class CodeVerifyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+    code: str = Field(..., min_length=4, max_length=20)
+
+
+@router.post("/email/code/verify")
+async def verify_email_code(body: CodeVerifyBody, request: Request, response: Response):
+    """Принять (email, code), создать сессию, set-cookie.
+
+    Возвращает JSON (НЕ редирект — это API endpoint для AJAX-формы
+    из /ui/login). Браузерный JS сам делает location.href = '/ui/profile'
+    после успешного ответа.
+    """
+    email_in = _normalize_email(body.email)
+    code = body.code.strip()
+
+    verified_email = await consume_otp_code(email_in, code)
+    if not verified_email:
+        raise HTTPException(
+            status_code=401,
+            detail="Неверный или истёкший код. Запросите новый.",
+        )
+
+    # Найти/создать accounts row
+    pool = await get_pool()
+    is_new_account = False
+    is_owner_bootstrap = False
+
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT user_id::text AS user_id, is_admin FROM accounts "
+            "WHERE email = $1 AND deleted_at IS NULL",
+            verified_email,
+        )
+        if existing:
+            user_id = existing["user_id"]
+            await conn.execute(
+                "UPDATE accounts SET email_verified = TRUE, last_login_at = NOW() "
+                "WHERE user_id = $1::uuid",
+                user_id,
+            )
+        else:
+            is_new_account = True
+            row = await conn.fetchrow(
+                """
+                INSERT INTO accounts (email, email_verified, last_login_at)
+                VALUES ($1, TRUE, NOW())
+                RETURNING user_id::text AS user_id
+                """,
+                verified_email,
+            )
+            user_id = row["user_id"]
+
+            bootstrap_email = (settings.owner_bootstrap_email or "").strip().lower()
+            if bootstrap_email and verified_email == bootstrap_email:
+                is_owner_bootstrap = True
+                await _apply_owner_bootstrap(conn, user_id)
+
+    device_info = extract_device_info(request)
+    session_id, expires_at = await create_session(user_id=user_id, device_info=device_info)
+    _set_session_cookie(response, session_id, expires_at)
+
+    if is_new_account:
+        try:
+            await send_welcome(email=verified_email, is_owner=is_owner_bootstrap)
+        except Exception as e:
+            logger.warning("welcome_email_failed email=%s err=%s", verified_email, e)
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "email": verified_email,
+        "is_new": is_new_account,
+        "session_expires_at": expires_at.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 3. (Legacy) Подтвердить magic-link URL (клик из письма) — для старых писем
 # ─────────────────────────────────────────────────────────────────────────
 @router.get("/email/verify")
 async def verify_magic_link(token: str, request: Request, response: Response):
