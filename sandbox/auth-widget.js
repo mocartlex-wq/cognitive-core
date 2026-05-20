@@ -147,7 +147,10 @@
   function renderLoggedOut(container) {
     const wrap = document.createElement('div');
     wrap.className = 'cc-auth';
-    wrap.innerHTML = `<a class="cc-auth-btn" href="/ui/login">Войти</a>`;
+    // Cache-bust query param: гарантирует свежий запрос даже если в
+    // браузерном кеше залежался старый 404-ответ от устаревшего routing.
+    const loginUrl = '/ui/login?_=' + Date.now();
+    wrap.innerHTML = `<a class="cc-auth-btn" href="${loginUrl}">Войти</a>`;
     container.appendChild(wrap);
   }
 
