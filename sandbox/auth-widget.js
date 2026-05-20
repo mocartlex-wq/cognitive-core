@@ -228,7 +228,15 @@
     a.textContent = 'Профиль';
     a.setAttribute('data-cc-injected', '1');
     if (location.pathname === '/ui/profile') a.classList.add('active');
-    nav.appendChild(a);
+    // Вставляем ПЕРЕД последним пунктом (обычно API) — единообразно с profile.html
+    // где Профиль идёт предпоследним: «Главная · Комнаты · Профиль · API».
+    const links = nav.querySelectorAll('a');
+    const last = links[links.length - 1];
+    if (last) {
+      nav.insertBefore(a, last);
+    } else {
+      nav.appendChild(a);
+    }
   }
 
   async function init() {
