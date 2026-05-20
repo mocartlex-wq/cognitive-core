@@ -200,6 +200,8 @@
       try {
         await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
       } catch (e) {}
+      // Сбрасываем кеш — иначе при возврате будет мигать старым email
+      try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
       location.href = '/ui/login';
     });
   }
@@ -239,32 +241,69 @@
     }
   }
 
-  async function init() {
-    const container = findContainer();
-    if (!container) return;
-    injectStyles();
+  // Кеш статуса для мгновенного рендера при переходах между страницами.
+  // Без него — на каждой новой странице top-status пустой пока fetch не вернётся
+  // (50-200мс), и виджет «моргает». С кешем — мгновенный рендер из последнего
+  // известного состояния, затем тихий update если что-то изменилось.
+  const CACHE_KEY = 'cc_auth_status_cache_v1';
 
-    let status = null;
-    try {
-      // /auth/status — всегда 200 (с {authenticated: bool}), не 401.
-      // Это чтобы browser console не загорался красным у незалогиненных юзеров.
-      const r = await fetch('/auth/status', {
-        credentials: 'same-origin',
-        cache: 'no-store',
-      });
-      if (r.ok) {
-        status = await r.json();
-      }
-    } catch (e) {
-      // network failure — silent
-      return;
-    }
+  function renderStatus(container, status) {
+    // Убираем все существующие виджеты + dynamic Профиль (полная пере-отрисовка)
+    container.querySelectorAll('.cc-auth').forEach(n => n.remove());
+    const oldProf = document.querySelector('a[data-cc-injected="1"]');
+    if (oldProf) oldProf.remove();
 
     if (status && status.authenticated && status.email) {
       renderLoggedIn(container, status);
       injectProfileNavLink();
     } else {
       renderLoggedOut(container);
+    }
+  }
+
+  function statusFingerprint(s) {
+    if (!s) return 'null';
+    if (!s.authenticated) return 'out';
+    return 'in:' + (s.email || '') + ':' + (s.is_admin ? 'A' : 'U');
+  }
+
+  async function init() {
+    const container = findContainer();
+    if (!container) return;
+    injectStyles();
+
+    // Phase 1: мгновенный рендер из кеша (если есть).
+    // Это устраняет «дырку» в top-status на 50-200мс при каждом переходе.
+    let cached = null;
+    try {
+      cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+      if (cached) renderStatus(container, cached);
+    } catch (e) {}
+
+    // Phase 2: реальный запрос для проверки актуальности статуса.
+    let status = null;
+    try {
+      const r = await fetch('/auth/status', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (r.ok) status = await r.json();
+    } catch (e) {
+      // Network failure — оставляем кешированный рендер, не перерисовываем.
+      return;
+    }
+    if (!status) return;
+
+    // Сохраняем актуальный статус в кеш для следующих переходов
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(status)); } catch (e) {}
+
+    // Перерисовываем только если статус действительно изменился
+    // (например logout в другой вкладке или session expired)
+    if (statusFingerprint(cached) !== statusFingerprint(status)) {
+      renderStatus(container, status);
+    } else if (!cached) {
+      // Первый визит — кеша не было, рисуем сейчас
+      renderStatus(container, status);
     }
   }
 
