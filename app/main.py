@@ -58,6 +58,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_event("warn", "OutboxPublisher disabled", error=str(e))
 
+    # Pre-cache Whisper модели в фоне. Если её ещё нет в volume — закачается
+    # с HuggingFace при старте api, а не при первом upload'е. Загружаем не-
+    # блокирующе через task: 30-60с на cold-cache, но api уже принимает запросы.
+    async def _prefetch_whisper():
+        try:
+            from app.services.media_analyzer import _get_whisper_model
+            await asyncio.to_thread(_get_whisper_model)
+            log_event("info", "Whisper model pre-cached")
+        except Exception as e:
+            log_event("warn", "Whisper pre-cache failed", error=str(e)[:200])
+    asyncio.create_task(_prefetch_whisper())
+
     log_event("info", "Cognitive Core ready")
     yield
 

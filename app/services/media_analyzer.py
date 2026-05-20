@@ -96,7 +96,10 @@ def _extract_frames_sync(video_path: str, count: int, max_width: int) -> tuple[l
         raise ValueError(f"видео слишком длинное: {duration:.0f}с > {MAX_VIDEO_DURATION_SEC}с")
 
     out_dir = Path(tempfile.mkdtemp(prefix="frames_"))
-    interval = max(1.0, duration / count)
+    # Адаптивный интервал — для коротких видео берём кадры чаще чем 1с,
+    # чтобы всегда получить заказанное `count` штук. Минимум 0.1с (10 fps cap)
+    # чтобы не упасть на видео долей секунды.
+    interval = max(0.1, duration / count)
     pattern = str(out_dir / "frame_%04d.jpg")
 
     # fps=1/interval — один кадр каждые interval секунд
