@@ -1,170 +1,245 @@
-<!doctype html>
-<html lang="ru">
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>AImail — вход по коду</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a73e8'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EA%3C/text%3E%3C/svg%3E">
-  <style>
-    :root {
-      --bg: #f5f6f8;
-      --card: #ffffff;
-      --text: #1a1a1a;
-      --muted: #6b7280;
-      --accent: #1a73e8;
-      --accent-hover: #1557b0;
-      --error: #d93025;
-      --success: #1e8e3e;
-      --border: #e5e7eb;
-    }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-    }
-    .card {
-      width: 100%;
-      max-width: 420px;
-      background: var(--card);
-      border-radius: 18px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-      padding: 36px 32px 28px;
-    }
-    .brand {
-      font-size: 13px;
-      letter-spacing: 0.6px;
-      text-transform: uppercase;
-      color: var(--muted);
-      text-align: center;
-      margin-bottom: 18px;
-    }
-    h1 {
-      font-size: 26px;
-      line-height: 1.25;
-      margin: 0 0 10px;
-      text-align: center;
-    }
-    .subtitle {
-      color: var(--muted);
-      font-size: 14.5px;
-      text-align: center;
-      margin: 0 0 24px;
-      line-height: 1.5;
-    }
-    label {
-      display: block;
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-    input[type=email] {
-      width: 100%;
-      font-size: 16px;
-      padding: 14px 14px;
-      border-radius: 11px;
-      border: 1px solid var(--border);
-      background: #fafbfc;
-      -webkit-appearance: none;
-    }
-    input[type=email]:focus { outline: none; border-color: var(--accent); background: #fff; }
-    .code-row {
-      display: flex;
-      gap: 8px;
-      justify-content: space-between;
-    }
-    .code-input {
-      flex: 1;
-      max-width: 52px;
-      height: 64px;
-      text-align: center;
-      font-family: 'SF Mono', Menlo, Consolas, monospace;
-      font-size: 30px;
-      font-weight: 600;
-      padding: 0;
-      border-radius: 11px;
-      border: 2px solid var(--border);
-      background: #fafbfc;
-      color: var(--text);
-      -webkit-appearance: none;
-      -moz-appearance: textfield;
-    }
-    .code-input::-webkit-outer-spin-button,
-    .code-input::-webkit-inner-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-    .code-input:focus { outline: none; border-color: var(--accent); background: #fff; }
-    button {
-      width: 100%;
-      margin-top: 16px;
-      font-size: 16px;
-      font-weight: 600;
-      padding: 14px 16px;
-      border-radius: 11px;
-      border: none;
-      background: var(--accent);
-      color: #fff;
-      cursor: pointer;
-    }
-    button.secondary {
-      background: transparent;
-      color: var(--muted);
-      font-size: 13.5px;
-      padding: 10px;
-      margin-top: 12px;
-    }
-    button:hover:not(:disabled) { background: var(--accent-hover); }
-    button.secondary:hover:not(:disabled) { color: var(--accent); background: transparent; }
-    button:disabled { opacity: 0.6; cursor: progress; }
-    .msg {
-      margin-top: 18px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      font-size: 14px;
-      line-height: 1.45;
-      display: none;
-    }
-    .msg.ok { background: #e6f4ea; color: var(--success); display: block; }
-    .msg.err { background: #fce8e6; color: var(--error); display: block; }
-    .hint {
-      font-size: 12.5px;
-      color: var(--muted);
-      margin-top: 22px;
-      text-align: center;
-      line-height: 1.55;
-    }
-    .step { display: none; }
-    .step.active { display: block; }
-    .email-shown {
-      text-align: center;
-      font-size: 14.5px;
-      color: var(--text);
-      margin: 0 0 18px;
-      font-weight: 500;
-    }
-  </style>
-</head>
-<body>
-  <main class="card">
-    <div class="brand">AImail</div>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Вход — Cognitive Core</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EC%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/shared.css?v=20260520">
+<link rel="stylesheet" href="/static/glass.css?v=20260520">
+<style>
+  html, body { background: var(--glass-base-bg) !important; color: var(--glass-text) !important; }
+  body { min-height: 100vh; display: flex; flex-direction: column; }
 
-    <!-- Шаг 1: запросить код -->
+  .login-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 460px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius);
+    box-shadow: var(--glass-shadow-lg);
+    padding: 40px 36px 32px;
+  }
+
+  .login-card h1 {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin: 0 0 10px;
+    text-align: center;
+    color: var(--glass-text);
+    letter-spacing: -0.02em;
+  }
+  .login-card .subtitle {
+    color: var(--glass-text-dim);
+    font-size: 14.5px;
+    text-align: center;
+    margin: 0 0 26px;
+    line-height: 1.5;
+  }
+
+  /* Input */
+  .login-card label {
+    display: block;
+    font-size: 12px;
+    color: var(--glass-text-dim);
+    margin-bottom: 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 600;
+  }
+  .login-card input[type=email] {
+    width: 100%;
+    font-size: 16px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg-light);
+    color: var(--glass-text);
+    transition: border-color 0.2s, background 0.2s;
+    font-family: var(--font);
+    -webkit-appearance: none;
+  }
+  .login-card input[type=email]:focus {
+    outline: none;
+    border-color: var(--glass-orb-1);
+    background: rgba(88, 166, 255, 0.05);
+  }
+  .login-card input[type=email]::placeholder { color: var(--glass-text-dim); opacity: 0.6; }
+
+  /* OTP code 6-input row */
+  .code-row {
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    margin: 8px 0 4px;
+  }
+  .code-input {
+    flex: 1;
+    min-width: 0;
+    height: 64px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 600;
+    padding: 0;
+    border-radius: 12px;
+    border: 1.5px solid var(--glass-border);
+    background: var(--glass-bg-light);
+    color: var(--glass-text);
+    -webkit-appearance: none;
+    -moz-appearance: textfield;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .code-input::-webkit-outer-spin-button,
+  .code-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .code-input:focus {
+    outline: none;
+    border-color: var(--glass-orb-1);
+    background: rgba(88, 166, 255, 0.08);
+  }
+
+  /* Primary action */
+  .btn-primary {
+    width: 100%;
+    margin-top: 18px;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 0;
+    background: var(--glass-orb-1);
+    color: #0a0e14;
+    cursor: pointer;
+    transition: filter 0.15s, transform 0.05s;
+    font-family: var(--font);
+  }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-primary:active:not(:disabled) { transform: translateY(1px); }
+  .btn-primary:disabled { opacity: 0.55; cursor: progress; }
+
+  .btn-secondary {
+    width: 100%;
+    margin-top: 12px;
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 0;
+    background: transparent;
+    color: var(--glass-text-dim);
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .btn-secondary:hover:not(:disabled) { color: var(--glass-orb-1); }
+
+  /* Message banners */
+  .msg {
+    margin-top: 18px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.45;
+    display: none;
+  }
+  .msg.ok {
+    background: rgba(63, 185, 80, 0.12);
+    color: #4cc960;
+    border: 1px solid rgba(63, 185, 80, 0.25);
+    display: block;
+  }
+  .msg.err {
+    background: rgba(248, 81, 73, 0.12);
+    color: #ff7770;
+    border: 1px solid rgba(248, 81, 73, 0.25);
+    display: block;
+  }
+
+  .hint {
+    font-size: 12.5px;
+    color: var(--glass-text-dim);
+    margin-top: 22px;
+    text-align: center;
+    line-height: 1.55;
+  }
+  .hint a { color: var(--glass-orb-1); text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
+
+  .step { display: none; }
+  .step.active { display: block; }
+
+  .email-shown {
+    text-align: center;
+    font-size: 14.5px;
+    color: var(--glass-text-soft);
+    margin: 0 0 16px;
+    font-weight: 500;
+    word-break: break-all;
+  }
+
+  /* Light theme adjustments */
+  :root[data-theme="light"] .btn-primary { color: #fff; background: #1d4cd9; }
+  :root[data-theme="light"] .code-input { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.12); }
+  :root[data-theme="light"] .login-card input[type=email] { background: rgba(0,0,0,0.04); }
+
+  @media (max-width: 480px) {
+    .login-card { padding: 28px 22px 24px; }
+    .code-input { height: 56px; font-size: 24px; }
+    .code-row { gap: 6px; }
+  }
+</style>
+</head>
+<body class="glass-mode">
+<div class="orb-3"></div>
+
+<div class="top-bar">
+  <a class="brand" href="/">
+    <div class="brand-icon"><span class="brand-dot"></span></div>
+    <div>
+      <div class="brand-name">Cognitive Core</div>
+      <span class="brand-ver">вход</span>
+    </div>
+  </a>
+  <nav class="top-nav">
+    <a href="/">Главная</a>
+    <a href="/ui">Комнаты</a>
+    <a href="/sandbox">API</a>
+  </nav>
+  <div class="top-status">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Сменить тему" aria-label="Сменить тему">
+      <svg class="icon icon-sun"><use href="#sun"/></svg>
+      <svg class="icon icon-moon"><use href="#moon"/></svg>
+    </button>
+  </div>
+</div>
+
+<main class="login-wrap">
+  <div class="login-card">
+
     <section id="step1" class="step active">
-      <h1>Вход в AImail</h1>
-      <p class="subtitle">Введите email — пришлём 6-значный код для входа.</p>
+      <h1>Вход в Cognitive Core</h1>
+      <p class="subtitle">Введите адрес почты — пришлём 6-значный код для входа.</p>
 
       <form id="emailForm" autocomplete="on">
         <label for="email">Адрес почты</label>
         <input id="email" name="email" type="email" autocomplete="email" required
                placeholder="вы@example.com" spellcheck="false" autocapitalize="off">
-        <button type="submit" id="reqBtn">Прислать код</button>
+        <button type="submit" class="btn-primary" id="reqBtn">Прислать код</button>
         <div id="reqMsg" class="msg"></div>
       </form>
 
@@ -173,11 +248,10 @@
       </p>
     </section>
 
-    <!-- Шаг 2: ввести код -->
     <section id="step2" class="step">
       <h1>Введите код</h1>
       <p class="email-shown" id="emailEcho">—</p>
-      <p class="subtitle" id="codeSubtitle">Проверьте почту — там 6 цифр.</p>
+      <p class="subtitle" id="codeSubtitle">Письмо отправлено. Введите 6 цифр.</p>
 
       <form id="codeForm" autocomplete="one-time-code">
         <div class="code-row" id="codeRow">
@@ -188,151 +262,125 @@
           <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="4">
           <input class="code-input" type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" data-i="5">
         </div>
-        <button type="submit" id="vrfBtn">Войти</button>
-        <button type="button" class="secondary" id="backBtn">← Изменить email</button>
+        <button type="submit" class="btn-primary" id="vrfBtn">Войти</button>
+        <button type="button" class="btn-secondary" id="backBtn">← Изменить email</button>
         <div id="vrfMsg" class="msg"></div>
       </form>
 
-      <p class="hint" id="resendHint">
+      <p class="hint">
         Не пришло письмо? Проверьте «Спам». <a href="#" id="resendLink">Прислать новый код</a>
       </p>
     </section>
-  </main>
 
-  <script>
-    const step1 = document.getElementById('step1');
-    const step2 = document.getElementById('step2');
-    const emailInput = document.getElementById('email');
-    const reqBtn = document.getElementById('reqBtn');
-    const reqMsg = document.getElementById('reqMsg');
-    const vrfBtn = document.getElementById('vrfBtn');
-    const vrfMsg = document.getElementById('vrfMsg');
-    const emailEcho = document.getElementById('emailEcho');
-    const codeInputs = Array.from(document.querySelectorAll('.code-input'));
+  </div>
+</main>
 
-    function setMsg(el, text, kind) { el.textContent = text; el.className = 'msg ' + (kind || ''); }
-    function goStep(n) {
-      step1.classList.toggle('active', n === 1);
-      step2.classList.toggle('active', n === 2);
-    }
-    function getCode() {
-      return codeInputs.map(i => i.value).join('');
-    }
-    function clearCode() {
-      codeInputs.forEach(i => { i.value = ''; });
-      codeInputs[0].focus();
-    }
+<script src="/static/theme.js?v=20260520"></script>
+<script>
+  const step1 = document.getElementById('step1');
+  const step2 = document.getElementById('step2');
+  const emailInput = document.getElementById('email');
+  const reqBtn = document.getElementById('reqBtn');
+  const reqMsg = document.getElementById('reqMsg');
+  const vrfBtn = document.getElementById('vrfBtn');
+  const vrfMsg = document.getElementById('vrfMsg');
+  const emailEcho = document.getElementById('emailEcho');
+  const codeInputs = Array.from(document.querySelectorAll('.code-input'));
 
-    // Управление 6 input-полями для кода: автопереход + paste + backspace
-    codeInputs.forEach((input, idx) => {
-      input.addEventListener('input', (e) => {
-        const v = e.target.value.replace(/\D/g, '');
-        e.target.value = v;
-        if (v && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
-        if (getCode().length === 6) document.getElementById('codeForm').dispatchEvent(new Event('submit'));
-      });
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace' && !input.value && idx > 0) codeInputs[idx - 1].focus();
-        if (e.key === 'ArrowLeft' && idx > 0) codeInputs[idx - 1].focus();
-        if (e.key === 'ArrowRight' && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
-      });
-      input.addEventListener('paste', (e) => {
-        e.preventDefault();
-        const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
-        if (!text) return;
-        for (let i = 0; i < codeInputs.length; i++) {
-          codeInputs[i].value = text[i] || '';
-        }
-        if (text.length >= 6) document.getElementById('codeForm').dispatchEvent(new Event('submit'));
-        else codeInputs[Math.min(text.length, codeInputs.length - 1)].focus();
-      });
+  function setMsg(el, text, kind) { el.textContent = text; el.className = 'msg ' + (kind || ''); }
+  function goStep(n) {
+    step1.classList.toggle('active', n === 1);
+    step2.classList.toggle('active', n === 2);
+  }
+  function getCode() { return codeInputs.map(i => i.value).join(''); }
+  function clearCode() { codeInputs.forEach(i => { i.value = ''; }); codeInputs[0].focus(); }
+
+  codeInputs.forEach((input, idx) => {
+    input.addEventListener('input', (e) => {
+      const v = e.target.value.replace(/\D/g, '');
+      e.target.value = v;
+      if (v && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
+      if (getCode().length === 6) document.getElementById('codeForm').dispatchEvent(new Event('submit'));
     });
-
-    // Шаг 1: запросить код
-    document.getElementById('emailForm').addEventListener('submit', async (e) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !input.value && idx > 0) codeInputs[idx - 1].focus();
+      if (e.key === 'ArrowLeft' && idx > 0) codeInputs[idx - 1].focus();
+      if (e.key === 'ArrowRight' && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
+    });
+    input.addEventListener('paste', (e) => {
       e.preventDefault();
-      const email = emailInput.value.trim();
-      if (!email) return;
-      reqBtn.disabled = true;
-      reqBtn.textContent = 'Отправляем…';
-      reqMsg.className = 'msg';
-      try {
-        const r = await fetch('/auth/email/request', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-          credentials: 'same-origin',
-        });
-        if (r.ok) {
-          emailEcho.textContent = email;
-          document.getElementById('codeSubtitle').textContent = 'Письмо отправлено на ваш адрес. Введите 6 цифр из него.';
-          goStep(2);
-          setTimeout(() => codeInputs[0].focus(), 100);
-          reqBtn.disabled = false;
-          reqBtn.textContent = 'Прислать код';
-        } else {
-          let detail = 'Не получилось отправить код. Попробуйте чуть позже.';
-          try { const j = await r.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
-          setMsg(reqMsg, detail, 'err');
-          reqBtn.disabled = false;
-          reqBtn.textContent = 'Прислать код';
-        }
-      } catch (err) {
-        setMsg(reqMsg, 'Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
-        reqBtn.disabled = false;
-        reqBtn.textContent = 'Прислать код';
+      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+      if (!text) return;
+      for (let i = 0; i < codeInputs.length; i++) codeInputs[i].value = text[i] || '';
+      if (text.length >= 6) document.getElementById('codeForm').dispatchEvent(new Event('submit'));
+      else codeInputs[Math.min(text.length, codeInputs.length - 1)].focus();
+    });
+  });
+
+  document.getElementById('emailForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = emailInput.value.trim();
+    if (!email) return;
+    reqBtn.disabled = true; reqBtn.textContent = 'Отправляем…'; reqMsg.className = 'msg';
+    try {
+      const r = await fetch('/auth/email/request', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }), credentials: 'same-origin',
+      });
+      if (r.ok) {
+        emailEcho.textContent = email;
+        document.getElementById('codeSubtitle').textContent = 'Письмо отправлено на ваш адрес. Введите 6 цифр из него.';
+        goStep(2);
+        setTimeout(() => codeInputs[0].focus(), 100);
+        reqBtn.disabled = false; reqBtn.textContent = 'Прислать код';
+      } else {
+        let detail = 'Не получилось отправить код. Попробуйте чуть позже.';
+        try { const j = await r.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
+        setMsg(reqMsg, detail, 'err'); reqBtn.disabled = false; reqBtn.textContent = 'Прислать код';
       }
-    });
-
-    // Шаг 2: проверить код
-    document.getElementById('codeForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const code = getCode();
-      const email = emailInput.value.trim();
-      if (code.length !== 6 || !email) return;
-      vrfBtn.disabled = true;
-      vrfBtn.textContent = 'Входим…';
-      vrfMsg.className = 'msg';
-      try {
-        const r = await fetch('/auth/email/code/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, code }),
-          credentials: 'same-origin',
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok && j.ok) {
-          setMsg(vrfMsg, 'Готово, переходим в профиль…', 'ok');
-          setTimeout(() => { location.href = '/ui/profile'; }, 400);
-        } else {
-          setMsg(vrfMsg, j.detail || 'Неверный или истёкший код.', 'err');
-          clearCode();
-          vrfBtn.disabled = false;
-          vrfBtn.textContent = 'Войти';
-        }
-      } catch (err) {
-        setMsg(vrfMsg, 'Сеть недоступна. Попробуйте снова.', 'err');
-        vrfBtn.disabled = false;
-        vrfBtn.textContent = 'Войти';
-      }
-    });
-
-    document.getElementById('backBtn').addEventListener('click', () => {
-      clearCode();
-      vrfMsg.className = 'msg';
-      goStep(1);
-      emailInput.focus();
-    });
-
-    document.getElementById('resendLink').addEventListener('click', async (e) => {
-      e.preventDefault();
-      reqBtn.click ? null : null;
-      document.getElementById('emailForm').dispatchEvent(new Event('submit'));
-    });
-
-    if (new URLSearchParams(location.search).get('error') === 'expired') {
-      setMsg(reqMsg, 'Старая ссылка устарела. Запросите новый код.', 'err');
+    } catch (err) {
+      setMsg(reqMsg, 'Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
+      reqBtn.disabled = false; reqBtn.textContent = 'Прислать код';
     }
-  </script>
+  });
+
+  document.getElementById('codeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const code = getCode();
+    const email = emailInput.value.trim();
+    if (code.length !== 6 || !email) return;
+    vrfBtn.disabled = true; vrfBtn.textContent = 'Входим…'; vrfMsg.className = 'msg';
+    try {
+      const r = await fetch('/auth/email/code/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }), credentials: 'same-origin',
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) {
+        setMsg(vrfMsg, 'Готово, переходим в профиль…', 'ok');
+        setTimeout(() => { location.href = '/ui/profile'; }, 400);
+      } else {
+        setMsg(vrfMsg, j.detail || 'Неверный или истёкший код.', 'err');
+        clearCode(); vrfBtn.disabled = false; vrfBtn.textContent = 'Войти';
+      }
+    } catch (err) {
+      setMsg(vrfMsg, 'Сеть недоступна. Попробуйте снова.', 'err');
+      vrfBtn.disabled = false; vrfBtn.textContent = 'Войти';
+    }
+  });
+
+  document.getElementById('backBtn').addEventListener('click', () => {
+    clearCode(); vrfMsg.className = 'msg'; goStep(1); emailInput.focus();
+  });
+
+  document.getElementById('resendLink').addEventListener('click', async (e) => {
+    e.preventDefault();
+    document.getElementById('emailForm').dispatchEvent(new Event('submit'));
+  });
+
+  if (new URLSearchParams(location.search).get('error') === 'expired') {
+    setMsg(reqMsg, 'Старая ссылка устарела. Запросите новый код.', 'err');
+  }
+</script>
 </body>
 </html>
