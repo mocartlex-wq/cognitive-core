@@ -34,6 +34,30 @@
     localStorage.setItem(STORAGE_KEY, next);
   };
 
+  // Auto-bootstrap auth-widget и error-reporter (если их ещё нет на странице).
+  // Это страховка: если HTML страницы — устаревший в браузерном кеше и не
+  // содержит <script src="auth-widget.js">, theme.js сам её подгрузит.
+  // Старые версии theme.js не имеют этого блока, но как только пользователь
+  // получит свежий theme.js (через Ctrl+Shift+R), бутстрап начнёт работать
+  // постоянно — на всех будущих страницах виджет появится сам.
+  function ensureScript(src, marker) {
+    if (window[marker]) return;
+    if (document.querySelector('script[data-cc-auto="' + marker + '"]')) return;
+    const s = document.createElement('script');
+    s.src = src;
+    s.defer = true;
+    s.setAttribute('data-cc-auto', marker);
+    document.head.appendChild(s);
+  }
+
+  // На каждой странице с .top-bar — нужен auth-widget. На каждой — error-reporter.
+  document.addEventListener('DOMContentLoaded', () => {
+    if (document.querySelector('.top-bar, .top-status')) {
+      ensureScript('/static/auth-widget.js?v=20260520e', '__ccAuthWidgetLoaded');
+    }
+    ensureScript('/static/error-reporter.js?v=20260520b', '__ccErrorReporterLoaded');
+  });
+
   // Inject neuron background и icon sprite
   document.addEventListener('DOMContentLoaded', () => {
     if (!document.querySelector('.neuron-bg')) {
