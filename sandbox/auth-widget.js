@@ -210,6 +210,27 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  function injectProfileNavLink() {
+    // Добавляем пункт «Профиль» в .top-nav если он там ещё не появлялся.
+    // Это унифицирует навигацию: на любой странице залогиненный пользователь
+    // видит ссылку на профиль в основном меню (а не только в dropdown'е).
+    const nav = document.querySelector('.top-nav');
+    if (!nav) return;
+    if (nav.querySelector('a[href="/ui/profile"]')) {
+      // Уже есть — пометим как active если мы сейчас на профиле
+      if (location.pathname === '/ui/profile') {
+        nav.querySelector('a[href="/ui/profile"]').classList.add('active');
+      }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = '/ui/profile';
+    a.textContent = 'Профиль';
+    a.setAttribute('data-cc-injected', '1');
+    if (location.pathname === '/ui/profile') a.classList.add('active');
+    nav.appendChild(a);
+  }
+
   async function init() {
     const container = findContainer();
     if (!container) return;
@@ -233,6 +254,7 @@
 
     if (status && status.authenticated && status.email) {
       renderLoggedIn(container, status);
+      injectProfileNavLink();
     } else {
       renderLoggedOut(container);
     }
