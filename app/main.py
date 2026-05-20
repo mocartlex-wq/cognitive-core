@@ -143,6 +143,28 @@ SANDBOX_DIR = os.path.join(os.path.dirname(__file__), "..", "sandbox")
 app.mount("/static", StaticFiles(directory=SANDBOX_DIR), name="static")
 
 
+# Favicon — браузеры автоматически запрашивают /favicon.ico на каждой странице.
+# Без этого route на каждой странице будет 404 в консоли. SVG-иконка inline,
+# без отдельного файла. Кешируется на сутки.
+_FAVICON_SVG = (
+    b'<?xml version="1.0" encoding="UTF-8"?>'
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    b'<rect width="64" height="64" rx="14" fill="#58a6ff"/>'
+    b'<text x="50%" y="58%" font-size="34" font-weight="700" fill="white" '
+    b'text-anchor="middle" font-family="system-ui">C</text>'
+    b'</svg>'
+)
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(
+        content=_FAVICON_SVG,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/")
 async def home_page():
     """Главная: объяснение идеи проекта + быстрый старт."""
@@ -210,6 +232,10 @@ from app.api.auth import router as auth_router
 from app.api.user import router as user_router
 app.include_router(auth_router)
 app.include_router(user_router)
+
+# Frontend error reporter (2026-05-20): /api/errors POST/GET
+from app.api.errors import router as errors_router
+app.include_router(errors_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────
