@@ -212,22 +212,24 @@
     if (!container) return;
     injectStyles();
 
-    let user = null;
+    let status = null;
     try {
-      const r = await fetch('/user/me', {
+      // /auth/status — всегда 200 (с {authenticated: bool}), не 401.
+      // Это чтобы browser console не загорался красным у незалогиненных юзеров.
+      const r = await fetch('/auth/status', {
         credentials: 'same-origin',
         cache: 'no-store',
       });
       if (r.ok) {
-        user = await r.json();
+        status = await r.json();
       }
     } catch (e) {
       // network failure — silent
       return;
     }
 
-    if (user && user.email) {
-      renderLoggedIn(container, user);
+    if (status && status.authenticated && status.email) {
+      renderLoggedIn(container, status);
     } else {
       renderLoggedOut(container);
     }

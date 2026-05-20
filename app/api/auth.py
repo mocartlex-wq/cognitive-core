@@ -370,6 +370,41 @@ async def _apply_owner_bootstrap(conn, user_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 2b. /auth/status — состояние сессии БЕЗ 401 (для auth-widget)
+# ─────────────────────────────────────────────────────────────────────────
+@router.get("/status")
+async def auth_status(request: Request):
+    """Проверка состояния аутентификации без выброса 401.
+
+    Используется auth-widget'ом в top-bar — ему нужно знать «залогинен или
+    нет», а не ловить ошибку 401 (которая засоряет browser console).
+    Возвращает 200 в обоих случаях:
+
+      {"authenticated": false}                     — не залогинен
+      {"authenticated": true, "email": ..., ...}   — залогинен
+
+    Безопасность: не выдаём sensitive данные (password_hash, session_id и т.п.).
+    """
+    from app.security.session import verify_session
+
+    sid = request.cookies.get(SESSION_COOKIE_NAME) or request.headers.get("X-Session-Id")
+    if not sid:
+        return {"authenticated": False}
+
+    session = await verify_session(sid)
+    if not session:
+        return {"authenticated": False}
+
+    return {
+        "authenticated": True,
+        "email": session.email,
+        "display_name": session.display_name,
+        "is_admin": session.is_admin,
+        "user_id": session.user_id,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 3. Logout
 # ─────────────────────────────────────────────────────────────────────────
 @router.post("/logout")

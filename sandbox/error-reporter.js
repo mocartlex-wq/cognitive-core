@@ -175,6 +175,19 @@
   });
 
   // ─── 3. Fetch с 5xx статусом ───────────────────────────────────────────
+  // Пути на которых 4xx ожидаем (не считаем ошибкой):
+  //   /auth/* — login/logout/status flow, 401 нормально
+  //   /api/errors — сам репортер
+  //   /user/me — legacy для виджетов, может вернуть 401
+  const EXPECTED_4XX_PATTERNS = [
+    /\/auth\//,
+    /\/api\/errors/,
+    /\/user\/me/,
+  ];
+  function isExpected4xx(url) {
+    return EXPECTED_4XX_PATTERNS.some(p => p.test(url));
+  }
+
   if (window.fetch) {
     const origFetch = window.fetch.bind(window);
     window.fetch = async function(input, init) {
