@@ -87,11 +87,37 @@ async def run_monthly_cycle():
     return results
 
 
+async def run_error_digest():
+    """Раз в 6 часов — собрать ошибки фронта и отправить дайджест на owner email
+    (если ошибки были И owner_bootstrap_email задан в .env)."""
+    try:
+        from app.api.errors import send_digest_email_if_needed
+        result = await send_digest_email_if_needed(hours=6)
+        await log_audit(
+            agent_id="system",
+            action="frontend_errors_digest",
+            target_table="l1_raw_events",
+            details=result,
+            success=True,
+        )
+        return result
+    except Exception as e:
+        await log_audit(
+            agent_id="system",
+            action="frontend_errors_digest",
+            target_table="l1_raw_events",
+            details={"error": str(e)[:300]},
+            success=False,
+        )
+        return {"sent": False, "error": str(e)}
+
+
 async def scheduler_loop():
     """Фоновый планировщик циклов."""
     last_daily = None
     last_weekly = None
     last_monthly = None
+    last_digest_slot: int | None = None  # 0..3 (каждый 6-час слот суток)
 
     while True:
         now = datetime.now(timezone.utc)
@@ -111,5 +137,12 @@ async def scheduler_loop():
         if now.day == 1 and last_monthly != today and now.hour >= 4:
             await run_monthly_cycle()
             last_monthly = today
+
+        # Каждые 6 часов: email-дайджест фронт-ошибок (00, 06, 12, 18 UTC)
+        # Slot = (date * 4) + (hour // 6) — уникально на сутки
+        slot = today.toordinal() * 4 + now.hour // 6
+        if last_digest_slot != slot and now.hour % 6 == 0:
+            await run_error_digest()
+            last_digest_slot = slot
 
         await asyncio.sleep(3600)  # Проверка каждый час

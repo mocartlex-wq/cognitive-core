@@ -32,6 +32,54 @@
            (payload.line || 0);
   }
 
+  // ─── Last actions tracker (5 последних кликов/инпутов) ─────────────────
+  const lastActions = [];
+  function pushAction(action) {
+    lastActions.push(action);
+    if (lastActions.length > 5) lastActions.shift();
+  }
+  document.addEventListener('click', function(e) {
+    try {
+      const t = e.target;
+      if (!t) return;
+      const tag = t.tagName ? t.tagName.toLowerCase() : '?';
+      const text = (t.textContent || '').trim().slice(0, 50);
+      const id = t.id ? '#' + t.id : '';
+      const cls = t.className && typeof t.className === 'string' ? '.' + t.className.split(' ').filter(Boolean).slice(0, 2).join('.') : '';
+      pushAction({ type: 'click', target: tag + id + cls, text: text, ts: Date.now() });
+    } catch (_) {}
+  }, true);
+  document.addEventListener('submit', function(e) {
+    try {
+      const t = e.target;
+      const id = t && t.id ? '#' + t.id : '';
+      pushAction({ type: 'submit', target: 'form' + id, ts: Date.now() });
+    } catch (_) {}
+  }, true);
+
+  // ─── DOM snapshot (sanitized: без value у password, до 5КБ) ────────────
+  function captureDomSnapshot() {
+    try {
+      const body = document.body;
+      if (!body) return null;
+      // Клонируем чтобы не трогать живой DOM
+      const clone = body.cloneNode(true);
+      // Удаляем скрипты и значения паролей
+      clone.querySelectorAll('script,style,noscript').forEach(n => n.remove());
+      clone.querySelectorAll('input[type="password"]').forEach(i => i.removeAttribute('value'));
+      // Удаляем data-URI у изображений (тяжёлые)
+      clone.querySelectorAll('img[src^="data:"]').forEach(i => i.setAttribute('src', '[data-url-removed]'));
+      let html = clone.outerHTML || '';
+      // Сжимаем whitespace
+      html = html.replace(/\s+/g, ' ').replace(/> </g, '><');
+      // Обрезаем до 5КБ
+      if (html.length > 5000) html = html.slice(0, 5000) + '...[truncated]';
+      return html;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function send(payload) {
     const now = Date.now();
     if (now - lastSentAt < MIN_INTERVAL_MS) return;
@@ -57,6 +105,8 @@
     payload.viewport_w = window.innerWidth;
     payload.viewport_h = window.innerHeight;
     payload.client_ts = now;
+    payload.last_actions = lastActions.slice();
+    payload.dom_snapshot = captureDomSnapshot();
 
     // sendBeacon если доступен (надёжнее — отправит даже при unload)
     try {

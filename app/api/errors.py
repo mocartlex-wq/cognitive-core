@@ -57,6 +57,14 @@ def _check_rate_limit(ip: str) -> bool:
     return True
 
 
+class ErrorAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: str = Field(..., max_length=20)
+    target: str = Field("", max_length=200)
+    text: str | None = Field(None, max_length=80)
+    ts: float | None = None
+
+
 class ErrorReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,8 +78,10 @@ class ErrorReport(BaseModel):
     viewport_h: int | None = Field(None, ge=0, le=100000)
     user_agent: str | None = Field(None, max_length=400)
     referrer: str | None = Field(None, max_length=500)
-    error_kind: str = Field("js", max_length=32)   # "js" / "promise" / "fetch" / "console"
+    error_kind: str = Field("js", max_length=32)   # "js" / "promise" / "fetch" / "console" / "resource"
     client_ts: float | None = None                  # epoch ms на стороне браузера
+    last_actions: list[ErrorAction] | None = Field(None, max_length=10)
+    dom_snapshot: str | None = Field(None, max_length=10000)  # sanitized HTML, max 10KB
 
 
 @router.post("")
@@ -126,13 +136,20 @@ async def post_error(body: ErrorReport, request: Request):
 
 
 @router.get("")
-async def list_errors(request: Request, limit: int = 50):
-    """Последние ошибки — для админ-дашборда. Требует is_admin."""
+async def list_errors(request: Request, limit: int = 50, since_hours: int = 168):
+    """Последние ошибки — для админ-дашборда. Требует is_admin.
+
+    Параметры:
+      limit       — макс. количество (1..500), default 50
+      since_hours — за сколько последних часов брать (1..720), default 168=7d
+    """
     user = await require_admin(request)
-    _ = user  # отметим использование
+    _ = user
 
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=400, detail="limit должен быть 1..500")
+    if since_hours < 1 or since_hours > 720:
+        raise HTTPException(status_code=400, detail="since_hours должен быть 1..720")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -141,10 +158,11 @@ async def list_errors(request: Request, limit: int = 50):
             SELECT id::text AS id, timestamp, raw_payload
               FROM l1_raw_events
              WHERE domain = 'frontend_errors'
+               AND timestamp > NOW() - $2 * INTERVAL '1 hour'
              ORDER BY timestamp DESC
              LIMIT $1
             """,
-            limit,
+            limit, since_hours,
         )
 
     items = []
@@ -154,3 +172,151 @@ async def list_errors(request: Request, limit: int = 50):
             d["timestamp"] = d["timestamp"].isoformat()
         items.append(d)
     return {"count": len(items), "items": items}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Digest — статистика за последние N часов (для cron-задачи email-нотификации)
+# ─────────────────────────────────────────────────────────────────────────
+async def collect_digest(hours: int = 6) -> dict[str, Any]:
+    """Собрать сводку ошибок за последние N часов.
+
+    Возвращает структуру:
+      {
+        "since_hours": 6,
+        "total": 42,
+        "unique_messages": 12,
+        "by_kind": {"js": 30, "fetch": 8, "promise": 4},
+        "top_errors": [{"message": "...", "count": 15, "first_url": "..."}],
+      }
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM l1_raw_events
+             WHERE domain = 'frontend_errors'
+               AND timestamp > NOW() - $1 * INTERVAL '1 hour'
+            """,
+            hours,
+        )
+        if not total:
+            return {"since_hours": hours, "total": 0, "top_errors": []}
+
+        kind_rows = await conn.fetch(
+            """
+            SELECT raw_payload->>'error_kind' AS kind, COUNT(*) AS c
+              FROM l1_raw_events
+             WHERE domain = 'frontend_errors'
+               AND timestamp > NOW() - $1 * INTERVAL '1 hour'
+             GROUP BY raw_payload->>'error_kind'
+             ORDER BY c DESC
+            """,
+            hours,
+        )
+        top_rows = await conn.fetch(
+            """
+            SELECT raw_payload->>'message' AS msg,
+                   MIN(raw_payload->>'url') AS first_url,
+                   MIN(raw_payload->>'error_kind') AS kind,
+                   COUNT(*) AS c
+              FROM l1_raw_events
+             WHERE domain = 'frontend_errors'
+               AND timestamp > NOW() - $1 * INTERVAL '1 hour'
+             GROUP BY raw_payload->>'message'
+             ORDER BY c DESC
+             LIMIT 10
+            """,
+            hours,
+        )
+        unique = await conn.fetchval(
+            """
+            SELECT COUNT(DISTINCT raw_payload->>'message')
+              FROM l1_raw_events
+             WHERE domain = 'frontend_errors'
+               AND timestamp > NOW() - $1 * INTERVAL '1 hour'
+            """,
+            hours,
+        )
+
+    return {
+        "since_hours": hours,
+        "total": total or 0,
+        "unique_messages": unique or 0,
+        "by_kind": {r["kind"] or "?": r["c"] for r in kind_rows},
+        "top_errors": [
+            {
+                "message": (r["msg"] or "")[:200],
+                "first_url": r["first_url"] or "",
+                "kind": r["kind"] or "?",
+                "count": r["c"],
+            }
+            for r in top_rows
+        ],
+    }
+
+
+@router.get("/digest")
+async def get_digest(request: Request, hours: int = 6):
+    """Сводка ошибок за N часов. Требует admin."""
+    user = await require_admin(request)
+    _ = user
+    if hours < 1 or hours > 168:
+        raise HTTPException(status_code=400, detail="hours должен быть 1..168")
+    return await collect_digest(hours)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Email-нотификация владельцу о новых ошибках
+# ─────────────────────────────────────────────────────────────────────────
+async def send_digest_email_if_needed(hours: int = 6) -> dict[str, Any]:
+    """Если за hours были ошибки — отправить дайджест на owner_bootstrap_email.
+
+    Вызывается из cron-задачи (worker.py). Если ошибок нет — silent skip.
+    """
+    from app.config import settings
+    from app.services.email_client import send_notification
+
+    target_email = (settings.owner_bootstrap_email or "").strip()
+    if not target_email:
+        return {"sent": False, "reason": "owner_bootstrap_email не задан"}
+
+    digest = await collect_digest(hours)
+    if digest["total"] == 0:
+        return {"sent": False, "reason": "нет ошибок за период"}
+
+    # Текст письма
+    lines = [
+        f"За последние {hours} часов на Cognitive Core зафиксировано {digest['total']} фронтенд-ошибок ",
+        f"({digest['unique_messages']} уникальных).",
+        "",
+        "По типам:",
+    ]
+    for kind, count in digest.get("by_kind", {}).items():
+        lines.append(f"  • {kind}: {count}")
+    lines.append("")
+    lines.append("Топ-10 повторяющихся:")
+    for i, e in enumerate(digest.get("top_errors", []), 1):
+        lines.append(f"  {i}. [{e['kind']}] ×{e['count']} — {e['message'][:120]}")
+        if e.get("first_url"):
+            lines.append(f"     {e['first_url'][:120]}")
+
+    base_url = (settings.app_url or "").rstrip("/")
+    body_text = "\n".join(lines)
+
+    result = await send_notification(
+        email=target_email,
+        title=f"Cognitive Core: {digest['total']} фронтенд-ошибок за {hours}ч",
+        body_text=body_text,
+        action_url=f"{base_url}/ui/admin/errors" if base_url else None,
+        action_label="Открыть админ-панель",
+    )
+    logger.info(
+        "frontend_errors_digest_sent total=%d unique=%d hours=%d success=%s",
+        digest["total"], digest["unique_messages"], hours, result.success,
+    )
+    return {
+        "sent": result.success,
+        "total": digest["total"],
+        "unique": digest["unique_messages"],
+        "message_id": result.message_id,
+    }

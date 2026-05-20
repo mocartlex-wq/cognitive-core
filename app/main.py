@@ -259,6 +259,14 @@ async def profile_page():
     return FileResponse(os.path.join(SANDBOX_DIR, "profile.html"))
 
 
+@app.get("/ui/admin/errors")
+async def admin_errors_page():
+    """Админ-панель: лог фронтенд-ошибок. Доступ проверяется в API
+    (/api/errors требует is_admin). HTML отдаётся всем, но если нет
+    прав — страница покажет 'Нужны права администратора'."""
+    return FileResponse(os.path.join(SANDBOX_DIR, "admin-errors.html"))
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Health
 # ─────────────────────────────────────────────────────────────────────────

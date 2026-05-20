@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ошибки фронта — Cognitive Core</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EC%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/shared.css?v=20260520">
+<link rel="stylesheet" href="/static/glass.css?v=20260520">
+<style>
+  html, body { background: var(--glass-base-bg) !important; color: var(--glass-text) !important; }
+  body { min-height: 100vh; }
+  .page { max-width: 1200px; margin: 32px auto 80px; padding: 0 20px; position: relative; z-index: 1; }
+  .page-title {
+    font-size: 13px; font-weight: 600; letter-spacing: 1.6px;
+    color: var(--glass-text-dim); text-transform: uppercase;
+    margin: 0 0 8px; padding: 0 6px;
+  }
+  .page-h1 {
+    font-size: 26px; font-weight: 700; color: var(--glass-text);
+    letter-spacing: -0.02em; margin: 0 0 22px; padding: 0 6px;
+  }
+
+  .toolbar {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+  }
+  .toolbar label {
+    font-size: 12px; color: var(--glass-text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+  }
+  .toolbar select, .toolbar button {
+    background: var(--glass-bg-light); color: var(--glass-text);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px;
+    font-family: inherit; cursor: pointer;
+  }
+  .toolbar .stats {
+    margin-left: auto;
+    font-size: 13px; color: var(--glass-text-dim);
+  }
+  .toolbar .stats strong { color: var(--glass-text); font-weight: 600; }
+
+  .summary {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+    padding: 18px 22px;
+    margin-bottom: 18px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
+  }
+  .summary .stat {
+    text-align: center;
+  }
+  .summary .stat .v {
+    font-size: 28px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--glass-text);
+  }
+  .summary .stat .l {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--glass-text-dim); margin-top: 4px;
+  }
+
+  .err-card {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .err-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px;
+    cursor: pointer;
+    flex-wrap: wrap;
+  }
+  .err-head:hover { background: rgba(255,255,255,0.02); }
+  .err-head .kind {
+    font-size: 10.5px; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    background: rgba(88,166,255,0.15); color: var(--glass-orb-1);
+    border: 1px solid rgba(88,166,255,0.25);
+  }
+  .err-head .kind.fetch { background: rgba(255,140,66,0.15); color: var(--glass-orb-3); border-color: rgba(255,140,66,0.3); }
+  .err-head .kind.promise { background: rgba(188,140,255,0.15); color: #bc8cff; border-color: rgba(188,140,255,0.3); }
+  .err-head .kind.resource { background: rgba(248,81,73,0.15); color: #ff7770; border-color: rgba(248,81,73,0.3); }
+  .err-head .ts {
+    font-size: 12px; color: var(--glass-text-dim);
+    font-variant-numeric: tabular-nums; min-width: 110px;
+  }
+  .err-head .msg {
+    flex: 1; min-width: 250px;
+    font-size: 13.5px; color: var(--glass-text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .err-head .arrow { color: var(--glass-text-dim); font-size: 14px; }
+  .err-head.open .arrow { transform: rotate(90deg); }
+
+  .err-body {
+    display: none;
+    padding: 0 18px 18px 18px;
+    border-top: 1px solid var(--glass-border);
+  }
+  .err-card.open .err-body { display: block; }
+  .err-card.open .err-head .arrow { transform: rotate(90deg); }
+  .err-body .block { margin-top: 14px; }
+  .err-body .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--glass-text-dim); font-weight: 600; margin-bottom: 6px;
+  }
+  .err-body .v {
+    font-size: 13px; color: var(--glass-text-soft); line-height: 1.55;
+    word-break: break-word;
+  }
+  .err-body .v.mono {
+    font-family: var(--mono); font-size: 11.5px;
+    background: rgba(13,17,23,0.5); padding: 10px 12px;
+    border-radius: 8px; border: 1px solid var(--glass-border);
+    white-space: pre-wrap; max-height: 280px; overflow-y: auto;
+  }
+  .err-body .v a { color: var(--glass-orb-1); text-decoration: none; }
+  .err-body .v a:hover { text-decoration: underline; }
+  .err-body .actions-list {
+    list-style: none; padding: 0; margin: 0;
+  }
+  .err-body .actions-list li {
+    padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 12.5px; color: var(--glass-text-soft);
+  }
+  .err-body .actions-list li:last-child { border-bottom: none; }
+
+  .empty {
+    text-align: center; padding: 60px 20px;
+    color: var(--glass-text-dim); font-size: 14px;
+  }
+  .empty .icon-big {
+    font-size: 42px; margin-bottom: 16px;
+  }
+</style>
+</head>
+<body class="glass-mode">
+<div class="orb-3"></div>
+
+<div class="top-bar">
+  <a class="brand" href="/">
+    <div class="brand-icon"><span class="brand-dot"></span></div>
+    <div>
+      <div class="brand-name">Cognitive Core</div>
+      <span class="brand-ver">админ · ошибки</span>
+    </div>
+  </a>
+  <nav class="top-nav">
+    <a href="/">Главная</a>
+    <a href="/ui">Комнаты</a>
+    <a href="/ui/profile">Профиль</a>
+    <a href="/ui/admin/errors" class="active">Ошибки</a>
+    <a href="/sandbox">API</a>
+  </nav>
+  <div class="top-status">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Сменить тему" aria-label="Сменить тему">
+      <svg class="icon icon-sun"><use href="#sun"/></svg>
+      <svg class="icon icon-moon"><use href="#moon"/></svg>
+    </button>
+  </div>
+</div>
+
+<main class="page">
+  <div class="page-title">Админ · Мониторинг</div>
+  <h1 class="page-h1">Ошибки фронтенда</h1>
+
+  <div class="toolbar">
+    <label>Период</label>
+    <select id="hours">
+      <option value="1">Последний час</option>
+      <option value="6" selected>6 часов</option>
+      <option value="24">Сутки</option>
+      <option value="168">7 дней</option>
+      <option value="720">30 дней</option>
+    </select>
+    <label>Тип</label>
+    <select id="kind">
+      <option value="">Все</option>
+      <option value="js">JS-исключение</option>
+      <option value="promise">Promise rejection</option>
+      <option value="fetch">Fetch 5xx</option>
+      <option value="resource">Resource 404</option>
+    </select>
+    <button id="reload">Обновить</button>
+    <div class="stats" id="stats">—</div>
+  </div>
+
+  <div id="summary"></div>
+  <div id="list"></div>
+</main>
+
+<script src="/static/theme.js?v=20260520"></script>
+<script src="/static/error-reporter.js?v=20260520" defer></script>
+<script src="/static/auth-widget.js?v=20260520b" defer></script>
+<script>
+  async function api(path) {
+    const r = await fetch(path, { credentials: 'same-origin' });
+    if (r.status === 401) {
+      location.href = '/ui/login?return=' + encodeURIComponent(location.pathname);
+      return null;
+    }
+    if (r.status === 403) {
+      document.querySelector('main.page').innerHTML =
+        '<div class="empty"><div class="icon-big">🔒</div>Нужны права администратора. Войдите как админ.</div>';
+      return null;
+    }
+    return r;
+  }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+      if (mins < 1) return 'только что';
+      if (mins < 60) return mins + ' мин';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + ' ч';
+      const days = Math.floor(hrs / 24);
+      if (days < 30) return days + ' дн';
+      return d.toLocaleDateString('ru-RU');
+    } catch (e) { return iso; }
+  }
+  function fmtFull(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('ru-RU'); }
+    catch (e) { return iso; }
+  }
+
+  async function loadDigest(hours) {
+    const r = await api('/api/errors/digest?hours=' + hours);
+    if (!r || !r.ok) return null;
+    return r.json();
+  }
+  async function loadList(hours) {
+    const r = await api('/api/errors?since_hours=' + hours + '&limit=200');
+    if (!r || !r.ok) return null;
+    return r.json();
+  }
+
+  function renderSummary(digest) {
+    if (!digest || digest.total === 0) {
+      document.getElementById('summary').innerHTML = '';
+      return;
+    }
+    const cells = [
+      `<div class="stat"><div class="v">${digest.total}</div><div class="l">всего</div></div>`,
+      `<div class="stat"><div class="v">${digest.unique_messages}</div><div class="l">уникальных</div></div>`,
+    ];
+    for (const [kind, count] of Object.entries(digest.by_kind || {})) {
+      cells.push(`<div class="stat"><div class="v">${count}</div><div class="l">${esc(kind)}</div></div>`);
+    }
+    document.getElementById('summary').innerHTML =
+      `<div class="summary">${cells.join('')}</div>`;
+  }
+
+  function renderItem(item) {
+    const p = item.raw_payload || {};
+    const kind = p.error_kind || 'js';
+    const msg = p.message || '—';
+    const ts = item.timestamp;
+
+    const lastActions = (p.last_actions || []).map(a =>
+      `<li>${esc(a.type)} → ${esc(a.target)}${a.text ? ' · «' + esc(a.text) + '»' : ''}</li>`
+    ).join('') || '<li style="color: var(--glass-text-dim);">—</li>';
+
+    const userInfo = p.user_email
+      ? `<div class="block"><div class="label">Пользователь</div>
+           <div class="v">${esc(p.user_email)}</div></div>`
+      : '';
+    const referrerInfo = p.referrer
+      ? `<div class="block"><div class="label">Откуда</div><div class="v">${esc(p.referrer)}</div></div>`
+      : '';
+
+    return `
+      <div class="err-card" data-id="${esc(item.id)}">
+        <div class="err-head" onclick="this.parentElement.classList.toggle('open')">
+          <span class="kind ${esc(kind)}">${esc(kind)}</span>
+          <span class="ts" title="${esc(fmtFull(ts))}">${esc(fmtDate(ts))}</span>
+          <span class="msg">${esc(msg)}</span>
+          <span class="arrow">›</span>
+        </div>
+        <div class="err-body">
+          <div class="block"><div class="label">URL</div>
+            <div class="v"><a href="${esc(p.url || '#')}" target="_blank">${esc(p.url || '—')}</a></div></div>
+          ${p.source ? `<div class="block"><div class="label">Источник</div>
+            <div class="v" style="font-family: var(--mono); font-size: 12px;">${esc(p.source)}${p.line ? ':' + p.line : ''}${p.col ? ':' + p.col : ''}</div></div>` : ''}
+          ${p.stack ? `<div class="block"><div class="label">Stack trace</div>
+            <div class="v mono">${esc(p.stack)}</div></div>` : ''}
+          <div class="block"><div class="label">Последние действия</div>
+            <ul class="actions-list">${lastActions}</ul></div>
+          ${userInfo}
+          ${referrerInfo}
+          <div class="block"><div class="label">Контекст</div>
+            <div class="v">IP ${esc(p.ip || '?')} · ${esc(p.viewport_w || '?')}×${esc(p.viewport_h || '?')} · ${esc((p.user_agent || '').slice(0, 100))}</div></div>
+          ${p.dom_snapshot ? `<div class="block"><div class="label">DOM-снимок (sanitized)</div>
+            <div class="v mono" style="max-height: 220px;">${esc(p.dom_snapshot)}</div></div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  async function reload() {
+    const hours = parseInt(document.getElementById('hours').value, 10);
+    const kindFilter = document.getElementById('kind').value;
+    document.getElementById('stats').textContent = 'Загружаем…';
+
+    const [digest, list] = await Promise.all([loadDigest(hours), loadList(hours)]);
+    if (!list) return;
+
+    renderSummary(digest);
+
+    let items = list.items || [];
+    if (kindFilter) {
+      items = items.filter(i => (i.raw_payload || {}).error_kind === kindFilter);
+    }
+
+    document.getElementById('stats').innerHTML =
+      `<strong>${items.length}</strong> из ${list.count} ошибок`;
+
+    if (items.length === 0) {
+      document.getElementById('list').innerHTML =
+        `<div class="empty"><div class="icon-big">✓</div>Нет ошибок за период.</div>`;
+    } else {
+      document.getElementById('list').innerHTML = items.map(renderItem).join('');
+    }
+  }
+
+  document.getElementById('hours').addEventListener('change', reload);
+  document.getElementById('kind').addEventListener('change', reload);
+  document.getElementById('reload').addEventListener('click', reload);
+
+  reload();
+</script>
+</body>
+</html>
