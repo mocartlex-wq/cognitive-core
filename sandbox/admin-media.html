@@ -304,11 +304,40 @@
       ['Транскрипция', j.transcript_duration_ms ? Math.round(j.transcript_duration_ms) + ' мс' : '—'],
     ].map(([k, v]) => `<div class="meta-row"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('');
 
+    // Ссылка для Claude — публичный info-endpoint, без auth
+    const claudeUrl = `${location.origin}/api/media/info/${j.media_id}`;
+    const claudePhrase = `посмотри это видео: ${claudeUrl}`;
+
     document.getElementById('result').outerHTML = `
       <div id="result">
         <div style="margin-bottom: 14px;">
           <strong>${esc(j.filename)}</strong> · media_id <code>${esc(j.media_id)}</code>
         </div>
+
+        <!-- Большая копи-кнопка для Claude -->
+        <div style="background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.3);
+                    border-radius: 12px; padding: 16px 18px; margin: 16px 0;">
+          <div style="font-size: 12px; color: var(--glass-text-dim); text-transform: uppercase;
+                      letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600;">
+            Чтобы Claude увидел это видео:
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <input id="claudePhrase" readonly value="${esc(claudePhrase)}"
+                   style="flex: 1; min-width: 280px; padding: 10px 12px; border-radius: 8px;
+                          border: 1px solid var(--glass-border); background: var(--glass-bg-light);
+                          color: var(--glass-text); font-family: var(--mono); font-size: 12.5px;">
+            <button id="copyClaudeBtn" onclick="copyClaudePhrase()"
+                    style="background: var(--glass-orb-1); color: #0a0e14; border: 0;
+                           padding: 10px 18px; border-radius: 8px; font-weight: 600;
+                           font-size: 13.5px; cursor: pointer;">
+              📋 Скопировать
+            </button>
+          </div>
+          <div style="font-size: 12px; color: var(--glass-text-dim); margin-top: 8px;">
+            Вставьте эту фразу в чат — Claude скачает кадры и транскрипт, увидит что в видео.
+          </div>
+        </div>
+
         ${meta}
         ${j.transcript ? `
           <h3 style="font-size: 14px; margin: 18px 0 0; color: var(--glass-text);">Транскрипт</h3>
@@ -319,12 +348,51 @@
       </div>`;
   }
 
+  function copyClaudePhrase() {
+    const input = document.getElementById('claudePhrase');
+    const btn = document.getElementById('copyClaudeBtn');
+    input.select();
+    navigator.clipboard.writeText(input.value).then(() => {
+      btn.textContent = '✓ Скопировано';
+      btn.style.background = '#3fb950';
+      setTimeout(() => {
+        btn.textContent = '📋 Скопировать';
+        btn.style.background = 'var(--glass-orb-1)';
+      }, 2000);
+    }).catch(() => {
+      btn.textContent = 'Скопируйте вручную (Ctrl+C)';
+    });
+  }
+
   function renderImageResult(j) {
+    const claudeUrl = `${location.origin}/api/media/info/${j.media_id}`;
+    const claudePhrase = `посмотри эту картинку: ${claudeUrl}`;
     document.getElementById('result').outerHTML = `
       <div id="result">
         <div style="margin-bottom: 14px;">
           <strong>${esc(j.filename)}</strong> · media_id <code>${esc(j.media_id)}</code>
         </div>
+
+        <div style="background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.3);
+                    border-radius: 12px; padding: 16px 18px; margin: 16px 0;">
+          <div style="font-size: 12px; color: var(--glass-text-dim); text-transform: uppercase;
+                      letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600;">
+            Чтобы Claude увидел это:
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <input id="claudePhrase" readonly value="${esc(claudePhrase)}"
+                   style="flex: 1; min-width: 280px; padding: 10px 12px; border-radius: 8px;
+                          border: 1px solid var(--glass-border); background: var(--glass-bg-light);
+                          color: var(--glass-text); font-family: var(--mono); font-size: 12.5px;">
+            <button id="copyClaudeBtn" onclick="copyClaudePhrase()"
+                    style="background: var(--glass-orb-1); color: #0a0e14; border: 0;
+                           padding: 10px 18px; border-radius: 8px; font-weight: 600;
+                           font-size: 13.5px; cursor: pointer;">
+              📋 Скопировать
+            </button>
+          </div>
+        </div>
+
         <div class="meta-row"><span class="k">Размер исходный</span><span class="v">${fmtSize(j.size_bytes)}</span></div>
         <div class="meta-row"><span class="k">Разрешение</span><span class="v">${j.width}×${j.height}</span></div>
         <div class="meta-row"><span class="k">Формат</span><span class="v">${esc(j.format)}</span></div>

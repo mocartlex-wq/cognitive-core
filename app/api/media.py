@@ -294,6 +294,61 @@ async def get_frame(key: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# GET /api/media/info/{media_id} — публичный info для Claude (без auth)
+# ─────────────────────────────────────────────────────────────────────────
+@router.get("/info/{media_id}")
+async def get_media_info(media_id: str):
+    """Публичный endpoint — отдаёт метаданные + URL'ы кадров для media_id.
+
+    Не требует auth — это специальная точка для того чтобы пользователь мог
+    дать прямую ссылку Claude'у. Sensitive поля (user_email, IP) убираются.
+    """
+    if not media_id or not media_id.replace("-", "").isalnum() or len(media_id) > 64:
+        raise HTTPException(400, "bad media_id")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT timestamp, raw_payload
+              FROM l1_raw_events
+             WHERE domain = 'media_analysis'
+               AND raw_payload->>'media_id' = $1
+             ORDER BY timestamp DESC LIMIT 1
+            """,
+            media_id,
+        )
+    if not row:
+        raise HTTPException(404, "не найдено")
+
+    p = dict(row["raw_payload"]) if isinstance(row["raw_payload"], dict) else json.loads(row["raw_payload"])
+    # Срезаем sensitive поля (IP, email)
+    for k in ("user_id", "user_email", "uploaded_by", "ip"):
+        p.pop(k, None)
+    return {
+        "media_id": p.get("media_id"),
+        "kind": p.get("kind"),
+        "filename": p.get("filename"),
+        "uploaded_at": p.get("uploaded_at"),
+        "duration_sec": p.get("duration_sec"),
+        "size_bytes": p.get("size_bytes"),
+        "has_audio": p.get("has_audio"),
+        "language": p.get("language"),
+        "transcript": p.get("transcript"),
+        "frames_count": p.get("frames_count"),
+        "frames": [
+            {"index": f.get("index"), "ts": f.get("ts"),
+             "url": f.get("url")}
+            for f in (p.get("frames") or [])
+        ],
+        "width": p.get("width"),
+        "height": p.get("height"),
+        "format": p.get("format"),
+        "url": p.get("url"),  # для image
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # GET /api/media/list — последние загрузки (admin)
 # ─────────────────────────────────────────────────────────────────────────
 @router.get("/list")
