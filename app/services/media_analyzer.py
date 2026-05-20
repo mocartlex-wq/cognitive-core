@@ -118,25 +118,40 @@ def _extract_frames_sync(video_path: str, count: int, max_width: int) -> tuple[l
 
 
 def _transcribe_sync(video_path: str) -> tuple[str, str | None, float]:
-    """Транскрипция через faster-whisper. Returns (text, language, duration_ms)."""
+    """Транскрипция через faster-whisper. Returns (text, language, duration_ms).
+
+    Graceful handling: если в видео НЕТ речи (screencast без голоса) или audio
+    silent throughout — faster-whisper падает с 'max() arg is an empty sequence'
+    при попытке auto-detect language из пустых вероятностей. Ловим эту ситуацию
+    и возвращаем пустой transcript вместо exception.
+    """
     started = time.monotonic()
     model = _get_whisper_model()
-    # beam_size=1 — fast greedy, vad_filter — режет тишину
-    segments, info = model.transcribe(
-        video_path,
-        language=None,                # auto-detect
-        beam_size=1,
-        vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500),
-    )
-    parts: list[str] = []
-    for seg in segments:
-        text = (seg.text or "").strip()
-        if text:
-            parts.append(text)
-    transcript = " ".join(parts)
+    try:
+        # beam_size=1 — fast greedy, vad_filter — режет тишину.
+        # language="ru" вместо None: фиксированный язык, не нужен auto-detect,
+        # который падает при пустом аудио. Если речь на другом языке — Whisper
+        # всё равно её распознает (модель multilingual), просто с ru-bias.
+        segments, info = model.transcribe(
+            video_path,
+            language="ru",
+            beam_size=1,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+        )
+        parts: list[str] = []
+        for seg in segments:
+            text = (seg.text or "").strip()
+            if text:
+                parts.append(text)
+        transcript = " ".join(parts)
+        lang = info.language if hasattr(info, "language") else "ru"
+    except (ValueError, RuntimeError) as e:
+        logger.info("transcribe gracefully skipped (likely silent audio): %s", e)
+        transcript = ""
+        lang = None
     duration_ms = (time.monotonic() - started) * 1000
-    return transcript, info.language, duration_ms
+    return transcript, lang, duration_ms
 
 
 # ─────────────────────────────────────────────────────────────────────────
