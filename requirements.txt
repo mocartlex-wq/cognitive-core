@@ -25,5 +25,6 @@ email-validator==2.*
 # Media analysis (2026-05-20) — Whisper транскрипция через CTranslate2 (~4-10× быстрее
 # оригинала на CPU). Модель base (~150MB) подходит для русского + английского.
 faster-whisper==1.0.*
-# Pillow для thumbnail/resize фреймов от ffmpeg
-Pillow==11.*
+# Pillow для thumbnail/resize фреймов от ffmpeg.
+# Версия 10.x — совместимо с fastembed 0.4.x который требует pillow<11.
+Pillow>=10.3.0,<11.0.0
