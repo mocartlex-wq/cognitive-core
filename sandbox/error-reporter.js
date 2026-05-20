@@ -186,9 +186,14 @@
       }
     }
     const msgStr = String(msg);
-    // Игнорируем безобидные AbortError от View Transitions / fetch abort
-    if (name === 'AbortError' && /transition|aborted|signal/i.test(msgStr)) return;
-    if (BENIGN_REJECTIONS.some(re => re.test(msgStr))) return;
+    // Безобидные ошибки — не репортим И скрываем из browser console (preventDefault)
+    const isBenign =
+        (name === 'AbortError' && /transition|aborted|signal/i.test(msgStr)) ||
+        BENIGN_REJECTIONS.some(re => re.test(msgStr));
+    if (isBenign) {
+      e.preventDefault();   // подавляет красную ошибку в DevTools console
+      return;
+    }
 
     send({
       message: msgStr.slice(0, 1000),
