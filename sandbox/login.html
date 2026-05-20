@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>AImail — вход по ссылке из письма</title>
+  <title>AImail — вход</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a73e8'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EA%3C/text%3E%3C/svg%3E">
   <style>
     :root {
@@ -55,16 +55,44 @@
       color: var(--muted);
       font-size: 14.5px;
       text-align: center;
-      margin: 0 0 28px;
+      margin: 0 0 24px;
       line-height: 1.5;
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      background: #f0f2f5;
+      padding: 4px;
+      border-radius: 11px;
+      margin-bottom: 20px;
+    }
+    .tab {
+      flex: 1;
+      padding: 9px 12px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .tab.active {
+      background: var(--card);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
     }
     label {
       display: block;
       font-size: 13px;
       color: var(--muted);
       margin-bottom: 6px;
+      margin-top: 12px;
     }
-    input[type=email] {
+    label:first-of-type { margin-top: 0; }
+    input[type=email], input[type=password] {
       width: 100%;
       font-size: 16px;
       padding: 14px 14px;
@@ -74,12 +102,12 @@
       transition: border-color 0.15s, background 0.15s;
       -webkit-appearance: none;
     }
-    input[type=email]:focus {
+    input[type=email]:focus, input[type=password]:focus {
       outline: none;
       border-color: var(--accent);
       background: #fff;
     }
-    button {
+    button[type=submit] {
       width: 100%;
       margin-top: 16px;
       font-size: 16px;
@@ -92,9 +120,9 @@
       cursor: pointer;
       transition: background 0.15s, transform 0.05s;
     }
-    button:hover:not(:disabled) { background: var(--accent-hover); }
-    button:active:not(:disabled) { transform: translateY(1px); }
-    button:disabled { opacity: 0.6; cursor: progress; }
+    button[type=submit]:hover:not(:disabled) { background: var(--accent-hover); }
+    button[type=submit]:active:not(:disabled) { transform: translateY(1px); }
+    button[type=submit]:disabled { opacity: 0.6; cursor: progress; }
     .msg {
       margin-top: 18px;
       padding: 12px 14px;
@@ -112,6 +140,8 @@
       text-align: center;
       line-height: 1.55;
     }
+    .panel { display: none; }
+    .panel.active { display: block; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
   </style>
@@ -119,51 +149,106 @@
 <body>
   <main class="card">
     <div class="brand">AImail</div>
-    <h1>Вход без пароля</h1>
-    <p class="subtitle">Введите адрес почты — пришлём ссылку для входа. Пароль не нужен.</p>
+    <h1>Вход в аккаунт</h1>
+    <p class="subtitle">Войдите по паролю или получите ссылку на email.</p>
 
-    <form id="loginForm" autocomplete="on">
-      <label for="email">Адрес почты</label>
-      <input
-        id="email"
-        name="email"
-        type="email"
-        autocomplete="email"
-        required
-        placeholder="вы@example.com"
-        spellcheck="false"
-        autocapitalize="off">
-      <button type="submit" id="submitBtn">Прислать ссылку</button>
-      <div id="msg" class="msg"></div>
+    <div class="tabs" role="tablist">
+      <button class="tab active" type="button" data-tab="password" role="tab">По паролю</button>
+      <button class="tab" type="button" data-tab="magiclink" role="tab">По ссылке</button>
+    </div>
+
+    <!-- Вход по паролю -->
+    <form id="passwordForm" class="panel active" autocomplete="on">
+      <label for="emailPw">Адрес почты</label>
+      <input id="emailPw" name="email" type="email" autocomplete="email" required
+             placeholder="вы@example.com" spellcheck="false" autocapitalize="off">
+      <label for="password">Пароль</label>
+      <input id="password" name="password" type="password" autocomplete="current-password"
+             required minlength="1" placeholder="••••••••">
+      <button type="submit" id="pwSubmit">Войти</button>
+      <div id="pwMsg" class="msg"></div>
     </form>
 
-    <p class="hint">
+    <!-- Magic-link -->
+    <form id="magicForm" class="panel" autocomplete="on">
+      <label for="emailMl">Адрес почты</label>
+      <input id="emailMl" name="email" type="email" autocomplete="email" required
+             placeholder="вы@example.com" spellcheck="false" autocapitalize="off">
+      <button type="submit" id="mlSubmit">Прислать ссылку</button>
+      <div id="mlMsg" class="msg"></div>
+    </form>
+
+    <p class="hint" id="hintPw">
+      Если пароль ещё не задан — выберите вкладку «По ссылке».<br>
+      Установить пароль можно в профиле после первого входа.
+    </p>
+    <p class="hint" id="hintMl" style="display: none;">
       Ссылка действительна 15 минут и работает один раз.<br>
-      Если письма нет — проверьте папку «Спам».
+      Если письма нет — проверьте «Спам».
     </p>
   </main>
 
   <script>
-    const form = document.getElementById('loginForm');
-    const btn = document.getElementById('submitBtn');
-    const msg = document.getElementById('msg');
-    const emailInput = document.getElementById('email');
+    const tabs = document.querySelectorAll('.tab');
+    const panels = { password: document.getElementById('passwordForm'),
+                     magiclink: document.getElementById('magicForm') };
+    const hints  = { password: document.getElementById('hintPw'),
+                     magiclink: document.getElementById('hintMl') };
 
-    function showMsg(text, kind) {
-      msg.textContent = text;
-      msg.className = 'msg ' + kind;
+    tabs.forEach(t => t.addEventListener('click', () => {
+      const which = t.dataset.tab;
+      tabs.forEach(x => x.classList.toggle('active', x === t));
+      Object.entries(panels).forEach(([k, p]) => p.classList.toggle('active', k === which));
+      Object.entries(hints).forEach(([k, h]) => h.style.display = (k === which) ? 'block' : 'none');
+    }));
+
+    function setMsg(el, text, kind) {
+      el.textContent = text;
+      el.className = 'msg ' + (kind || '');
     }
 
-    form.addEventListener('submit', async (e) => {
+    document.getElementById('passwordForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const email = emailInput.value.trim();
-      if (!email) return;
+      const email = document.getElementById('emailPw').value.trim();
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('pwSubmit');
+      const msg = document.getElementById('pwMsg');
+      if (!email || !password) return;
+      btn.disabled = true;
+      btn.textContent = 'Входим…';
+      msg.className = 'msg';
+      try {
+        const r = await fetch('/auth/password/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+          credentials: 'same-origin',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.ok) {
+          setMsg(msg, 'Готово, переходим в профиль…', 'ok');
+          setTimeout(() => { location.href = '/ui/profile'; }, 400);
+        } else {
+          setMsg(msg, j.detail || 'Не удалось войти. Проверьте email и пароль.', 'err');
+          btn.disabled = false;
+          btn.textContent = 'Войти';
+        }
+      } catch (err) {
+        setMsg(msg, 'Сеть недоступна. Попробуйте снова.', 'err');
+        btn.disabled = false;
+        btn.textContent = 'Войти';
+      }
+    });
 
+    document.getElementById('magicForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('emailMl').value.trim();
+      const btn = document.getElementById('mlSubmit');
+      const msg = document.getElementById('mlMsg');
+      if (!email) return;
       btn.disabled = true;
       btn.textContent = 'Отправляем…';
       msg.className = 'msg';
-      msg.textContent = '';
-
       try {
         const r = await fetch('/auth/email/request', {
           method: 'POST',
@@ -172,33 +257,30 @@
           credentials: 'same-origin',
         });
         if (r.ok) {
-          showMsg(
-            'Если адрес зарегистрирован — письмо со ссылкой на входящих в течение минуты. ' +
-            'Перейдите в почтовый ящик.',
-            'ok'
-          );
+          setMsg(msg,
+            'Если адрес зарегистрирован — письмо со ссылкой придёт в течение минуты. ' +
+            'Загляните в почтовый ящик.', 'ok');
           btn.textContent = 'Письмо отправлено';
         } else {
           let detail = 'Не получилось отправить письмо. Попробуйте чуть позже.';
-          try {
-            const j = await r.json();
-            if (j && j.detail) detail = j.detail;
-          } catch (_) {}
-          showMsg(detail, 'err');
+          try { const j = await r.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
+          setMsg(msg, detail, 'err');
           btn.disabled = false;
           btn.textContent = 'Прислать ссылку';
         }
       } catch (err) {
-        showMsg('Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
+        setMsg(msg, 'Сеть недоступна. Проверьте интернет и попробуйте снова.', 'err');
         btn.disabled = false;
         btn.textContent = 'Прислать ссылку';
       }
     });
 
-    // Если пришли с ошибкой verify (?error=expired) — покажем
     const params = new URLSearchParams(location.search);
     if (params.get('error') === 'expired') {
-      showMsg('Ссылка устарела или уже использована. Запросите новую.', 'err');
+      setMsg(document.getElementById('mlMsg'), 'Ссылка устарела или уже использована. Запросите новую.', 'err');
+      tabs.forEach(x => x.classList.toggle('active', x.dataset.tab === 'magiclink'));
+      Object.entries(panels).forEach(([k, p]) => p.classList.toggle('active', k === 'magiclink'));
+      Object.entries(hints).forEach(([k, h]) => h.style.display = (k === 'magiclink') ? 'block' : 'none');
     }
   </script>
 </body>

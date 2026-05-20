@@ -1,7 +1,9 @@
-"""Endpoints для magic-link авторизации.
+"""Endpoints для авторизации (magic-link + пароль).
 
   POST   /auth/email/request      — запросить magic-link на email
   GET    /auth/email/verify       — подтвердить (по клику в письме), set cookie
+  POST   /auth/password/login     — войти по паролю (email + пароль), set cookie
+  POST   /auth/password/set       — установить/сменить пароль (требует сессии)
   POST   /auth/logout             — отозвать текущую сессию
   POST   /auth/logout/all         — отозвать все сессии пользователя
   GET    /auth/sessions           — список активных сессий (мои устройства)
@@ -33,6 +35,12 @@ from app.db.postgres import get_pool
 from app.security.middleware import (
     extract_device_info,
     require_user,
+)
+from app.security.password import (
+    hash_password,
+    needs_rehash,
+    validate_password_strength,
+    verify_password,
 )
 from app.security.session import (
     SESSION_COOKIE_NAME,
@@ -288,7 +296,157 @@ async def _apply_owner_bootstrap(conn, user_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 3. Logout
+# 3. Password login + set
+# ─────────────────────────────────────────────────────────────────────────
+class PasswordLoginBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class PasswordSetBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    password: str = Field(..., min_length=8, max_length=256)
+
+
+@router.post("/password/login")
+async def password_login(body: PasswordLoginBody, request: Request, response: Response):
+    """Вход по email + пароль. Если у аккаунта пароль не установлен,
+    но email совпадает с OWNER_BOOTSTRAP_EMAIL и пароль с OWNER_BOOTSTRAP_PASSWORD —
+    аккаунт создаётся автоматически (bootstrap-владелец).
+
+    Возвращает 401 при любой ошибке аутентификации (anti-enumeration —
+    одинаковая ошибка независимо от того, существует ли email).
+    """
+    email_norm = _normalize_email(body.email)
+    bootstrap_email = (settings.owner_bootstrap_email or "").strip().lower()
+    bootstrap_password = (settings.owner_bootstrap_password or "").strip()
+
+    pool = await get_pool()
+    user_id: str | None = None
+    is_new_bootstrap = False
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT user_id::text AS user_id, password_hash, is_admin
+              FROM accounts
+             WHERE email = $1 AND deleted_at IS NULL
+            """,
+            email_norm,
+        )
+
+        if row:
+            # Аккаунт существует — проверяем пароль
+            if not verify_password(body.password, row["password_hash"]):
+                # Bootstrap-владелец без пароля в БД, но с правильным env-паролем —
+                # устанавливаем пароль на лету (одноразовый bootstrap)
+                if (
+                    bootstrap_email
+                    and bootstrap_password
+                    and email_norm == bootstrap_email
+                    and body.password == bootstrap_password
+                    and not row["password_hash"]
+                ):
+                    pw_hash = hash_password(body.password)
+                    await conn.execute(
+                        """
+                        UPDATE accounts
+                           SET password_hash = $1,
+                               password_set_at = NOW(),
+                               last_login_at = NOW(),
+                               is_admin = TRUE
+                         WHERE user_id = $2::uuid
+                        """,
+                        pw_hash, row["user_id"],
+                    )
+                    user_id = row["user_id"]
+                    logger.info("bootstrap_password_set email=%s", email_norm)
+                else:
+                    logger.info("password_login_failed email=%s reason=bad_password", email_norm)
+                    raise HTTPException(status_code=401, detail="Неверный email или пароль")
+            else:
+                user_id = row["user_id"]
+                # Авто-rehash если параметры устарели
+                if needs_rehash(row["password_hash"]):
+                    try:
+                        new_hash = hash_password(body.password)
+                        await conn.execute(
+                            "UPDATE accounts SET password_hash = $1, password_set_at = NOW() "
+                            "WHERE user_id = $2::uuid",
+                            new_hash, user_id,
+                        )
+                    except Exception as e:  # pragma: no cover
+                        logger.warning("rehash_failed user_id=%s err=%s", user_id, e)
+                await conn.execute(
+                    "UPDATE accounts SET last_login_at = NOW() WHERE user_id = $1::uuid",
+                    user_id,
+                )
+
+        else:
+            # Аккаунта нет. Создаём ТОЛЬКО для bootstrap-владельца
+            if (
+                bootstrap_email
+                and bootstrap_password
+                and email_norm == bootstrap_email
+                and body.password == bootstrap_password
+            ):
+                pw_hash = hash_password(body.password)
+                new_row = await conn.fetchrow(
+                    """
+                    INSERT INTO accounts
+                        (email, email_verified, is_admin, password_hash, password_set_at, last_login_at)
+                    VALUES ($1, TRUE, TRUE, $2, NOW(), NOW())
+                    RETURNING user_id::text AS user_id
+                    """,
+                    email_norm, pw_hash,
+                )
+                user_id = new_row["user_id"]
+                is_new_bootstrap = True
+                await _apply_owner_bootstrap(conn, user_id)
+                logger.info("bootstrap_account_created email=%s user_id=%s", email_norm, user_id)
+            else:
+                logger.info("password_login_failed email=%s reason=no_account", email_norm)
+                raise HTTPException(status_code=401, detail="Неверный email или пароль")
+
+    # Создаём сессию + set-cookie
+    device_info = extract_device_info(request)
+    session_id, expires_at = await create_session(
+        user_id=user_id, device_info=device_info,
+    )
+    _set_session_cookie(response, session_id, expires_at)
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "email": email_norm,
+        "is_new": is_new_bootstrap,
+        "session_expires_at": expires_at.isoformat(),
+    }
+
+
+@router.post("/password/set")
+async def password_set(body: PasswordSetBody, request: Request):
+    """Установить/сменить пароль текущего пользователя. Требует валидной сессии."""
+    user = await require_user(request)
+    err = validate_password_strength(body.password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    pw_hash = hash_password(body.password)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE accounts SET password_hash = $1, password_set_at = NOW() "
+            "WHERE user_id = $2::uuid",
+            pw_hash, user.user_id,
+        )
+    logger.info("password_set user_id=%s", user.user_id)
+    return {"ok": True, "message": "Пароль установлен. Используйте его при следующем входе."}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 4. Logout
 # ─────────────────────────────────────────────────────────────────────────
 @router.post("/logout")
 async def logout(request: Request, response: Response):
