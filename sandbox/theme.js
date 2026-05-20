@@ -53,9 +53,9 @@
   // На каждой странице с .top-bar — нужен auth-widget. На каждой — error-reporter.
   document.addEventListener('DOMContentLoaded', () => {
     if (document.querySelector('.top-bar, .top-status')) {
-      ensureScript('/static/auth-widget.js?v=20260520h', '__ccAuthWidgetLoaded');
+      ensureScript('/static/auth-widget.js?v=20260520i', '__ccAuthWidgetLoaded');
     }
-    ensureScript('/static/error-reporter.js?v=20260520b', '__ccErrorReporterLoaded');
+    ensureScript('/static/error-reporter.js?v=20260520c', '__ccErrorReporterLoaded');
   });
 
   // Inject neuron background и icon sprite

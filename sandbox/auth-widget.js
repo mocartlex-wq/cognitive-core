@@ -256,6 +256,11 @@
     if (status && status.authenticated && status.email) {
       renderLoggedIn(container, status);
       injectProfileNavLink();
+      // Retry на случай если nav был перерисован view-transition'ом
+      // или DOM-сменой через bfcache restore — три попытки за 800мс.
+      setTimeout(injectProfileNavLink, 80);
+      setTimeout(injectProfileNavLink, 400);
+      setTimeout(injectProfileNavLink, 800);
     } else {
       renderLoggedOut(container);
     }

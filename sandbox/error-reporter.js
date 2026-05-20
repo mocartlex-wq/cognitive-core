@@ -144,8 +144,13 @@
       });
       return;
     }
+    const msg = String(e.message || e.error || 'unknown');
+    // Та же фильтрация AbortError что и в unhandledrejection — пропускаем
+    if (/transition was skipped|resizeobserver loop|signal is aborted/i.test(msg)) return;
+    if (e.error && e.error.name === 'AbortError' && /transition|aborted|signal/i.test(msg)) return;
+
     send({
-      message: String(e.message || e.error || 'unknown').slice(0, 1000),
+      message: msg.slice(0, 1000),
       stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 2000) : null,
       source: String(e.filename || '').slice(0, 300),
       line: e.lineno || 0,
@@ -155,20 +160,38 @@
   }, true);
 
   // ─── 2. Необработанные Promise rejection ───────────────────────────────
+  // Безобидные ошибки которые НЕ репортим (browser-внутренние, не баги):
+  //   AbortError: Transition was skipped — View Transitions API когда юзер
+  //     быстро кликает по ссылкам подряд. Это by-design поведение.
+  //   AbortError: signal is aborted — отмена fetch при unload страницы.
+  //   ResizeObserver loop limit exceeded — известный chrome бенайн warning.
+  const BENIGN_REJECTIONS = [
+    /transition was skipped/i,
+    /aborted by the user/i,
+    /resizeobserver loop/i,
+    /signal is aborted/i,
+  ];
   window.addEventListener('unhandledrejection', function(e) {
     let msg = 'unhandled promise rejection';
     let stack = null;
+    let name = '';
     if (e.reason) {
       if (typeof e.reason === 'string') msg = e.reason;
       else if (e.reason.message) {
         msg = e.reason.message;
         stack = e.reason.stack || null;
+        name = e.reason.name || '';
       } else {
         try { msg = JSON.stringify(e.reason); } catch (_) { msg = String(e.reason); }
       }
     }
+    const msgStr = String(msg);
+    // Игнорируем безобидные AbortError от View Transitions / fetch abort
+    if (name === 'AbortError' && /transition|aborted|signal/i.test(msgStr)) return;
+    if (BENIGN_REJECTIONS.some(re => re.test(msgStr))) return;
+
     send({
-      message: String(msg).slice(0, 1000),
+      message: msgStr.slice(0, 1000),
       stack: stack ? String(stack).slice(0, 2000) : null,
       error_kind: 'promise',
     });
