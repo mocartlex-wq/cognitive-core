@@ -235,6 +235,19 @@
     }
   }
 
+  // BFCache (back/forward) handling: когда юзер возвращается на страницу
+  // через назад/вперёд, браузер восстанавливает её из памяти БЕЗ повторного
+  // запуска JS. Виджет уже был отрендерён — но статус мог измениться (logout
+  // в другой вкладке). Перепроверяем при pageshow.persisted=true.
+  window.addEventListener('pageshow', function(e) {
+    if (e.persisted) {
+      // Удаляем старый виджет (если был) и пересоздаём заново
+      const old = document.querySelectorAll('.cc-auth');
+      old.forEach(n => n.remove());
+      init();
+    }
+  });
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

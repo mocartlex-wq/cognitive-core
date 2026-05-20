@@ -143,6 +143,15 @@ SANDBOX_DIR = os.path.join(os.path.dirname(__file__), "..", "sandbox")
 app.mount("/static", StaticFiles(directory=SANDBOX_DIR), name="static")
 
 
+# UI HTML-страницы — НЕ кешируем (часто меняем дизайн + auth-зависимый контент).
+# Static (CSS/JS/SVG) кешируется через query-string version, а HTML всегда свежий.
+_NO_CACHE_HTML = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+
+
+def _html(path: str):
+    return FileResponse(os.path.join(SANDBOX_DIR, path), headers=_NO_CACHE_HTML)
+
+
 # Favicon — браузеры автоматически запрашивают /favicon.ico на каждой странице.
 # Без этого route на каждой странице будет 404 в консоли. SVG-иконка inline,
 # без отдельного файла. Кешируется на сутки.
@@ -168,13 +177,13 @@ async def favicon():
 @app.get("/")
 async def home_page():
     """Главная: объяснение идеи проекта + быстрый старт."""
-    return FileResponse(os.path.join(SANDBOX_DIR, "home.html"))
+    return _html("home.html")
 
 
 @app.get("/sandbox")
 async def sandbox_page():
     """API-песочница: формы для всех эндпоинтов."""
-    return FileResponse(os.path.join(SANDBOX_DIR, "index.html"))
+    return _html("index.html")
 
 
 @app.get("/metrics")
@@ -244,19 +253,19 @@ app.include_router(errors_router)
 @app.get("/ui")
 async def dashboard_page():
     """Web-дашборд: live-метрики, обозреватель слоёв, графики."""
-    return FileResponse(os.path.join(SANDBOX_DIR, "dashboard.html"))
+    return _html("dashboard.html")
 
 
 @app.get("/ui/login")
 async def login_page():
     """Страница входа — magic-link."""
-    return FileResponse(os.path.join(SANDBOX_DIR, "login.html"))
+    return _html("login.html")
 
 
 @app.get("/ui/profile")
 async def profile_page():
     """Профиль — мои комнаты, помощники, устройства."""
-    return FileResponse(os.path.join(SANDBOX_DIR, "profile.html"))
+    return _html("profile.html")
 
 
 @app.get("/ui/admin/errors")
@@ -264,7 +273,7 @@ async def admin_errors_page():
     """Админ-панель: лог фронтенд-ошибок. Доступ проверяется в API
     (/api/errors требует is_admin). HTML отдаётся всем, но если нет
     прав — страница покажет 'Нужны права администратора'."""
-    return FileResponse(os.path.join(SANDBOX_DIR, "admin-errors.html"))
+    return _html("admin-errors.html")
 
 
 # ─────────────────────────────────────────────────────────────────────────
