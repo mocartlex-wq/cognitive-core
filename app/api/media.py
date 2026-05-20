@@ -151,11 +151,18 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         # Запустить анализ (фреймы + транскрипция)
         try:
             analysis = await analyze_video(tmp_path)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
-            logger.exception("analyze_video failed")
-            raise HTTPException(status_code=500, detail=f"анализ упал: {type(e).__name__}: {str(e)[:200]}")
+            import traceback
+            tb = traceback.format_exc()
+            logger.warning("analyze_video failed: %s\n%s", e, tb)
+            # Если это ValueError из MAX_VIDEO_DURATION_SEC — 400, иначе 500
+            status = 400 if isinstance(e, ValueError) and "слишком длинн" in str(e) else 500
+            # Возвращаем последние 600 chars traceback чтобы было видно
+            tb_tail = tb[-600:] if len(tb) > 600 else tb
+            raise HTTPException(
+                status_code=status,
+                detail=f"{type(e).__name__}: {str(e)[:200]}\n\nTRACE:\n{tb_tail}",
+            )
 
         # Загрузить фреймы в MinIO
         _ensure_bucket()
