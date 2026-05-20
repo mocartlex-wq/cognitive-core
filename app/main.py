@@ -276,6 +276,26 @@ async def admin_errors_page():
     return _html("admin-errors.html")
 
 
+# Алиасы для login (на случай закладок с trailing slash, короткого пути и т.п.)
+@app.get("/login")
+@app.get("/signin")
+@app.get("/войти")
+@app.get("/ui/login/")
+@app.get("/auth/login")
+async def login_aliases():
+    """Все распространённые варианты URL для входа → редирект на /ui/login."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ui/login", status_code=301)
+
+
+@app.get("/profile")
+@app.get("/ui/profile/")
+async def profile_aliases():
+    """Алиасы для профиля."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ui/profile", status_code=301)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Health
 # ─────────────────────────────────────────────────────────────────────────
