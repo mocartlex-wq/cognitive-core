@@ -246,6 +246,10 @@ app.include_router(user_router)
 from app.api.errors import router as errors_router
 app.include_router(errors_router)
 
+# Media upload + analyze (2026-05-20): /api/media/{video,image,list,frame/...}
+from app.api.media import router as media_router
+app.include_router(media_router)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # UI страницы
@@ -274,6 +278,12 @@ async def admin_errors_page():
     (/api/errors требует is_admin). HTML отдаётся всем, но если нет
     прав — страница покажет 'Нужны права администратора'."""
     return _html("admin-errors.html")
+
+
+@app.get("/ui/admin/media")
+async def admin_media_page():
+    """Админ-панель: загрузка видео/картинок с авто-анализом."""
+    return _html("admin-media.html")
 
 
 # Алиасы для login (на случай закладок с trailing slash, короткого пути и т.п.)

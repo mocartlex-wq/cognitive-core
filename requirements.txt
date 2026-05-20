@@ -22,3 +22,8 @@ httpx==0.28.*
 aiosmtplib==3.*
 # Email validation для pydantic (нужно для EmailStr в auth.py)
 email-validator==2.*
+# Media analysis (2026-05-20) — Whisper транскрипция через CTranslate2 (~4-10× быстрее
+# оригинала на CPU). Модель base (~150MB) подходит для русского + английского.
+faster-whisper==1.0.*
+# Pillow для thumbnail/resize фреймов от ffmpeg
+Pillow==11.*

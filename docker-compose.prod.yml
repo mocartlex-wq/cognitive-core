@@ -58,9 +58,17 @@ services:
     ports: !reset []
     expose:
       - "8000"
+    volumes:
+      # Whisper модель (~150MB для base) — persist между rebuild'ами,
+      # иначе при каждой пересборке скачивается с HuggingFace.
+      - whisper_cache:/data/whisper
+    environment:
+      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
+      WHISPER_CACHE_DIR: /data/whisper
     deploy:
       resources:
-        limits: { cpus: '1.0', memory: 2G }
+        # Bumped: ffmpeg + Whisper транскрипция жрут CPU/RAM при анализе видео
+        limits: { cpus: '2.0', memory: 3G }
         reservations: { cpus: '0.5', memory: 1G }
     logging:
       driver: json-file
@@ -185,3 +193,5 @@ volumes:
   nginx_logs:
   nats_data:
     name: cognitive_nats_data
+  whisper_cache:
+    name: cognitive_whisper_cache
