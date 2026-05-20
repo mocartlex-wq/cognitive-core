@@ -18,3 +18,7 @@ psycopg2-binary==2.9.*
 pytest==8.*
 pytest-asyncio==1.*
 httpx==0.28.*
+# Email (2026-05-17, Фаза 1A) — async SMTP клиент для magic-link писем
+aiosmtplib==3.*
+# Email validation для pydantic (нужно для EmailStr в auth.py)
+email-validator==2.*

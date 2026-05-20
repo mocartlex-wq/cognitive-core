@@ -1,5 +1,16 @@
+"""Cognitive Core FastAPI bootstrap.
+
+Изменения 2026-05-17:
+  • Подключены auth_router + user_router (магик-ссылка вход + профиль)
+  • /ui/login → sandbox/login.html
+  • /ui/profile → sandbox/profile.html
+  • CORS allow_credentials=True для /auth/* и /user/* (нужно для cookies),
+    остальные endpoints — без credentials (агенты ходят через X-API-Key)
+  • Secret-redaction middleware в логах (Phase 3 task 3.2)
+"""
 import asyncio
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -14,7 +25,7 @@ from app.db.redis import init_redis, close_redis
 from app.db.s3 import init_s3
 from app.services.metrics import track_http, log_event
 
-__version__ = "0.5.0"  # bumped 2026-05-07 (was 0.2.0 stale stamp)
+__version__ = "0.6.0"  # bumped 2026-05-17 (accounts + email)
 
 _start_time: datetime | None = None
 _scheduler_task: asyncio.Task | None = None
@@ -61,30 +72,70 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Cognitive Core",
-    description="5-слойная система памяти с AI-куратором",
+    description="5-слойная система памяти с AI-куратором + аккаунты",
     version=__version__,
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # с "*" credentials всё равно блокируются браузером
-    allow_methods=["*"],
-    allow_headers=["*"],
+# CORS: разрешены креды для cookie-flow. Origins по умолчанию — все.
+# Для production'а ставим в .env CORS_ORIGINS_CSV="https://aimail.art,https://mcp.ии-память.рф"
+_origins_env = os.getenv("CORS_ORIGINS_CSV", "").strip()
+if _origins_env:
+    _origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    # Без явных origins нельзя совмещать "*" + credentials=True (браузер откажет).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Secret-redaction для логов (Phase 3 task 3.2)
+# ─────────────────────────────────────────────────────────────────────────
+_REDACT_HEADERS = {
+    "authorization", "x-api-key", "x-room-key", "x-session-id",
+    "cookie", "set-cookie",
+}
+_REDACT_QUERY_RE = re.compile(
+    r"\b(token|api_key|apikey|key|password|secret)=([^&\s]+)",
+    re.IGNORECASE,
 )
+
+
+def _redact_path(path: str, query: str) -> str:
+    """Маскирует sensitive query-параметры в пути для логирования."""
+    if not query:
+        return path
+    masked = _REDACT_QUERY_RE.sub(r"\1=***", query)
+    return f"{path}?{masked}"
 
 
 # HTTP метрики + логирование middleware
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
-    trace_id = log_event("info", "request", method=request.method, path=request.url.path)
+    # Для лога — маскируем токены в URL
+    safe_path = request.url.path
+    if settings.log_redact_secrets and request.url.query:
+        safe_path = _redact_path(request.url.path, request.url.query)
+
+    trace_id = log_event("info", "request", method=request.method, path=safe_path)
     start = time.monotonic()
     response = await call_next(request)
     duration = time.monotonic() - start
     track_http(request.method, request.url.path, response.status_code, duration)
     log_event("info", "response", trace_id=trace_id, method=request.method,
-              path=request.url.path, status=response.status_code, duration_ms=round(duration * 1000, 2))
+              path=safe_path, status=response.status_code, duration_ms=round(duration * 1000, 2))
     return response
 
 
@@ -127,7 +178,9 @@ async def value_error_handler(request: Request, exc: ValueError):
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────
 # Регистрация роутеров
+# ─────────────────────────────────────────────────────────────────────────
 from app.api.events import router as events_router
 from app.api.operative import router as operative_router
 from app.api.memory import router as memory_router
@@ -152,13 +205,37 @@ app.include_router(replication_router)
 from app.api.mcp_protocol import router as mcp_router
 app.include_router(mcp_router)
 
+# Новые роутеры (2026-05-17): аккаунты + magic-link авторизация
+from app.api.auth import router as auth_router
+from app.api.user import router as user_router
+app.include_router(auth_router)
+app.include_router(user_router)
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# UI страницы
+# ─────────────────────────────────────────────────────────────────────────
 @app.get("/ui")
 async def dashboard_page():
     """Web-дашборд: live-метрики, обозреватель слоёв, графики."""
     return FileResponse(os.path.join(SANDBOX_DIR, "dashboard.html"))
 
 
+@app.get("/ui/login")
+async def login_page():
+    """Страница входа — magic-link."""
+    return FileResponse(os.path.join(SANDBOX_DIR, "login.html"))
+
+
+@app.get("/ui/profile")
+async def profile_page():
+    """Профиль — мои комнаты, помощники, устройства."""
+    return FileResponse(os.path.join(SANDBOX_DIR, "profile.html"))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Health
+# ─────────────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     """Проверка здоровья всех сервисов с детализацией."""
@@ -198,6 +275,16 @@ async def health():
             deep["last_l2_buffer"] = last_l2.isoformat() if last_l2 else None
             deep["last_l3_knowledge"] = last_l3.isoformat() if last_l3 else None
             deep["last_l4_snapshot"] = last_l4.isoformat() if last_l4 else None
+            # Новое: счётчики аккаунтов/сессий (если таблицы созданы 0003-миграцией)
+            try:
+                accs = await conn.fetchval("SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL")
+                sess = await conn.fetchval(
+                    "SELECT COUNT(*) FROM sessions WHERE NOT revoked AND expires_at > NOW()"
+                )
+                deep["accounts_active"] = accs or 0
+                deep["sessions_active"] = sess or 0
+            except Exception:
+                deep["accounts_active"] = None  # таблицы ещё не созданы (до миграции 0003)
     except Exception as e:
         status["postgres"] = str(e)
 
@@ -227,6 +314,16 @@ async def health():
         deep["minio_query_ms"] = round((time.monotonic() - t0) * 1000, 1)
     except Exception as e:
         status["minio"] = str(e)
+
+    # ─── Email backend health (легковесная проверка, без отправки) ───────
+    try:
+        deep["email_backend"] = settings.email_backend
+        deep["email_smtp_configured"] = bool(settings.smtp_host and (
+            settings.email_backend == "stdout" or
+            (settings.smtp_user and settings.smtp_password)
+        ))
+    except Exception:
+        pass
 
     # ─── Disk free (host volume; container sees /backups if mounted) ──────
     try:

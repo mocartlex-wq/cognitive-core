@@ -1,0 +1,4 @@
+# OpenDKIM SigningTable
+# Формат: <from-address-pattern> <key-name>
+# Все письма с @__DOMAIN__ подписываются ключом default._domainkey.__DOMAIN__
+*@__DOMAIN__ default._domainkey.__DOMAIN__

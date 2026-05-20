@@ -1,3 +1,8 @@
+"""Settings cognitive-core.
+
+Расширение 2026-05-17: добавлены параметры email + аккаунты для Фазы 1A/2.
+Все новые поля имеют дефолты — старые .env-файлы продолжают работать без изменений.
+"""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
 
@@ -76,6 +81,40 @@ class Settings(BaseSettings):
 
     # Язык
     system_language: str = "ru"  # ru / en / zh
+
+    # ─────────────────────────────────────────────────────────────────────
+    # EMAIL + АККАУНТЫ (добавлено 2026-05-17, Фаза 1A/2)
+    # ─────────────────────────────────────────────────────────────────────
+    # Бекенд для отправки писем: "yandex" (smtp.yandex.ru), "postfix" (свой),
+    # "stdout" (для dev — печатает письмо в лог вместо отправки).
+    email_backend: str = "stdout"
+
+    smtp_host: str = "smtp.yandex.ru"
+    smtp_port: int = 465
+    smtp_user: str = ""           # для yandex — mozartlex@yandex.ru
+    smtp_password: str = ""       # для yandex — APP-PASSWORD (не обычный пароль!)
+
+    email_from: str = "mozartlex@yandex.ru"
+    email_from_name: str = "AImail"
+    email_reply_to: str = "noreply@aimail.art"
+
+    # Корневой URL приложения — используется при формировании magic-link
+    # и редиректа после входа. На сервере: https://mcp.xn----8sbwawqx4fza.xn--p1ai
+    # или https://aimail.art когда DNS заработает.
+    app_url: str = "https://aimail.art"
+    magic_link_ttl_minutes: int = 15
+
+    # Email владельца-bootstrap. При первом входе под этим адресом
+    # пользователь получает is_admin=TRUE + все legacy комнаты/помощники
+    # привязываются к его user_id. Пусто = bootstrap не применяется.
+    owner_bootstrap_email: str = ""
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Логирование (Phase 3 — секреты редактируются автоматически)
+    # ─────────────────────────────────────────────────────────────────────
+    # Если True, middleware маскирует значения чувствительных заголовков
+    # и query-параметров в access-логе.
+    log_redact_secrets: bool = True
 
     def get_agent_keys(self) -> dict:
         return json.loads(self.agent_api_keys)

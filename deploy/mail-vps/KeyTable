@@ -1,0 +1,4 @@
+# OpenDKIM KeyTable
+# Формат: <name> <domain>:<selector>:<path-to-private-key>
+# Placeholder: __DOMAIN__ заменяется setup.sh
+default._domainkey.__DOMAIN__ __DOMAIN__:default:/etc/opendkim/keys/__DOMAIN__/default.private
