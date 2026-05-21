@@ -176,7 +176,10 @@
   <div class="card">
     <h2>
       Мои помощники
-      <button id="newAgentBtn" class="btn secondary btn-sm">+ Добавить</button>
+      <span style="display:flex;gap:6px">
+        <button id="claimTokenBtn" class="btn secondary btn-sm" title="Сгенерировать одноразовый код — передайте его помощнику, он сам подключится">🪄 Передать помощнику</button>
+        <button id="newAgentBtn" class="btn secondary btn-sm">+ Добавить</button>
+      </span>
     </h2>
     <div id="agentsBlock" class="empty">Загружаем…</div>
   </div>
@@ -191,6 +194,31 @@
     <p class="msg-line">Аккаунт помечается на удаление. Можно восстановить в течение 30 дней.</p>
   </div>
 </main>
+
+<dialog id="claimTokenDialog">
+  <h3>🪄 Передать ключ помощнику</h3>
+  <p style="font-size:13px;color:var(--glass-text-dim);margin:0 0 14px;line-height:1.5">
+    Сгенерируем одноразовый код. Передайте его в чат с Claude Code / Cursor —
+    помощник сам подключится, отредактирует свой ~/.claude.json, попросит вас
+    перезапустить. Никаких manual edit'ов файлов.
+  </p>
+  <form id="claimTokenForm">
+    <label for="claimTokenAgentId">agent_id (необязательно)</label>
+    <input id="claimTokenAgentId" name="agent_id" pattern="[a-zA-Z0-9._\-]*" maxlength="64" placeholder="auto-generated если пусто">
+    <label for="claimTokenMachine">Машина (необязательно)</label>
+    <input id="claimTokenMachine" name="machine_hint" maxlength="128" placeholder="MacBook жены / ноут в офисе">
+    <label for="claimTokenPlatform">Платформа</label>
+    <select id="claimTokenPlatform" name="platform" style="width:100%;padding:11px 13px;font-size:14px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--font);box-sizing:border-box">
+      <option value="claude_code">Claude Code (default)</option>
+      <option value="cursor">Cursor IDE</option>
+    </select>
+    <div class="toolbar">
+      <button type="button" class="btn secondary btn-sm" onclick="document.getElementById('claimTokenDialog').close()">Отмена</button>
+      <button type="submit" class="btn btn-sm">Сгенерировать</button>
+    </div>
+    <div id="claimTokenResult" style="display:none"></div>
+  </form>
+</dialog>
 
 <dialog id="newAgentDialog">
   <h3>Новый помощник</h3>
@@ -347,6 +375,55 @@
   }
   // Кнопка «Выйти» удалена из top-bar — logout теперь через auth-widget dropdown.
   // Старый listener больше не нужен.
+  // ─── Claim-token: «🪄 Передать ключ помощнику» ──────────────────
+  document.getElementById('claimTokenBtn').addEventListener('click', () => {
+    document.getElementById('claimTokenResult').style.display = 'none';
+    document.getElementById('claimTokenResult').innerHTML = '';
+    document.getElementById('claimTokenDialog').showModal();
+  });
+  document.getElementById('claimTokenForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+      agent_id: form.agent_id.value.trim() || null,
+      machine_hint: form.machine_hint.value.trim() || null,
+      platform: form.platform.value,
+    };
+    const r = await api('/user/connect/issue-claim-token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!r) return;
+    const j = await r.json();
+    const result = document.getElementById('claimTokenResult');
+    result.style.display = 'block';
+    if (r.ok && j.token) {
+      const promptText = j.prompt_for_agent || '';
+      result.innerHTML = `
+        <p style="margin: 14px 0 6px; color: #4cc960; font-weight: 600;">✓ Готово! Код для агента:</p>
+        <div class="api-key-display" style="font-size: 22px; letter-spacing: 3px; text-align: center; padding: 18px;">${esc(j.token)}</div>
+        <p class="msg-line">Действителен ${Math.round(j.expires_in_seconds/60)} минут. После использования сгорает.</p>
+        <p class="msg-line" style="margin-top: 14px;"><strong>agent_id будет:</strong> <code>${esc(j.agent_id)}</code></p>
+        <p style="margin: 14px 0 6px; font-size: 12.5px; color: var(--glass-text-dim); font-weight: 600;">📋 Промпт для копирования в чат с помощником:</p>
+        <pre style="background: rgba(0,0,0,0.35); border: 1px solid var(--glass-border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; color: #e6edf3;">${esc(promptText)}</pre>
+        <div class="toolbar">
+          <button class="btn btn-sm" onclick="copyText(this, ${JSON.stringify(promptText)})">📋 Скопировать промпт</button>
+          <button class="btn secondary btn-sm" onclick="copyText(this, '${esc(j.token)}')">Скопировать только код</button>
+          <button class="btn secondary btn-sm" onclick="document.getElementById('claimTokenDialog').close(); location.reload();">Готово</button>
+        </div>`;
+    } else {
+      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
+    }
+  });
+  function copyText(btn, text) {
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = '✓ Скопировано';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    });
+  }
+  window.copyText = copyText;
+
   document.getElementById('newAgentBtn').addEventListener('click', () => {
     document.getElementById('newAgentDialog').showModal();
   });

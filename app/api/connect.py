@@ -46,6 +46,19 @@ MCP_MESSAGES_URL = f"{BASE_URL}/mcp/messages"
 _QR_TOKENS: dict[str, dict] = {}
 QR_TTL_SECONDS = 600
 
+# Claim tokens — короткие коды для «agent self-onboarding»:
+# owner генерит в своей сессии, передаёт агенту, агент обменивает на api_key.
+# Формат: 8 hex-символов в виде XXXX-XXXX (легко читать вслух).
+# TTL 10 минут, one-shot consumption.
+_CLAIM_TOKENS: dict[str, dict] = {}
+CLAIM_TTL_SECONDS = 600
+
+
+def _generate_claim_token() -> str:
+    """Generate human-readable 8-hex claim token формата XXXX-XXXX."""
+    raw = secrets.token_hex(4).upper()  # 8 hex chars
+    return f"{raw[:4]}-{raw[4:]}"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Models
@@ -524,6 +537,133 @@ async def resolve_mobile_token(token: str):
         "agent_id": entry["agent_id"],
         "api_key": entry["api_key"],
         "base_url": BASE_URL,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Claim-token flow — «agent self-onboarding»
+# ─────────────────────────────────────────────────────────────────────────
+class IssueClaimBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str | None = Field(None, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
+    machine_hint: str | None = Field(None, max_length=128)
+    platform: str = Field("claude_code", description="claude_code|cursor — определяет mcp config target")
+
+
+@router.post("/issue-claim-token")
+async def issue_claim_token(body: IssueClaimBody, request: Request):
+    """Сгенерировать short claim-token который агент обменяет на api_key.
+
+    Flow:
+      1. Owner в своей сессии (authenticated) дёргает этот endpoint
+      2. Получает короткий код типа AB12-CD34 (TTL 10 мин)
+      3. Передаёт код агенту в чат: «вот claim AB12-CD34, подключись»
+      4. Агент дёргает GET /user/connect/claim?token=AB12-CD34 (public)
+      5. Получает api_key + config — обменивает токен на per-agent ключ
+
+    Безопасность:
+      • Токен короткий (~32 бит entropy) но short-lived (10 мин)
+      • One-shot: после claim записан в _CLAIM_TOKENS, удаляется при первом GET
+      • Не передаёт сам api_key — только пред-создаёт агента под user
+    """
+    user = await require_user(request)
+    token = _generate_claim_token()
+    # Default agent_id если не задан — суффикс от платформы
+    default_id = body.agent_id or f"{body.platform.split('_')[0]}-{secrets.token_hex(3)}"
+
+    _CLAIM_TOKENS[token] = {
+        "user_id": user.user_id,
+        "agent_id": default_id,
+        "machine_hint": body.machine_hint,
+        "platform": body.platform,
+        "created_at": time.time(),
+    }
+    return {
+        "token": token,
+        "expires_in_seconds": CLAIM_TTL_SECONDS,
+        "agent_id": default_id,
+        "prompt_for_agent": (
+            f"Привет! Подключись к Cognitive Core под моим аккаунтом. "
+            f"Сделай GET https://mcp.xn----8sbwawqx4fza.xn--p1ai/user/connect/claim?token={token} — "
+            f"получишь свой api_key + готовый JSON для ~/.claude.json (mcp-remote). "
+            f"После получения через Edit tool аккуратно вставь mcpServers.cognitive-core "
+            f"в config (не перезаписывай existing servers). Затем попроси меня перезапустить "
+            f"Claude Code/Cursor — после рестарта у тебя появятся 24 MCP-инструмента."
+        ),
+    }
+
+
+@router.get("/claim")
+async def claim_token(token: str):
+    """Public endpoint — агент обменивает claim-token на свой api_key + config.
+
+    One-shot: токен удаляется при первом успешном claim. Если кто-то ещё
+    попробует тот же токен — получит 404 «expired».
+    """
+    token_clean = (token or "").strip().upper()
+    entry = _CLAIM_TOKENS.pop(token_clean, None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Claim-token не найден или уже использован")
+    if time.time() - entry["created_at"] > CLAIM_TTL_SECONDS:
+        raise HTTPException(status_code=410, detail="Claim-token истёк (>10 мин)")
+
+    # Создаём агента под этого user'a — используем reusable _create_agent_core
+    class _FakeUser:
+        user_id = entry["user_id"]
+    create_body = CreateAgentBody(
+        agent_id=entry["agent_id"],
+        description=f"Self-onboarded via claim-token at {datetime.utcnow().isoformat()}",
+        machine=entry.get("machine_hint"),
+        project="claim-onboard",
+    )
+    try:
+        agent = await _create_agent_core(_FakeUser(), create_body)
+    except HTTPException as e:
+        if e.status_code == 409:
+            # Race / re-claim попытка: возможно агент уже создан, скажем нет
+            raise HTTPException(
+                status_code=409,
+                detail=f"Помощник с id «{entry['agent_id']}» уже существует. Сгенерируйте новый claim-token.",
+            )
+        raise
+
+    api_key = agent["api_key"]
+    platform = entry.get("platform", "claude_code")
+
+    # Строим mcp config (для Claude Code / Cursor одинаковый)
+    mcp_config = {
+        "mcpServers": {
+            "cognitive-core": {
+                "command": "npx",
+                "args": ["-y", "mcp-remote", MCP_SSE_URL, "--header", f"X-API-Key: {api_key}"],
+            },
+        },
+    }
+
+    logger.info(
+        "claim_consumed user_id=%s agent_id=%s platform=%s",
+        entry["user_id"], entry["agent_id"], platform,
+    )
+
+    return {
+        "agent_id": entry["agent_id"],
+        "api_key": api_key,
+        "platform": platform,
+        "mcp_url": MCP_SSE_URL,
+        "base_url": BASE_URL,
+        "mcp_config": mcp_config,
+        "instructions": (
+            f"Установка для агента:\n"
+            f"1. Откройте config-файл (приоритет):\n"
+            f"   • Claude Code: ~/.claude.json\n"
+            f"   • Claude Desktop macOS: ~/Library/Application Support/Claude/claude_desktop_config.json\n"
+            f"   • Claude Desktop Windows: %APPDATA%\\Claude\\claude_desktop_config.json\n"
+            f"   • Cursor: ~/.cursor/mcp.json или .cursor/mcp.json\n"
+            f"2. Под ключом mcpServers добавьте новую запись cognitive-core (НЕ перезаписывайте existing).\n"
+            f"3. Используйте Edit/jq для surgical edit, не overwrite.\n"
+            f"4. После — попросите user'а перезапустить приложение.\n"
+            f"5. После рестарта у вас появятся 24 MCP-инструмента."
+        ),
     }
 
 
