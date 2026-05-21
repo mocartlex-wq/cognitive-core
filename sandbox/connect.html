@@ -335,11 +335,21 @@
       <div class="warn">Сохраните сейчас — больше показать нельзя. После закрытия страницы — придётся создавать новый helping.</div>
     </div>
 
-    <h2>📋 Конфиг для копирования</h2>
+    <div id="installTabs" style="display:none">
+      <div style="display:flex; gap:8px; margin-bottom:14px;">
+        <button class="btn" id="tabAgentBtn" onclick="switchTab('agent')">🤖 Поручить помощнику</button>
+        <button class="btn secondary" id="tabManualBtn" onclick="switchTab('manual')">📝 Вручную</button>
+      </div>
+      <p id="tabHint" style="font-size:12.5px;color:var(--glass-text-dim);margin:0 0 14px">
+        💡 Помощник может сам отредактировать config через Edit/Bash tools — не надо лезть в файлы.
+      </p>
+    </div>
+
+    <h2 id="artifactTitle">📋 Конфиг для копирования</h2>
     <div class="code-wrap">
       <div class="code-actions">
         <button class="btn secondary icon" onclick="copyArtifact()" id="copyBtn">Скопировать</button>
-        <button class="btn secondary icon" onclick="downloadArtifact()">Скачать</button>
+        <button class="btn secondary icon" onclick="downloadArtifact()" id="downloadBtn">Скачать</button>
       </div>
       <pre class="code" id="artifactCode">…</pre>
     </div>
@@ -559,20 +569,53 @@ $('step2Next').addEventListener('click', async () => {
 });
 
 // ─── Step 3: render artifact ────────────────────────────────────
+let activeTab = 'agent';  // 'agent' or 'manual'
+
 function renderStep3() {
   $('step3PlatformName').textContent = `${state.selectedPlatform.icon} ${state.selectedPlatform.name}`;
   $('apiKeyDisplay').textContent = state.agent.api_key;
-  $('artifactCode').textContent = state.artifact.content;
+  // Если артефакт имеет agent_prompt — показываем табы (recommended path)
+  if (state.artifact.agent_prompt) {
+    $('installTabs').style.display = '';
+    activeTab = 'agent';
+    switchTab('agent');
+  } else {
+    $('installTabs').style.display = 'none';
+    $('artifactCode').textContent = state.artifact.content;
+  }
   $('artifactInstructions').textContent = state.artifact.instructions;
 }
 
+function switchTab(tab) {
+  activeTab = tab;
+  if (tab === 'agent' && state.artifact.agent_prompt) {
+    $('artifactCode').textContent = state.artifact.agent_prompt;
+    $('artifactTitle').textContent = '🤖 Промпт для помощника — скопируйте и вставьте в чат';
+    $('tabHint').textContent = '💡 Помощник прочитает промпт, сам отредактирует ~/.claude.json через Edit/Bash tools, попросит вас перезапустить.';
+    $('downloadBtn').style.display = 'none';
+    // Update button styles
+    $('tabAgentBtn').classList.remove('secondary');
+    $('tabManualBtn').classList.add('secondary');
+  } else {
+    $('artifactCode').textContent = state.artifact.content;
+    $('artifactTitle').textContent = '📋 Конфиг для копирования вручную';
+    $('tabHint').textContent = '✋ Откройте файл ~/.claude.json в редакторе и добавьте секцию `mcpServers.cognitive-core` из JSON ниже.';
+    $('downloadBtn').style.display = '';
+    $('tabAgentBtn').classList.add('secondary');
+    $('tabManualBtn').classList.remove('secondary');
+  }
+}
+
 function copyArtifact() {
-  navigator.clipboard.writeText(state.artifact.content).then(() => {
+  const text = (activeTab === 'agent' && state.artifact.agent_prompt)
+    ? state.artifact.agent_prompt
+    : state.artifact.content;
+  navigator.clipboard.writeText(text).then(() => {
     const btn = $('copyBtn');
     const orig = btn.textContent;
     btn.textContent = '✓ Скопировано';
     setTimeout(() => { btn.textContent = orig; }, 1500);
-    track(state.selectedPlatform.id, 'copied');
+    track(state.selectedPlatform.id, 'copied', `tab=${activeTab}`);
   });
 }
 

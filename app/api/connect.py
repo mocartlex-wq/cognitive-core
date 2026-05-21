@@ -146,7 +146,14 @@ PLATFORMS: list[dict[str, Any]] = [
 # Artifact builders — по одному на платформу
 # ─────────────────────────────────────────────────────────────────────────
 def _build_mcp_json(agent_id: str, api_key: str) -> dict[str, Any]:
-    """Конфиг для Claude Code / Claude Desktop / Cursor mcpServers."""
+    """Конфиг для Claude Code / Claude Desktop / Cursor mcpServers.
+
+    Возвращает ДВА артефакта:
+      1) agent_prompt — готовый промпт для копирования в чат с помощником
+         (помощник сам отредактирует ~/.claude.json через Edit/Bash tools).
+         Это recommended path — нулевой touch файлов.
+      2) content — raw JSON для manual paste (legacy).
+    """
     config = {
         "mcpServers": {
             "cognitive-core": {
@@ -155,19 +162,48 @@ def _build_mcp_json(agent_id: str, api_key: str) -> dict[str, Any]:
             },
         },
     }
+    raw_json = json.dumps(config, indent=2, ensure_ascii=False)
+    agent_prompt = f"""Привет! Я подключаю тебя как помощника к Cognitive Core — это 5-слойная самохостимая память для AI-агентов (https://mcp.xn----8sbwawqx4fza.xn--p1ai).
+
+Пожалуйста добавь меня в свой MCP-конфиг. Найди файл (по приоритету):
+  • Claude Code: ~/.claude.json
+  • Claude Desktop macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
+  • Claude Desktop Windows: %APPDATA%\\Claude\\claude_desktop_config.json
+  • Cursor: ~/.cursor/mcp.json или .cursor/mcp.json в проекте
+
+В корне JSON под ключом "mcpServers" добавь новую запись "cognitive-core":
+
+{raw_json}
+
+ВАЖНО:
+  • Сохраняй существующие mcpServers (если есть) — добавь как новый ключ, не перетирай.
+  • Используй Edit tool (или jq для surgical edit) — НЕ перезаписывай весь файл.
+  • Мой agent_id: {agent_id} — он же зашит в api_key выше.
+  • API key — секретный, не логируй и не пересылай.
+
+После сохранения скажи мне сделать рестарт (я перезапущу Claude Code/Cursor вручную). У тебя появятся 24 MCP-инструмента: cognitive_remember, cognitive_recall, cognitive_send, cognitive_inbox, room_join, room_post, room_read, room_ask, room_answer и т.д.
+
+Подтверди что конфиг сохранён и я могу рестартить."""
+
     return {
         "kind": "mcp_json",
         "filename": "claude_mcp_config.json",
         "mime": "application/json",
-        "content": json.dumps(config, indent=2, ensure_ascii=False),
+        "content": raw_json,
+        "agent_prompt": agent_prompt,  # NEW — для табы «🤖 Поручить помощнику»
         "instructions": (
-            f"1. Откройте файл `~/.claude.json` (Claude Code) или `claude_desktop_config.json` "
+            f"📌 Два способа подключения (выберите один):\n\n"
+            f"🤖 СПОСОБ A (рекомендуется): просто скопируйте промпт «Поручить помощнику» "
+            f"и вставьте в чат с Claude Code/Cursor — помощник сам отредактирует "
+            f"~/.claude.json через свои инструменты Edit/Bash.\n\n"
+            f"📝 СПОСОБ B (вручную):\n"
+            f"  1. Откройте `~/.claude.json` (Claude Code) или `claude_desktop_config.json` "
             f"(Claude Desktop) или `.cursor/mcp.json` (Cursor).\n"
-            f"2. Добавьте секцию `mcpServers.cognitive-core` из этого JSON в существующий config.\n"
-            f"3. Перезапустите приложение.\n"
-            f"4. У помощника появятся 24 MCP-инструмента: cognitive_remember, cognitive_recall, "
-            f"cognitive_send, room_post и т.д.\n"
-            f"5. agent_id вашего помощника: `{agent_id}` — это его «имя» в системе."
+            f"  2. Добавьте секцию `mcpServers.cognitive-core` из JSON в существующий config.\n"
+            f"  3. Перезапустите приложение.\n\n"
+            f"После любого способа: у помощника появятся 24 MCP-инструмента — "
+            f"cognitive_remember, cognitive_recall, room_post и т.д.\n"
+            f"agent_id вашего помощника: `{agent_id}`."
         ),
     }
 
