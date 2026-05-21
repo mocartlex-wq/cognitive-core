@@ -248,12 +248,24 @@
   const CACHE_KEY = 'cc_auth_status_cache_v1';
 
   function renderStatus(container, status) {
-    // Если есть pre-render skeleton от head-bootstrap.js с тем же email —
-    // не пересоздаём. Только догружаем dropdown (через apgrade в renderLoggedIn).
-    // Это устраняет визуальный скачок «skeleton → полный widget».
+    // Если есть pre-render skeleton от head-bootstrap.js с подходящим состоянием —
+    // не пересоздаём резким remove+create, просто заменяем skeleton в место полным
+    // виджетом. Это устраняет визуальный скачок «skeleton → полный widget».
+    //
+    // Skeleton может быть двух видов:
+    //   logged-in: <button> с .cc-auth-email содержащим email
+    //   logged-out: <a> «Войти»
+    // Match: skeleton-state совпадает с фактическим status.
     const pre = container.querySelector('.cc-auth[data-pre="1"]');
-    const preMatches = pre && status && status.authenticated && status.email &&
-                       (pre.querySelector('.cc-auth-email')?.textContent === status.email);
+    let preMatches = false;
+    if (pre && status) {
+      const preEmail = pre.querySelector('.cc-auth-email');
+      if (status.authenticated && status.email && preEmail) {
+        preMatches = preEmail.textContent === status.email;
+      } else if (!status.authenticated && !preEmail) {
+        preMatches = true;  // оба logged-out
+      }
+    }
 
     if (preMatches) {
       // Upgrade in-place: убираем skeleton-метку и рендерим полноценный widget

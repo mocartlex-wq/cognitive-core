@@ -36,19 +36,23 @@
 
   // ─── 2. Pre-render auth-widget из localStorage cache ───────────────────
   // Cache-key совпадает с auth-widget.js (CACHE_KEY = 'cc_auth_status_cache_v1').
-  // Рендерим только если юзер залогинен — иначе пусть auth-widget сам
-  // отрисует кнопку «Войти» (она быстрая, не критично).
+  // Поддерживаем три состояния:
+  //   logged-in (cached.authenticated && email) → email-кнопка skeleton
+  //   logged-out (cached.authenticated === false) → «Войти» кнопка skeleton
+  //   unknown (нет cache, первый визит) → НЕ рендерим — auth-widget сам решит
+  // Цель: на каждой странице (кроме самого первого визита) — top-status
+  // моментально занят правильным виджетом, БЕЗ дырки на 50-200ms.
   var cached;
   try {
     cached = JSON.parse(localStorage.getItem('cc_auth_status_cache_v1') || 'null');
   } catch (_) { cached = null; }
-  if (!cached || !cached.authenticated || !cached.email) return;
+  if (!cached) return;  // первый визит — пусть auth-widget сам отработает
 
-  var email = String(cached.email).replace(/[&<>"']/g, function(ch) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
-  });
-  var adminChip = cached.is_admin
-    ? ' <span class="cc-auth-admin-chip">Админ</span>'
+  var isLoggedIn = cached.authenticated && cached.email;
+  var email = isLoggedIn
+    ? String(cached.email).replace(/[&<>"']/g, function(ch) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+      })
     : '';
 
   function renderSkeleton() {
@@ -57,13 +61,22 @@
     if (status.querySelector('.cc-auth')) return;  // уже отрисован
     // skeleton помечен data-pre="1" — auth-widget.js его заменит на полноценный
     // виджет с dropdown «Профиль / Мои комнаты / Выйти» без визуального скачка
-    var html =
-      '<div class="cc-auth" data-pre="1">' +
-        '<button class="cc-auth-btn" type="button" aria-haspopup="true" aria-expanded="false">' +
-          '<span class="cc-auth-dot"></span>' +
-          '<span class="cc-auth-email">' + email + '</span>' +
-        '</button>' +
-      '</div>';
+    var html;
+    if (isLoggedIn) {
+      html =
+        '<div class="cc-auth" data-pre="1">' +
+          '<button class="cc-auth-btn" type="button" aria-haspopup="true" aria-expanded="false">' +
+            '<span class="cc-auth-dot"></span>' +
+            '<span class="cc-auth-email">' + email + '</span>' +
+          '</button>' +
+        '</div>';
+    } else {
+      // logged-out skeleton — точно такой же href что и auth-widget renderLoggedOut
+      html =
+        '<div class="cc-auth" data-pre="1">' +
+          '<a class="cc-auth-btn" href="/ui/login">Войти</a>' +
+        '</div>';
+    }
     status.insertAdjacentHTML('beforeend', html);
     // Стили для skeleton (минимум — чтобы выглядел как готовый виджет).
     // Полноценные стили вставит auth-widget.js при загрузке.
