@@ -51,7 +51,11 @@ QR_TTL_SECONDS = 600
 # Формат: 8 hex-символов в виде XXXX-XXXX (легко читать вслух).
 # TTL 10 минут, one-shot consumption.
 _CLAIM_TOKENS: dict[str, dict] = {}
+# Audit-trail uses: чтобы различать «никогда не было» vs «уже использован» vs «истёк».
+# Хранит {token: {used_at, used_by_ip, original_user_id}} ~1 час, потом cleanup.
+_CLAIM_TOKENS_USED: dict[str, dict] = {}
 CLAIM_TTL_SECONDS = 600
+CLAIM_USED_AUDIT_TTL = 3600  # 1 час видна история «used by browser» для диагностики
 
 
 def _generate_claim_token() -> str:
@@ -594,18 +598,56 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
 
 
 @router.get("/claim")
-async def claim_token(token: str):
+async def claim_token(token: str, request: Request):
     """Public endpoint — агент обменивает claim-token на свой api_key + config.
 
-    One-shot: токен удаляется при первом успешном claim. Если кто-то ещё
-    попробует тот же токен — получит 404 «expired».
+    One-shot: токен удаляется при первом успешном claim. Различает три
+    состояния для понятных error-msg:
+      404 «никогда не было» — токен not in active or audit store
+      410 «уже использован»  — в audit store с used_at
+      410 «истёк (>10 мин)»  — в active store но created_at > TTL
     """
     token_clean = (token or "").strip().upper()
+
+    # Cleanup старых audit-записей (lazy, при каждом запросе)
+    now = time.time()
+    expired_audit = [t for t, e in _CLAIM_TOKENS_USED.items()
+                     if now - e["used_at"] > CLAIM_USED_AUDIT_TTL]
+    for t in expired_audit:
+        _CLAIM_TOKENS_USED.pop(t, None)
+
+    # Проверка audit-store — был ли уже использован?
+    audit = _CLAIM_TOKENS_USED.get(token_clean)
+    if audit:
+        used_ago = int(now - audit["used_at"])
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                f"Claim-token уже использован {used_ago} сек назад "
+                f"(IP …{audit['used_by_ip'][-8:]}). Часто это значит что URL "
+                f"открылся в browser-preview, антивирусе или search-краулере. "
+                f"Сгенерируйте НОВЫЙ токен и передайте его текстом, не как ссылку."
+            ),
+        )
+
     entry = _CLAIM_TOKENS.pop(token_clean, None)
     if not entry:
-        raise HTTPException(status_code=404, detail="Claim-token не найден или уже использован")
-    if time.time() - entry["created_at"] > CLAIM_TTL_SECONDS:
-        raise HTTPException(status_code=410, detail="Claim-token истёк (>10 мин)")
+        raise HTTPException(
+            status_code=404,
+            detail="Claim-token не существует. Проверьте регистр или сгенерируйте новый в /ui/profile.",
+        )
+    if now - entry["created_at"] > CLAIM_TTL_SECONDS:
+        raise HTTPException(status_code=410, detail="Claim-token истёк (>10 минут). Сгенерируйте новый.")
+
+    # Запишем в audit store ДО создания агента (на случай если create упал —
+    # юзер сможет понять что токен был валидный)
+    client_ip = (request.client.host if request.client else "?") or "?"
+    _CLAIM_TOKENS_USED[token_clean] = {
+        "used_at": now,
+        "used_by_ip": client_ip,
+        "original_user_id": entry["user_id"],
+        "agent_id": entry["agent_id"],
+    }
 
     # Создаём агента под этого user'a — используем reusable _create_agent_core
     class _FakeUser:
