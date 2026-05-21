@@ -320,45 +320,12 @@ async def connect_mobile_page():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Static helpers — раздача cogmedia + installers из scripts/ (не sandbox/)
-# StaticFiles мoнтирован на sandbox/, эти явные routes имеют приоритет.
+# Static installers: cogmedia + install-cogcore.{sh,ps1} раздаются как
+# обычные файлы из sandbox/ (через StaticFiles mount выше). Source-of-truth
+# живёт в scripts/, копии в sandbox/ обновляются при коммите. Это потому
+# что StaticFiles mount перехватывает /static/* раньше route handlers,
+# и явные @app.get('/static/...') routes были бы недостижимы.
 # ─────────────────────────────────────────────────────────────────────────
-from fastapi.responses import FileResponse
-
-_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
-
-
-@app.get("/static/cogmedia")
-async def serve_cogmedia():
-    """cogmedia bash-скрипт — раздаётся для curl-based установки."""
-    path = os.path.join(_SCRIPTS_DIR, "cogmedia")
-    return FileResponse(
-        path,
-        media_type="text/x-shellscript",
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
-
-
-@app.get("/static/install-cogcore.sh")
-async def serve_install_sh():
-    """Linux/macOS installer (curl ... | bash)."""
-    path = os.path.join(_SCRIPTS_DIR, "install-cogcore.sh")
-    return FileResponse(
-        path,
-        media_type="text/x-shellscript",
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
-
-
-@app.get("/static/install-cogcore.ps1")
-async def serve_install_ps1():
-    """Windows PowerShell installer (iwr ... | iex)."""
-    path = os.path.join(_SCRIPTS_DIR, "installer-cogcore.ps1")
-    return FileResponse(
-        path,
-        media_type="text/x-powershell",
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
 
 
 # Алиасы для login (на случай закладок с trailing slash, короткого пути и т.п.)
