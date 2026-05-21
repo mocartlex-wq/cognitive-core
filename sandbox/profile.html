@@ -203,8 +203,8 @@
     перезапустить. Никаких manual edit'ов файлов.
   </p>
   <form id="claimTokenForm">
-    <label for="claimTokenAgentId">agent_id (необязательно)</label>
-    <input id="claimTokenAgentId" name="agent_id" pattern="[a-zA-Z0-9._\-]*" maxlength="64" placeholder="auto-generated если пусто">
+    <label for="claimTokenAgentId">agent_id (необязательно — мин 3 символа)</label>
+    <input id="claimTokenAgentId" name="agent_id" pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64" placeholder="auto-generated если пусто">
     <label for="claimTokenMachine">Машина (необязательно)</label>
     <input id="claimTokenMachine" name="machine_hint" maxlength="128" placeholder="MacBook жены / ноут в офисе">
     <label for="claimTokenPlatform">Платформа</label>

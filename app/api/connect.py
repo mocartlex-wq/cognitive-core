@@ -550,7 +550,10 @@ async def resolve_mobile_token(token: str):
 # ─────────────────────────────────────────────────────────────────────────
 class IssueClaimBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    agent_id: str | None = Field(None, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
+    # min_length=3 — иначе claim фейлится в _create_agent_core (CreateAgentBody
+    # требует min_length=3) после того как Redis GETDEL уже consume'нул токен.
+    # Owner мог случайно ввести «8» — теперь rejected на issue-этапе.
+    agent_id: str | None = Field(None, min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
     machine_hint: str | None = Field(None, max_length=128)
     platform: str = Field("claude_code", description="claude_code|cursor — определяет mcp config target")
 
@@ -615,6 +618,7 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
     }
 
 
+@router.post("/claim")
 @router.get("/claim")
 async def claim_token(token: str, request: Request):
     """Public endpoint — агент обменивает claim-token на свой api_key + config.
@@ -701,11 +705,19 @@ async def claim_token(token: str, request: Request):
         "agent_id": entry["agent_id"],
     }
 
+    # Защитный fallback на случай legacy токенов выпущенных ДО min_length=3
+    # фикса (там agent_id мог быть короткий или странный). Регенерим default.
+    requested_agent_id = entry["agent_id"] or ""
+    if len(requested_agent_id) < 3 or not requested_agent_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
+        platform = entry.get("platform", "claude_code")
+        requested_agent_id = f"{platform.split('_')[0]}-{secrets.token_hex(3)}"
+        logger.warning("legacy short agent_id from claim, regenerated to %s", requested_agent_id)
+
     # Создаём агента под этого user'a — используем reusable _create_agent_core
     class _FakeUser:
         user_id = entry["user_id"]
     create_body = CreateAgentBody(
-        agent_id=entry["agent_id"],
+        agent_id=requested_agent_id,
         description=f"Self-onboarded via claim-token at {datetime.utcnow().isoformat()}",
         machine=entry.get("machine_hint"),
         project="claim-onboard",
