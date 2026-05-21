@@ -168,16 +168,22 @@ class CreateAgentBody(BaseModel):
     capabilities: list[str] | None = None
 
 
-@router.post("/agents/create")
-async def create_agent(body: CreateAgentBody, request: Request):
-    """Зарегистрировать нового помощника и выдать ему API key.
+async def _create_agent_core(user, body: CreateAgentBody) -> dict:
+    """Реализация регистрации помощника. Reusable из других routers
+    (connect.py wizard) — без HTTP-hop, без повторного require_user.
 
-    Помощник сразу привязан к текущему пользователю (owner_user_id).
-    Возвращает api_key один раз — после этого его нельзя увидеть снова.
+    Параметры:
+        user: объект пользователя с .user_id (из require_user / session)
+        body: CreateAgentBody уже валидированный
+
+    Returns:
+        dict с полями ok, agent_id, api_key, warning.
+
+    Raises:
+        HTTPException 409 если agent_id занят.
     """
     import json as _json
 
-    user = await require_user(request)
     api_key = secrets.token_urlsafe(32)
 
     pool = await get_pool()
@@ -224,6 +230,19 @@ async def create_agent(body: CreateAgentBody, request: Request):
         "api_key": api_key,
         "warning": "Сохраните api_key — больше его показать нельзя.",
     }
+
+
+@router.post("/agents/create")
+async def create_agent(body: CreateAgentBody, request: Request):
+    """Зарегистрировать нового помощника и выдать ему API key.
+
+    Помощник сразу привязан к текущему пользователю (owner_user_id).
+    Возвращает api_key один раз — после этого его нельзя увидеть снова.
+
+    Тонкий wrapper над _create_agent_core() для reuse из connect.py wizard.
+    """
+    user = await require_user(request)
+    return await _create_agent_core(user, body)
 
 
 # ─────────────────────────────────────────────────────────────────────────

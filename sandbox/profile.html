@@ -194,6 +194,11 @@
 
 <dialog id="newAgentDialog">
   <h3>Новый помощник</h3>
+  <p style="font-size:13px;color:var(--glass-text-dim);margin:0 0 14px;line-height:1.5">
+    Хотите готовый конфиг для Claude Code / ChatGPT / мобильного?
+    <a href="/ui/connect" style="color:var(--glass-orb-1);font-weight:600">→ Пошаговый wizard</a>
+    (5 шагов, проверка end-to-end).
+  </p>
   <form id="newAgentForm">
     <label for="newAgentId">Идентификатор (латиница, цифры, дефис)</label>
     <input id="newAgentId" name="agent_id" required pattern="[a-zA-Z0-9._\-]+" maxlength="64">
@@ -368,9 +373,11 @@
         <div class="api-key-display">${esc(j.api_key)}</div>
         <p class="msg-line">⚠ Сохраните этот ключ — больше его показать нельзя.</p>
         <div class="toolbar">
-          <button class="btn btn-sm" onclick="copyKey(this, '${esc(j.api_key)}')">Скопировать</button>
+          <button class="btn btn-sm" onclick="copyKey(this, '${esc(j.api_key)}')">Скопировать ключ</button>
+          <a class="btn btn-sm" href="/ui/connect?agent_id=${encodeURIComponent(j.agent_id)}&step=3" style="background:#ff8c42;color:#0a0e14">🔌 Подключить к платформе</a>
           <button class="btn secondary btn-sm" onclick="document.getElementById('newAgentDialog').close(); location.reload();">Готово</button>
-        </div>`;
+        </div>
+        <p class="msg-line" style="margin-top:8px">💡 Wizard поможет вставить ключ в нужное место для Claude Code / ChatGPT / Mobile.</p>`;
     } else {
       result.style.display = 'block';
       result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;

@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Подключить помощника — Cognitive Core</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EC%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/shared.css?v=20260520j">
+<link rel="stylesheet" href="/static/glass.css?v=20260520i">
+<style>
+  html, body { background: var(--glass-base-bg) !important; color: var(--glass-text) !important; }
+  body { min-height: 100vh; }
+
+  .page { max-width: 920px; margin: 32px auto 80px; padding: 0 20px; position: relative; z-index: 1; }
+
+  /* ── Progress bar ─────────────────────────────────────────────── */
+  .stepper {
+    display: flex; gap: 8px; margin-bottom: 28px;
+    padding: 0 6px;
+  }
+  .stepper .step {
+    flex: 1; height: 5px; border-radius: 999px;
+    background: var(--glass-border);
+    transition: background 0.25s;
+  }
+  .stepper .step.done { background: var(--glass-orb-1); }
+  .stepper .step.active {
+    background: linear-gradient(90deg, var(--glass-orb-1), var(--glass-orb-2));
+    box-shadow: 0 0 8px rgba(88,166,255,0.4);
+  }
+  .step-title {
+    font-size: 12px; font-weight: 600; letter-spacing: 1.4px;
+    color: var(--glass-text-dim); text-transform: uppercase;
+    margin: 0 0 18px; padding: 0 6px;
+  }
+  .step-title strong { color: var(--glass-text); margin-right: 8px; }
+
+  /* ── Card ────────────────────────────────────────────────────── */
+  .card {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--apple-radius);
+    box-shadow: var(--glass-shadow);
+    padding: 28px 32px; margin-bottom: 18px;
+  }
+  .card h1 { margin: 0 0 8px; font-size: 24px; font-weight: 700; color: var(--glass-text); }
+  .card .sub { color: var(--glass-text-dim); font-size: 14.5px; margin: 0 0 24px; }
+  .card h2 { margin: 0 0 14px; font-size: 17px; font-weight: 600; color: var(--glass-text); }
+
+  /* ── Platform tiles (Step 1) ─────────────────────────────────── */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .tile {
+    padding: 18px 16px;
+    background: var(--glass-bg-light);
+    border: 1.5px solid var(--glass-border);
+    border-radius: 14px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, transform 0.1s;
+    text-align: left;
+    font-family: inherit;
+    color: inherit;
+  }
+  .tile:hover { border-color: var(--glass-orb-1); background: rgba(88,166,255,0.06); }
+  .tile.selected {
+    border-color: var(--glass-orb-1);
+    background: rgba(88,166,255,0.13);
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.18) inset;
+  }
+  .tile .icon { font-size: 28px; line-height: 1; margin-bottom: 8px; }
+  .tile .name { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+  .tile .desc { font-size: 12.5px; color: var(--glass-text-dim); line-height: 1.4; }
+  .tile .tier {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 6px;
+  }
+  .tile .tier.best { background: rgba(63,185,80,0.18); color: #4cc960; }
+  .tile .tier.simple { background: rgba(88,166,255,0.18); color: #58a6ff; }
+  .tile .tier.power { background: rgba(255,140,66,0.18); color: #ff8c42; }
+
+  /* ── Form inputs ─────────────────────────────────────────────── */
+  .field { margin: 14px 0; }
+  .field label {
+    display: block; font-size: 11.5px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--glass-text-dim);
+    margin-bottom: 6px; font-weight: 600;
+  }
+  .field input {
+    width: 100%; padding: 11px 13px; font-size: 14px;
+    border-radius: 9px; border: 1px solid var(--glass-border);
+    background: var(--glass-bg-light); color: var(--glass-text);
+    font-family: var(--font); box-sizing: border-box;
+  }
+  .field input:focus { outline: none; border-color: var(--glass-orb-1); }
+  .field input.error { border-color: #ff7770; }
+  .field .hint { font-size: 12px; color: var(--glass-text-dim); margin-top: 5px; }
+  .field .err { font-size: 12px; color: #ff7770; margin-top: 5px; }
+
+  /* ── Buttons ─────────────────────────────────────────────────── */
+  .btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  .btn-row.between { justify-content: space-between; }
+  .btn {
+    font-size: 14px; font-weight: 600; padding: 11px 22px;
+    border-radius: 10px; border: 0; cursor: pointer;
+    background: var(--glass-orb-1); color: #0a0e14;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+    transition: filter 0.15s; font-family: var(--font);
+  }
+  .btn:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.secondary {
+    background: var(--glass-bg-light); color: var(--glass-text);
+    border: 1px solid var(--glass-border);
+  }
+  .btn.secondary:hover:not(:disabled) { background: rgba(255,255,255,0.06); }
+  .btn.icon { padding: 8px 14px; font-size: 13px; }
+
+  /* ── Code blocks ─────────────────────────────────────────────── */
+  pre.code {
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    overflow-x: auto;
+    max-height: 360px;
+    color: #e6edf3;
+    margin: 0;
+  }
+  .code-wrap { position: relative; }
+  .code-actions {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; gap: 6px;
+  }
+  .code-actions .btn { padding: 5px 11px; font-size: 11.5px; }
+
+  /* ── API key display ─────────────────────────────────────────── */
+  .api-key-box {
+    background: rgba(255,140,66,0.08);
+    border: 1.5px solid rgba(255,140,66,0.3);
+    border-radius: 12px; padding: 16px 18px; margin: 18px 0;
+  }
+  .api-key-box .lbl {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: #ff8c42; font-weight: 700; margin-bottom: 8px;
+  }
+  .api-key-box .key {
+    font-family: var(--mono); font-size: 13px; word-break: break-all;
+    line-height: 1.5; color: var(--glass-text);
+    user-select: all;
+  }
+  .api-key-box .warn {
+    font-size: 12px; color: var(--glass-text-dim); margin-top: 10px;
+  }
+
+  /* ── Instructions list ───────────────────────────────────────── */
+  .instructions {
+    background: rgba(88,166,255,0.06);
+    border-left: 3px solid var(--glass-orb-1);
+    padding: 14px 18px;
+    border-radius: 0 10px 10px 0;
+    margin: 16px 0;
+    white-space: pre-wrap;
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--glass-text);
+  }
+
+  /* ── Verify step ─────────────────────────────────────────────── */
+  .verify-state {
+    text-align: center;
+    padding: 36px 20px;
+  }
+  .verify-state .big {
+    font-size: 56px;
+    line-height: 1;
+    margin-bottom: 14px;
+  }
+  .verify-state .msg {
+    font-size: 16px;
+    color: var(--glass-text);
+    margin: 0 0 8px;
+  }
+  .verify-state .meta {
+    font-size: 12.5px;
+    color: var(--glass-text-dim);
+  }
+  .verify-state.success .big { color: #4cc960; }
+  .verify-state.timeout .big { color: #ff8c42; }
+  .verify-state .spinner {
+    width: 44px; height: 44px;
+    margin: 0 auto 14px;
+    border: 4px solid rgba(88,166,255,0.2);
+    border-top: 4px solid var(--glass-orb-1);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Media drag-drop ─────────────────────────────────────────── */
+  .media-drop {
+    border: 2.5px dashed var(--glass-border);
+    border-radius: 14px;
+    padding: 30px 20px;
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s;
+    cursor: pointer;
+  }
+  .media-drop:hover, .media-drop.over {
+    border-color: var(--glass-orb-1);
+    background: rgba(88,166,255,0.05);
+  }
+  .media-drop .icon { font-size: 36px; margin-bottom: 8px; }
+  .media-drop .txt { font-size: 14px; color: var(--glass-text); margin: 0 0 4px; }
+  .media-drop .sub { font-size: 12px; color: var(--glass-text-dim); }
+
+  .media-result {
+    margin-top: 16px;
+    padding: 14px;
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .media-result.success { border-color: rgba(63,185,80,0.4); background: rgba(63,185,80,0.06); }
+  .media-result.error { border-color: rgba(248,81,73,0.4); background: rgba(248,81,73,0.06); }
+  .media-result .url { word-break: break-all; color: var(--glass-orb-1); }
+
+  /* ── Spoiler «другие платформы» ──────────────────────────────── */
+  .spoiler summary {
+    cursor: pointer; color: var(--glass-text-dim);
+    font-size: 13px; padding: 8px 0;
+    user-select: none;
+  }
+  .spoiler[open] summary { color: var(--glass-text); }
+  .spoiler[open] { margin-top: 12px; }
+
+  /* ── Responsive ──────────────────────────────────────────────── */
+  @media (max-width: 640px) {
+    .page { margin: 16px auto 60px; padding: 0 12px; }
+    .card { padding: 20px 18px; }
+    .tiles { grid-template-columns: 1fr; }
+    .btn-row { flex-direction: column-reverse; }
+    .btn { width: 100%; justify-content: center; }
+  }
+</style>
+<script src="/static/head-bootstrap.js?v=20260521b"></script>
+</head>
+<body class="glass-mode">
+<div class="orb-3"></div>
+
+<div class="top-bar">
+  <a class="brand" href="/">
+    <div class="brand-icon"><span class="brand-dot"></span></div>
+    <div>
+      <div class="brand-name">Cognitive Core</div>
+      <span class="brand-ver">подключение</span>
+    </div>
+  </a>
+  <nav class="top-nav">
+    <a href="/">Главная</a>
+    <a href="/ui/team">AI-чат</a>
+    <a href="/ui">Комнаты</a>
+    <a href="/ui/profile">Профиль</a>
+    <a href="/sandbox">API</a>
+  </nav>
+  <div class="top-status">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Сменить тему" aria-label="Сменить тему">
+      <svg class="icon icon-sun"><use href="#sun"/></svg>
+      <svg class="icon icon-moon"><use href="#moon"/></svg>
+    </button>
+  </div>
+</div>
+
+<main class="page">
+  <div class="stepper">
+    <div class="step" data-step="1"></div>
+    <div class="step" data-step="2"></div>
+    <div class="step" data-step="3"></div>
+    <div class="step" data-step="4"></div>
+    <div class="step" data-step="5"></div>
+  </div>
+  <div class="step-title"><strong id="stepNum">Шаг 1</strong> <span id="stepName">Выберите платформу</span></div>
+
+  <!-- ─── STEP 1: PLATFORM ─────────────────────────────────────── -->
+  <section class="card step-card" id="step1">
+    <h1>Подключить помощника к Cognitive Core</h1>
+    <p class="sub">За 5 минут: память + комнаты + чтение медиа. Выберите где живёт ваш помощник — мы сгенерируем готовый конфиг.</p>
+    <div class="tiles" id="platformTiles"></div>
+    <div class="btn-row">
+      <button class="btn" id="step1Next" disabled>Дальше →</button>
+    </div>
+  </section>
+
+  <!-- ─── STEP 2: NAME ─────────────────────────────────────────── -->
+  <section class="card step-card" id="step2" style="display:none">
+    <h1>Имя помощника</h1>
+    <p class="sub">Это «agent_id» — уникальное имя в системе. Можно оставить дефолтное.</p>
+    <div class="field">
+      <label>agent_id</label>
+      <input type="text" id="agentIdInput" placeholder="claude-code-laptop"
+             pattern="[a-zA-Z0-9._\-]+" minlength="3" maxlength="64">
+      <div class="hint">3-64 символа, латиница + цифры + точки/дефисы/подчёркивания</div>
+      <div class="err" id="agentIdErr" style="display:none"></div>
+    </div>
+    <div class="field">
+      <label>Машина (необязательно)</label>
+      <input type="text" id="machineInput" placeholder="MacBook Pro M2 / ноут жены / офис">
+      <div class="hint">Для отличия если у вас несколько помощников</div>
+    </div>
+    <div class="btn-row between">
+      <button class="btn secondary" onclick="goStep(1)">← Назад</button>
+      <button class="btn" id="step2Next" disabled>Создать и продолжить →</button>
+    </div>
+  </section>
+
+  <!-- ─── STEP 3: INSTALL ──────────────────────────────────────── -->
+  <section class="card step-card" id="step3" style="display:none">
+    <h1>Установка</h1>
+    <p class="sub" id="step3PlatformName">…</p>
+
+    <div class="api-key-box">
+      <div class="lbl">🔑 API-ключ (показывается один раз)</div>
+      <div class="key" id="apiKeyDisplay">…</div>
+      <div class="warn">Сохраните сейчас — больше показать нельзя. После закрытия страницы — придётся создавать новый helping.</div>
+    </div>
+
+    <h2>📋 Конфиг для копирования</h2>
+    <div class="code-wrap">
+      <div class="code-actions">
+        <button class="btn secondary icon" onclick="copyArtifact()" id="copyBtn">Скопировать</button>
+        <button class="btn secondary icon" onclick="downloadArtifact()">Скачать</button>
+      </div>
+      <pre class="code" id="artifactCode">…</pre>
+    </div>
+
+    <h2 style="margin-top:22px">📝 Что делать</h2>
+    <div class="instructions" id="artifactInstructions">…</div>
+
+    <details class="spoiler">
+      <summary>Альтернативные каналы установки (CLI / QR / другая платформа)</summary>
+      <p style="font-size:13px;color:var(--glass-text-dim);margin:8px 0 0">
+        Вы можете <a href="?step=1" style="color:var(--glass-orb-1)">вернуться к шагу 1</a> и выбрать другую платформу для этого же agent_id — конфиг будет другой, ключ тот же.
+      </p>
+    </details>
+
+    <div class="btn-row between">
+      <button class="btn secondary" onclick="goStep(2)">← Назад</button>
+      <button class="btn" onclick="goStep(4)">Дальше: тест медиа →</button>
+    </div>
+  </section>
+
+  <!-- ─── STEP 4: MEDIA ────────────────────────────────────────── -->
+  <section class="card step-card" id="step4" style="display:none">
+    <h1>Проверка медиа (необязательно)</h1>
+    <p class="sub">Загрузите картинку или видео — помощник сможет «увидеть» её через cognitive_recall domain:media_analysis.</p>
+
+    <h2>🌐 Способ A: drag-drop в браузер</h2>
+    <div class="media-drop" id="mediaDrop">
+      <div class="icon">📁</div>
+      <div class="txt">Перетащите файл сюда или нажмите чтобы выбрать</div>
+      <div class="sub">.png .jpg .mp4 .mov .mp3 .wav (до 200 MB)</div>
+      <input type="file" id="mediaFile" style="display:none" accept="image/*,video/*,audio/*">
+    </div>
+    <div id="mediaResult"></div>
+
+    <h2 style="margin-top:22px">💻 Способ B: CLI с локальной машины</h2>
+    <div class="code-wrap">
+      <div class="code-actions">
+        <button class="btn secondary icon" onclick="copyCliCmd()">Скопировать</button>
+      </div>
+      <pre class="code" id="cliCmd">…</pre>
+    </div>
+    <p style="font-size:12.5px;color:var(--glass-text-dim);margin-top:8px">
+      Требует установленного `cogmedia` (см. шаг 3 для CLI-платформы).
+    </p>
+
+    <div class="btn-row between">
+      <button class="btn secondary" onclick="goStep(3)">← Назад</button>
+      <button class="btn" onclick="goStep(5)">Дальше: проверка →</button>
+    </div>
+  </section>
+
+  <!-- ─── STEP 5: VERIFY ───────────────────────────────────────── -->
+  <section class="card step-card" id="step5" style="display:none">
+    <h1>Проверка связи</h1>
+    <p class="sub">Скажите помощнику «remember domain:test task:hello» — он должен сразу записать это через cognitive_remember.</p>
+    <div class="verify-state" id="verifyState">
+      <div class="spinner"></div>
+      <div class="msg">Ожидаем первое событие от помощника…</div>
+      <div class="meta">Поллинг каждые 2 секунды, таймаут 90 секунд</div>
+    </div>
+    <div class="btn-row between">
+      <button class="btn secondary" onclick="goStep(4)">← Назад</button>
+      <a class="btn" href="/ui/profile" id="goProfileBtn" style="display:none">Открыть профиль →</a>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/theme.js?v=20260520"></script>
+<script src="/static/error-reporter.js?v=20260521b" defer></script>
+<script src="/static/auth-widget.js?v=20260521b" defer></script>
+<script>
+'use strict';
+
+// ─── State ──────────────────────────────────────────────────────
+const state = {
+  platforms: [],
+  selectedPlatform: null,  // {id, name, icon, ...}
+  agentId: '',
+  machineHint: '',
+  agent: null,    // {api_key, ...}
+  artifact: null, // {kind, content, instructions, ...}
+  verifyTimer: null,
+  verifyDeadline: 0,
+};
+
+const STEP_NAMES = {
+  1: 'Выберите платформу',
+  2: 'Имя помощника',
+  3: 'Установка',
+  4: 'Проверка медиа',
+  5: 'Проверка связи',
+};
+
+// ─── Helpers ────────────────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+function track(channel, action, detail) {
+  fetch('/user/connect/track', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({channel: channel || 'unknown', action, detail: detail || null}),
+  }).catch(() => {});
+}
+
+function goStep(n) {
+  document.querySelectorAll('.step-card').forEach(c => c.style.display = 'none');
+  $(`step${n}`).style.display = '';
+  document.querySelectorAll('.stepper .step').forEach(el => {
+    const i = parseInt(el.dataset.step);
+    el.classList.toggle('done', i < n);
+    el.classList.toggle('active', i === n);
+  });
+  $('stepNum').textContent = `Шаг ${n}`;
+  $('stepName').textContent = STEP_NAMES[n];
+  window.scrollTo({top: 0, behavior: 'smooth'});
+
+  if (n === 5) startVerifyPolling();
+  else stopVerifyPolling();
+  if (n === 4) updateCliCmd();
+}
+
+// ─── Step 1: load platforms ─────────────────────────────────────
+async function loadPlatforms() {
+  const r = await fetch('/user/connect/platforms', {credentials: 'same-origin'});
+  if (!r.ok) {
+    $('platformTiles').innerHTML = '<p style="color:#ff7770">Не удалось загрузить список платформ</p>';
+    return;
+  }
+  const data = await r.json();
+  state.platforms = data.platforms || [];
+  $('platformTiles').innerHTML = state.platforms.map(p => `
+    <button class="tile" data-id="${escHtml(p.id)}">
+      <div class="icon">${escHtml(p.icon || '🔌')}</div>
+      <div class="tier ${escHtml(p.tier || 'simple')}">${escHtml(p.tier || 'simple')}</div>
+      <div class="name">${escHtml(p.name)}</div>
+      <div class="desc">${escHtml(p.description)}</div>
+    </button>
+  `).join('');
+  document.querySelectorAll('.tile').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.tile').forEach(t => t.classList.remove('selected'));
+      el.classList.add('selected');
+      state.selectedPlatform = state.platforms.find(p => p.id === el.dataset.id);
+      $('step1Next').disabled = false;
+      track(state.selectedPlatform.id, 'opened');
+    });
+  });
+}
+
+$('step1Next').addEventListener('click', () => {
+  if (!state.selectedPlatform) return;
+  // Default agent_id
+  const platformShort = state.selectedPlatform.id.split('_')[0];
+  const rand = Math.random().toString(36).slice(2, 8);
+  $('agentIdInput').value = `${platformShort}-${rand}`;
+  $('step2Next').disabled = false;
+  goStep(2);
+});
+
+// ─── Step 2: name + machine ─────────────────────────────────────
+$('agentIdInput').addEventListener('input', async () => {
+  const v = $('agentIdInput').value.trim();
+  const errEl = $('agentIdErr');
+  errEl.style.display = 'none';
+  $('agentIdInput').classList.remove('error');
+
+  if (!v || v.length < 3) {
+    $('step2Next').disabled = true;
+    return;
+  }
+  if (!/^[a-zA-Z0-9._\-]+$/.test(v)) {
+    errEl.textContent = 'Только латиница, цифры, точка, дефис, подчёркивание';
+    errEl.style.display = '';
+    $('agentIdInput').classList.add('error');
+    $('step2Next').disabled = true;
+    return;
+  }
+  $('step2Next').disabled = false;
+});
+
+$('step2Next').addEventListener('click', async () => {
+  $('step2Next').disabled = true;
+  $('step2Next').textContent = 'Создаём…';
+  state.agentId = $('agentIdInput').value.trim();
+  state.machineHint = $('machineInput').value.trim();
+
+  try {
+    const r = await fetch('/user/connect/generate', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        agent_id: state.agentId,
+        platform: state.selectedPlatform.id,
+        machine_hint: state.machineHint || null,
+      }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      $('agentIdErr').textContent = err.detail || `HTTP ${r.status}`;
+      $('agentIdErr').style.display = '';
+      $('step2Next').disabled = false;
+      $('step2Next').textContent = 'Создать и продолжить →';
+      return;
+    }
+    state.agent = await r.json();
+    state.artifact = state.agent.artifact;
+    renderStep3();
+    goStep(3);
+    track(state.selectedPlatform.id, 'verified', 'agent_created');
+  } catch (e) {
+    $('agentIdErr').textContent = 'Сетевая ошибка: ' + (e.message || e);
+    $('agentIdErr').style.display = '';
+    $('step2Next').disabled = false;
+    $('step2Next').textContent = 'Создать и продолжить →';
+  }
+});
+
+// ─── Step 3: render artifact ────────────────────────────────────
+function renderStep3() {
+  $('step3PlatformName').textContent = `${state.selectedPlatform.icon} ${state.selectedPlatform.name}`;
+  $('apiKeyDisplay').textContent = state.agent.api_key;
+  $('artifactCode').textContent = state.artifact.content;
+  $('artifactInstructions').textContent = state.artifact.instructions;
+}
+
+function copyArtifact() {
+  navigator.clipboard.writeText(state.artifact.content).then(() => {
+    const btn = $('copyBtn');
+    const orig = btn.textContent;
+    btn.textContent = '✓ Скопировано';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+    track(state.selectedPlatform.id, 'copied');
+  });
+}
+
+function downloadArtifact() {
+  const blob = new Blob([state.artifact.content], {type: state.artifact.mime || 'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = state.artifact.filename || 'config.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Step 4: media ──────────────────────────────────────────────
+function updateCliCmd() {
+  if (!state.agent) return;
+  $('cliCmd').textContent =
+    `# Linux/macOS\nCOGNITIVE_API_KEY='${state.agent.api_key}' cogmedia /path/to/file.png\n\n` +
+    `# Windows PowerShell\n$env:COGNITIVE_API_KEY = '${state.agent.api_key}'\ncogmedia C:\\path\\to\\file.png`;
+}
+
+function copyCliCmd() {
+  navigator.clipboard.writeText($('cliCmd').textContent);
+}
+
+$('mediaDrop').addEventListener('click', () => $('mediaFile').click());
+$('mediaDrop').addEventListener('dragover', e => {
+  e.preventDefault();
+  $('mediaDrop').classList.add('over');
+});
+$('mediaDrop').addEventListener('dragleave', () => $('mediaDrop').classList.remove('over'));
+$('mediaDrop').addEventListener('drop', e => {
+  e.preventDefault();
+  $('mediaDrop').classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) uploadMedia(f);
+});
+$('mediaFile').addEventListener('change', e => {
+  if (e.target.files[0]) uploadMedia(e.target.files[0]);
+});
+
+async function uploadMedia(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  let endpoint;
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext)) endpoint = '/api/media/image';
+  else if (['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'].includes(ext)) endpoint = '/api/media/video';
+  else if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'opus'].includes(ext)) endpoint = '/api/media/audio';
+  else {
+    $('mediaResult').innerHTML = `<div class="media-result error">Неподдерживаемое расширение: .${escHtml(ext)}</div>`;
+    return;
+  }
+
+  $('mediaResult').innerHTML = `<div class="media-result">Загружаем «${escHtml(file.name)}» (${(file.size/1024/1024).toFixed(1)} MB)…</div>`;
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'X-API-Key': state.agent.api_key},
+      body: fd,
+    });
+    if (!r.ok) {
+      const err = await r.text();
+      $('mediaResult').innerHTML = `<div class="media-result error">Ошибка ${r.status}: ${escHtml(err.slice(0, 200))}</div>`;
+      track('media_drag_drop', 'failed', `HTTP ${r.status}`);
+      return;
+    }
+    const data = await r.json();
+    const url = data.url || (data.frames && data.frames[0] && data.frames[0].url) || '';
+    $('mediaResult').innerHTML = `
+      <div class="media-result success">
+        ✓ Загружено за ${(data.transcript_duration_ms || 0).toFixed(0)}мс<br>
+        <small>media_id: <code>${escHtml(data.media_id)}</code></small><br>
+        ${url ? `<small>URL: <a class="url" href="${url}" target="_blank">${escHtml(url)}</a></small>` : ''}
+        ${data.transcript ? `<small>Транскрипт: «${escHtml(data.transcript.slice(0, 200))}»</small>` : ''}
+      </div>
+    `;
+    track('media_drag_drop', 'verified', `kind=${data.kind}`);
+  } catch (e) {
+    $('mediaResult').innerHTML = `<div class="media-result error">Сетевая ошибка: ${escHtml(e.message || e)}</div>`;
+    track('media_drag_drop', 'failed', String(e.message || e));
+  }
+}
+
+// ─── Step 5: verify ─────────────────────────────────────────────
+function startVerifyPolling() {
+  stopVerifyPolling();
+  state.verifyDeadline = Date.now() + 90 * 1000;
+  pollVerify();
+  state.verifyTimer = setInterval(pollVerify, 2000);
+}
+
+function stopVerifyPolling() {
+  if (state.verifyTimer) { clearInterval(state.verifyTimer); state.verifyTimer = null; }
+}
+
+async function pollVerify() {
+  if (!state.agent) return;
+  try {
+    const r = await fetch(`/user/agents/${encodeURIComponent(state.agent.agent_id)}/verify`, {
+      credentials: 'same-origin',
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.verified) {
+      stopVerifyPolling();
+      $('verifyState').className = 'verify-state success';
+      $('verifyState').innerHTML = `
+        <div class="big">✓</div>
+        <p class="msg">Помощник пишет в память!</p>
+        <p class="meta">Последнее событие: ${data.last_event_at || data.last_heartbeat_at || '—'}</p>
+      `;
+      $('goProfileBtn').style.display = '';
+      track(state.selectedPlatform.id, 'verified', 'end-to-end');
+      return;
+    }
+    if (Date.now() > state.verifyDeadline) {
+      stopVerifyPolling();
+      $('verifyState').className = 'verify-state timeout';
+      $('verifyState').innerHTML = `
+        <div class="big">⌛</div>
+        <p class="msg">Помощник пока молчит</p>
+        <p class="meta">${escHtml(data.hint || 'Проверьте что конфиг применён и помощник перезапущен')}</p>
+        <p style="margin-top:14px;font-size:12px">
+          <a href="javascript:startVerifyPolling()" style="color:var(--glass-orb-1)">Попробовать ещё раз</a>
+        </p>
+      `;
+      track(state.selectedPlatform.id, 'failed', 'verify_timeout');
+    }
+  } catch (e) {
+    // Network errors игнорируем — продолжаем поллить
+  }
+}
+
+// ─── Utils ──────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ─── Init ───────────────────────────────────────────────────────
+(function init() {
+  loadPlatforms();
+  const url = new URL(location.href);
+  const startStep = parseInt(url.searchParams.get('step') || '1');
+  const preAgentId = url.searchParams.get('agent_id');
+  if (preAgentId) {
+    $('agentIdInput').value = preAgentId;
+    state.agentId = preAgentId;
+  }
+  goStep(Math.max(1, Math.min(5, startStep)));
+})();
+</script>
+</body>
+</html>

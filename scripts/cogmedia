@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# cogmedia — загрузить медиа-файл в Cognitive Core и получить анализ.
+#
+# Использование:
+#   cogmedia /path/to/file.mp4
+#   cogmedia C:\videos\demo.mp4         (Windows-путь автоконвертится)
+#
+# Возвращает JSON с media_id, transcript, frames[], duration.
+# Тип файла определяется по расширению. Endpoints:
+#   .mp4/.webm/.mov/.mkv/.avi/.m4v  → POST /api/media/video
+#   .jpg/.jpeg/.png/.webp/.gif/.bmp → POST /api/media/image
+#   .mp3/.wav/.ogg/.m4a/.flac/.opus → POST /api/media/audio
+#
+# Auth (приоритет):
+#   1) env COGNITIVE_API_KEY — per-agent X-API-Key (рекомендуется, от wizard)
+#   2) ~/.config/cogcore/api-key — legacy owner-key или per-agent
+#   Если COGNITIVE_API_KEY задан — используется как X-API-Key.
+#   Иначе содержимое key-file отправляется как X-Owner-Key (legacy)
+#   ИЛИ X-API-Key если файл начинается с per-agent токена.
+#   Для unified flow: connect wizard выдаёт X-API-Key, его же кладём в env.
+#
+# Git source: scripts/cogmedia. Раздаётся через GET /static/cogmedia.
+
+set -euo pipefail
+
+# ─── Конфиг ─────────────────────────────────────────────────────────────
+BASE_URL="${COGCORE_BASE_URL:-https://mcp.xn----8sbwawqx4fza.xn--p1ai}"
+KEY_FILE="${COGCORE_KEY_FILE:-$HOME/.config/cogcore/api-key}"
+COGNITIVE_API_KEY="${COGNITIVE_API_KEY:-}"
+
+# ─── Аргументы ──────────────────────────────────────────────────────────
+if [ $# -lt 1 ]; then
+    echo "usage: cogmedia <path-to-media-file>" >&2
+    echo "" >&2
+    echo "supported:" >&2
+    echo "  video: .mp4 .webm .mov .mkv .avi .m4v" >&2
+    echo "  image: .jpg .jpeg .png .webp .gif .bmp" >&2
+    echo "  audio: .mp3 .wav .ogg .m4a .flac .opus" >&2
+    exit 64
+fi
+
+INPUT="$1"
+
+# Path normalization для Windows (MSYS/Git Bash).
+# Curl на Windows хочет "C:/foo/bar.png", не POSIX "/c/foo/bar.png".
+# Поддерживаем три формы ввода: C:\foo\bar / C:/foo/bar / /c/foo/bar.
+case "$INPUT" in
+    [A-Za-z]:\\*|[A-Za-z]:/*)
+        # C:\foo\bar или C:/foo/bar — только заменяем backslashes
+        FILE="${INPUT//\\//}"
+        ;;
+    /[A-Za-z]/*)
+        # POSIX /c/foo/bar → Windows C:/foo/bar (для curl)
+        drive=$(echo "${INPUT:1:1}" | tr '[:lower:]' '[:upper:]')
+        FILE="${drive}:${INPUT:2}"
+        ;;
+    *)
+        FILE="$INPUT"
+        ;;
+esac
+
+if [ ! -f "$FILE" ]; then
+    echo "ERROR: файл не найден: $FILE" >&2
+    exit 66
+fi
+
+# ─── Auth key ───────────────────────────────────────────────────────────
+# Приоритет: env COGNITIVE_API_KEY (per-agent от wizard) > KEY_FILE (legacy)
+if [ -n "$COGNITIVE_API_KEY" ]; then
+    KEY=$(echo -n "$COGNITIVE_API_KEY" | tr -d '\n\r ' | head -c 200)
+    AUTH_HEADER="X-API-Key: $KEY"
+elif [ -r "$KEY_FILE" ]; then
+    KEY=$(cat "$KEY_FILE" | tr -d '\n\r ' | head -c 200)
+    if [ -z "$KEY" ]; then
+        echo "ERROR: API-key пустой в $KEY_FILE" >&2
+        exit 67
+    fi
+    # Heuristic: 32+ символа без префиксов rk_/sk_ → скорее всего token_urlsafe(32) per-agent.
+    # Иначе считаем legacy owner-key.
+    if [ ${#KEY} -ge 40 ] && [[ ! "$KEY" =~ ^(rk_|sk_|tk_) ]]; then
+        AUTH_HEADER="X-API-Key: $KEY"
+    else
+        AUTH_HEADER="X-Owner-Key: $KEY"
+    fi
+else
+    echo "ERROR: API-key не найден" >&2
+    echo "" >&2
+    echo "Опции:" >&2
+    echo "  1) env COGNITIVE_API_KEY='your-key' cogmedia file.png" >&2
+    echo "  2) echo 'your-key' > $KEY_FILE && chmod 600 $KEY_FILE" >&2
+    echo "  3) /ui/connect → wizard выдаст ключ + installer" >&2
+    exit 67
+fi
+
+# ─── Детект типа по расширению ──────────────────────────────────────────
+ext="${FILE##*.}"
+ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+case "$ext_lower" in
+    mp4|webm|mov|mkv|avi|m4v)
+        ENDPOINT="/api/media/video"
+        KIND="video"
+        ;;
+    jpg|jpeg|png|webp|gif|bmp)
+        ENDPOINT="/api/media/image"
+        KIND="image"
+        ;;
+    mp3|wav|ogg|m4a|flac|opus)
+        ENDPOINT="/api/media/audio"
+        KIND="audio"
+        ;;
+    *)
+        echo "ERROR: неподдерживаемое расширение: .$ext_lower" >&2
+        echo "Поддерживаются: video (.mp4 .webm .mov .mkv .avi .m4v)," >&2
+        echo "  image (.jpg .jpeg .png .webp .gif .bmp)," >&2
+        echo "  audio (.mp3 .wav .ogg .m4a .flac .opus)" >&2
+        exit 65
+        ;;
+esac
+
+# ─── Размер файла → info в stderr ───────────────────────────────────────
+size_bytes=$(stat -c '%s' "$FILE" 2>/dev/null || stat -f '%z' "$FILE" 2>/dev/null || echo "?")
+size_human=$(numfmt --to=iec --suffix=B "$size_bytes" 2>/dev/null || echo "${size_bytes}B")
+echo "[cogmedia] $KIND · $(basename "$FILE") · $size_human → $BASE_URL$ENDPOINT" >&2
+
+# ─── Upload + анализ ────────────────────────────────────────────────────
+# --silent — нет progress в stdout (JSON чистый)
+# --fail-with-body — non-2xx → ненулевой exit, но body печатается
+# --max-time 600 — анализ видео может занять минуты
+curl --silent --fail-with-body --max-time 600 \
+    -X POST \
+    -H "$AUTH_HEADER" \
+    -F "file=@${FILE};filename=$(basename "$FILE")" \
+    "${BASE_URL}${ENDPOINT}"
+
+rc=$?
+if [ $rc -ne 0 ]; then
+    echo "" >&2
+    echo "[cogmedia] curl exit $rc" >&2
+    exit $rc
+fi

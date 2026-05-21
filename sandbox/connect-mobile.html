@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>Cognitive Core — мобильная установка</title>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EC%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --fg: #e6edf3;
+    --dim: rgba(230,237,243,0.6);
+    --accent: #58a6ff;
+    --ok: #4cc960;
+    --warn: #ff8c42;
+    --err: #ff7770;
+    --card: rgba(22,27,34,0.85);
+    --border: #30363d;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap {
+    max-width: 480px; margin: 0 auto;
+    padding: 24px 18px 60px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 18px;
+  }
+  .brand-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), #a371f7);
+    border-radius: 10px;
+  }
+  .brand-name { font-weight: 700; font-size: 17px; }
+
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--dim); font-size: 14px; margin: 0 0 22px; line-height: 1.5; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    margin: 14px 0;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+
+  .key-box {
+    background: rgba(255,140,66,0.08);
+    border: 1.5px solid rgba(255,140,66,0.3);
+    border-radius: 10px;
+    padding: 14px;
+    margin: 14px 0;
+  }
+  .key-box .lbl {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--warn); font-weight: 700; margin-bottom: 8px;
+  }
+  .key-box .key {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    word-break: break-all; line-height: 1.4;
+    user-select: all;
+  }
+
+  .btn {
+    display: block; width: 100%;
+    padding: 14px 18px; margin: 8px 0;
+    background: var(--accent); color: #0a0e14;
+    border: 0; border-radius: 12px;
+    font-size: 15px; font-weight: 700;
+    text-decoration: none; text-align: center;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn.secondary {
+    background: rgba(255,255,255,0.06);
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+  .btn:active { opacity: 0.7; }
+
+  .agent-id {
+    display: inline-block;
+    padding: 2px 8px;
+    background: rgba(88,166,255,0.15);
+    border-radius: 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+
+  .step {
+    display: flex; gap: 10px; margin: 12px 0;
+    align-items: flex-start;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 24px; height: 24px;
+    background: var(--accent); color: #0a0e14;
+    border-radius: 50%;
+    font-weight: 700; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step-txt { font-size: 13.5px; line-height: 1.5; color: var(--fg); }
+  .step-txt code {
+    background: rgba(255,255,255,0.08);
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .error-state {
+    color: var(--err); text-align: center; padding: 30px 14px;
+    font-size: 15px;
+  }
+  .loading {
+    text-align: center; padding: 40px;
+    color: var(--dim);
+  }
+  .spinner {
+    width: 36px; height: 36px;
+    margin: 0 auto 14px;
+    border: 3px solid rgba(88,166,255,0.2);
+    border-top: 3px solid var(--accent);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .copy-flash {
+    position: fixed; bottom: 20px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--ok); color: #0a0e14;
+    padding: 10px 18px; border-radius: 8px;
+    font-weight: 700; font-size: 13px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .copy-flash.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="wrap" id="root">
+  <div class="loading">
+    <div class="spinner"></div>
+    Подтверждаем токен…
+  </div>
+</div>
+
+<div class="copy-flash" id="copyFlash">✓ Скопировано</div>
+
+<script>
+'use strict';
+
+const root = document.getElementById('root');
+const params = new URLSearchParams(location.search);
+const token = params.get('token');
+
+function renderError(msg) {
+  root.innerHTML = `
+    <div class="brand">
+      <div class="brand-icon"></div>
+      <div class="brand-name">Cognitive Core</div>
+    </div>
+    <div class="error-state">${escHtml(msg)}</div>
+    <a class="btn secondary" href="/ui/connect">Создать новый QR на десктопе</a>
+  `;
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function showFlash(msg) {
+  const f = document.getElementById('copyFlash');
+  f.textContent = msg;
+  f.classList.add('show');
+  setTimeout(() => f.classList.remove('show'), 1500);
+}
+
+function copyText(text, label) {
+  navigator.clipboard.writeText(text).then(() => showFlash(label || '✓ Скопировано'));
+}
+
+async function init() {
+  if (!token) {
+    renderError('Токен не передан в URL. Сгенерируйте новый QR.');
+    return;
+  }
+  try {
+    const r = await fetch(`/user/connect/mobile-resolve?token=${encodeURIComponent(token)}`);
+    if (!r.ok) {
+      renderError(r.status === 410 ? 'QR-токен истёк (живёт 10 минут). Сгенерируйте новый.' : `Ошибка ${r.status}`);
+      return;
+    }
+    const data = await r.json();
+    render(data);
+  } catch (e) {
+    renderError('Сетевая ошибка: ' + (e.message || e));
+  }
+}
+
+function render(data) {
+  const remember = `${data.base_url}/events`;
+  const recall = `${data.base_url}/recall`;
+  const shortcut = `shortcuts://run-shortcut?name=Cogcore%20Remember&input=text`;
+
+  root.innerHTML = `
+    <div class="brand">
+      <div class="brand-icon"></div>
+      <div class="brand-name">Cognitive Core</div>
+    </div>
+    <h1>Помощник готов 🎉</h1>
+    <p class="sub">
+      agent_id: <span class="agent-id">${escHtml(data.agent_id)}</span><br>
+      Ниже — ключ и быстрые действия для мобильного.
+    </p>
+
+    <div class="key-box">
+      <div class="lbl">🔑 API-ключ</div>
+      <div class="key" id="apiKey">${escHtml(data.api_key)}</div>
+    </div>
+
+    <button class="btn" onclick="copyText(document.getElementById('apiKey').textContent, '✓ Ключ скопирован')">
+      📋 Скопировать ключ
+    </button>
+
+    <div class="card">
+      <h2>📱 iOS — Shortcuts</h2>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-txt">Откройте приложение <strong>Shortcuts</strong></div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-txt">Новый shortcut → действие <strong>Get Contents of URL</strong></div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-txt">
+          URL: <code>${escHtml(remember)}</code><br>
+          Method: <strong>POST</strong> · Headers: <code>X-API-Key: …ваш ключ…</code><br>
+          Request Body: JSON с полями <code>domain</code>, <code>task</code>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-txt">Дайте shortcut имя <code>Cogcore Remember</code> и добавьте на главный экран</div>
+      </div>
+      <button class="btn secondary" onclick="copyText('${escHtml(remember)}')">
+        📋 Скопировать URL /events
+      </button>
+    </div>
+
+    <div class="card">
+      <h2>🤖 Android — Tasker / HTTP Shortcuts</h2>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-txt">Установите <strong>HTTP Shortcuts</strong> (бесплатно в Play)</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-txt">
+          New shortcut → POST → <code>${escHtml(remember)}</code><br>
+          Headers: <code>X-API-Key: …ключ выше…</code><br>
+          Body: JSON
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-txt">Add to home screen или в виджет</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🧪 Быстрый тест из браузера</h2>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-txt">Нажмите кнопку ниже — отправит тестовое событие в L1 от имени <span class="agent-id">${escHtml(data.agent_id)}</span></div>
+      </div>
+      <button class="btn" id="testBtn" onclick="sendTest('${escHtml(data.api_key)}', '${escHtml(remember)}')">
+        🧪 Отправить test event
+      </button>
+      <div id="testResult" style="margin-top:10px;font-size:13px"></div>
+    </div>
+
+    <a class="btn secondary" href="/ui/profile" style="margin-top:18px">
+      Открыть профиль на десктопе →
+    </a>
+  `;
+}
+
+window.sendTest = async function(apiKey, url) {
+  const btn = document.getElementById('testBtn');
+  const result = document.getElementById('testResult');
+  btn.disabled = true;
+  btn.textContent = 'Отправляем…';
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {'X-API-Key': apiKey, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        domain: 'mobile_test',
+        payload: {task: 'hello from mobile', source: 'qr-flow'},
+      }),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      result.innerHTML = `<span style="color:var(--ok)">✓ Записано в L1, id: <code>${escHtml((data.id || '').slice(0, 8))}…</code></span>`;
+      btn.textContent = '✓ Отправлено';
+    } else {
+      const err = await r.text();
+      result.innerHTML = `<span style="color:var(--err)">Ошибка ${r.status}: ${escHtml(err.slice(0, 200))}</span>`;
+      btn.disabled = false;
+      btn.textContent = '🧪 Повторить';
+    }
+  } catch (e) {
+    result.innerHTML = `<span style="color:var(--err)">Сетевая ошибка: ${escHtml(e.message || e)}</span>`;
+    btn.disabled = false;
+    btn.textContent = '🧪 Повторить';
+  }
+};
+
+window.copyText = copyText;
+
+init();
+</script>
+</body>
+</html>

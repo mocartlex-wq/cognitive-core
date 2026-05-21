@@ -262,6 +262,15 @@ app.include_router(errors_router)
 from app.api.media import router as media_router
 app.include_router(media_router)
 
+# Unified Agent Onboarding wizard (2026-05-21): /user/connect/* + /user/agents/{id}/verify
+from app.api.connect import router as connect_router, verify_router as agents_verify_router
+app.include_router(connect_router)
+app.include_router(agents_verify_router)
+
+# OpenAPI generator для ChatGPT Custom GPT (2026-05-21): /api/openapi/cognitive.{json,yaml}
+from app.api.openapi_gen import router as openapi_router
+app.include_router(openapi_router)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # UI страницы
@@ -296,6 +305,60 @@ async def admin_errors_page():
 async def admin_media_page():
     """Админ-панель: загрузка видео/картинок с авто-анализом."""
     return _html("admin-media.html")
+
+
+@app.get("/ui/connect")
+async def connect_page():
+    """Wizard «Подключить помощника» — 5-step flow для любой платформы."""
+    return _html("connect.html")
+
+
+@app.get("/ui/connect/mobile")
+async def connect_mobile_page():
+    """Mobile QR landing — single-screen с api_key + iOS Shortcut/Tasker hint."""
+    return _html("connect-mobile.html")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Static helpers — раздача cogmedia + installers из scripts/ (не sandbox/)
+# StaticFiles мoнтирован на sandbox/, эти явные routes имеют приоритет.
+# ─────────────────────────────────────────────────────────────────────────
+from fastapi.responses import FileResponse
+
+_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
+
+
+@app.get("/static/cogmedia")
+async def serve_cogmedia():
+    """cogmedia bash-скрипт — раздаётся для curl-based установки."""
+    path = os.path.join(_SCRIPTS_DIR, "cogmedia")
+    return FileResponse(
+        path,
+        media_type="text/x-shellscript",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/static/install-cogcore.sh")
+async def serve_install_sh():
+    """Linux/macOS installer (curl ... | bash)."""
+    path = os.path.join(_SCRIPTS_DIR, "install-cogcore.sh")
+    return FileResponse(
+        path,
+        media_type="text/x-shellscript",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/static/install-cogcore.ps1")
+async def serve_install_ps1():
+    """Windows PowerShell installer (iwr ... | iex)."""
+    path = os.path.join(_SCRIPTS_DIR, "installer-cogcore.ps1")
+    return FileResponse(
+        path,
+        media_type="text/x-powershell",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 # Алиасы для login (на случай закладок с trailing slash, короткого пути и т.п.)

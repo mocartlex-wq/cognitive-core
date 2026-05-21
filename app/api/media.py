@@ -51,7 +51,7 @@ ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus"}
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Auth helper: admin-cookie ИЛИ X-Owner-Key header
+# Auth helper: admin-cookie ИЛИ X-Owner-Key ИЛИ per-agent X-API-Key
 # ─────────────────────────────────────────────────────────────────────────
 class _OwnerCtx:
     """Маркер «owner-key auth» когда нет реальной session/user."""
@@ -60,20 +60,74 @@ class _OwnerCtx:
     is_admin = True
 
 
-async def _check_admin_or_owner(request: Request):
-    """Авторизация: либо валидная admin-session, либо корректный X-Owner-Key.
+class _AgentCtx:
+    """Маркер «agent-key auth» — per-agent X-API-Key.
 
-    Возвращает объект с .email / .user_id / .is_admin = True.
-    Бросает 401/403 если ни то ни другое.
-
-    Owner-key path нужен для cogmedia (Bash curl с лэптопа без сессии).
+    Resolved owner_user_id привязывается к user_id (что и есть владелец
+    помощника). is_admin=False — обычный пользовательский upload.
     """
+    def __init__(self, agent_id: str, user_id: str, email: str = ""):
+        self.agent_id = agent_id
+        self.user_id = user_id
+        self.email = email or f"{agent_id}@agent"
+        self.is_admin = False
+
+
+async def _check_admin_or_owner(request: Request):
+    """Авторизация: admin-session ИЛИ X-Owner-Key ИЛИ per-agent X-API-Key.
+
+    Три пути:
+      1. Header X-Owner-Key совпадает с settings.owner_api_key (legacy
+         cogmedia path, owner-key глобальный — будет deprecated в Phase
+         cleanup после A/B v1→v2).
+      2. Header X-API-Key матчится с agent_keys.api_key (не revoked).
+         Помощник заливает media — owner_user_id берётся из FK на agent.
+      3. Admin-cookie через require_admin (legacy admin-only UI).
+
+    Возвращает объект с .user_id / .email / .is_admin. Бросает 401/403
+    если ничего не подходит.
+    """
+    # Path 1: legacy owner-key (deprecated, оставлен для совместимости с cogmedia)
     owner_key_header = request.headers.get("X-Owner-Key", "").strip()
     expected = (settings.owner_api_key or "").strip()
     if owner_key_header and expected and owner_key_header == expected:
         return _OwnerCtx()
 
-    # Fallback на стандартную admin-сессию
+    # Path 2: per-agent X-API-Key (демократизация — любой агент юзера может upload)
+    api_key = request.headers.get("X-API-Key", "").strip()
+    if api_key:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT ak.agent_id,
+                       ast.owner_user_id::text AS user_id,
+                       acc.email
+                  FROM agent_keys ak
+                  JOIN agent_states ast ON ast.agent_id = ak.agent_id
+             LEFT JOIN accounts acc     ON acc.user_id = ast.owner_user_id
+                 WHERE ak.api_key = $1 AND ak.revoked_at IS NULL
+                 LIMIT 1
+                """,
+                api_key,
+            )
+        if row and row["user_id"]:
+            # last_used touch — не критично, fire-and-forget
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE agent_keys SET last_used_at = NOW() WHERE api_key = $1",
+                        api_key,
+                    )
+            except Exception:  # pragma: no cover
+                pass
+            return _AgentCtx(
+                agent_id=row["agent_id"],
+                user_id=row["user_id"],
+                email=row.get("email") or "",
+            )
+
+    # Path 3: fallback на admin-сессию
     return await require_admin(request)
 
 
@@ -92,8 +146,16 @@ def _upload_frame_to_s3(local_path: Path, key: str) -> str:
     return f"/api/media/frame/{key}"
 
 
-async def _save_to_l1(payload: dict[str, Any]) -> str:
-    """Записать метаданные в L1 raw_events. Returns event id."""
+async def _save_to_l1(payload: dict[str, Any], source_agent: str = "media_uploader") -> str:
+    """Записать метаданные в L1 raw_events. Returns event id.
+
+    Параметр source_agent позволяет атрибутировать upload к конкретному
+    помощнику (если auth прошёл через X-API-Key) — это даёт recall
+    domain=media_analysis по конкретному agent_id.
+
+    Если payload содержит room_id (Phase v2 room-aware), он остаётся в
+    payload и доступен для последующего auto-post в комнату.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -102,7 +164,7 @@ async def _save_to_l1(payload: dict[str, Any]) -> str:
             VALUES ($1, $2, $3::jsonb)
             RETURNING id::text AS id
             """,
-            "media_uploader",
+            source_agent,
             "media_analysis",
             json.dumps(payload, ensure_ascii=False, default=str),
         )
@@ -200,8 +262,9 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
             "frames_count": len(frame_records),
         }
 
-        # Запись в L1
-        event_id = await _save_to_l1(result)
+        # Запись в L1 — атрибутируем к agent_id если auth через X-API-Key
+        src = getattr(user, "agent_id", None) or "media_uploader"
+        event_id = await _save_to_l1(result, source_agent=src)
         result["event_id"] = event_id
 
         logger.info(
@@ -277,7 +340,8 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
             "key": key,
             "url": url,
         }
-        result["event_id"] = await _save_to_l1(result)
+        src = getattr(user, "agent_id", None) or "media_uploader"
+        result["event_id"] = await _save_to_l1(result, source_agent=src)
         return result
     finally:
         try:
@@ -342,7 +406,8 @@ async def upload_audio(request: Request, file: UploadFile = File(...)):
             "language": analysis.get("language"),
             "transcript_duration_ms": analysis.get("transcript_duration_ms"),
         }
-        result["event_id"] = await _save_to_l1(result)
+        src = getattr(user, "agent_id", None) or "media_uploader"
+        result["event_id"] = await _save_to_l1(result, source_agent=src)
         logger.info(
             "audio analyzed media_id=%s duration=%.1fs lang=%s chars=%d",
             media_id,
