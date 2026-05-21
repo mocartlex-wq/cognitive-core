@@ -62,6 +62,14 @@ while IFS= read -r f; do
             sudo systemctl daemon-reload || true
             sudo systemctl restart cognitive-deploy.timer || true
             worth_logging=1 ;;
+        scripts/cognitive-rooms.py)
+            # Live-файл лежит в /usr/local/lib/cognitive-rooms.py (запуск через
+            # systemd unit cognitive-rooms.service). git import 2026-05-21 —
+            # теперь scripts/cognitive-rooms.py = source of truth, sync атомарный.
+            echo "[$(date -Iseconds)] rooms-server changed — sync + restart"
+            sudo install -m 0755 "$REPO_DIR/scripts/cognitive-rooms.py" /usr/local/lib/cognitive-rooms.py
+            sudo systemctl restart cognitive-rooms || true
+            worth_logging=1 ;;
         *)
             : ;;  # docs / scripts / .md / прочее — игнор
     esac
