@@ -446,14 +446,15 @@ async def render_qr(token: str):
 
     deep_link = f"{BASE_URL}/ui/connect/mobile?token={token}"
 
-    # Попробуем qrcode lib; если нет — fallback на SVG прямо вписанный
+    # Попробуем qrcode lib (PIL backend — Pillow уже в requirements);
+    # если нет — fallback на SVG прямо вписанный.
     try:
         import qrcode
-        from qrcode.image.pure import PyPNGImage
-        img = qrcode.make(deep_link, image_factory=PyPNGImage, box_size=8, border=2)
         import io
+        # qrcode по умолчанию использует PIL — Pillow уже в requirements.txt
+        img = qrcode.make(deep_link, box_size=8, border=2)
         buf = io.BytesIO()
-        img.save(buf)
+        img.save(buf, format="PNG")
         buf.seek(0)
         return StreamingResponse(buf, media_type="image/png")
     except Exception:
