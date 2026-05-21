@@ -108,12 +108,29 @@ elif [ "$rebuild_api" = "1" ] || [ "$rebuild_mcp" = "1" ]; then
 fi
 
 if [ "$reload_nginx" = "1" ]; then
-    echo "[$(date -Iseconds)] reloading nginx"
-    if docker exec cognitive_nginx nginx -t >/dev/null 2>&1; then
-        docker exec cognitive_nginx nginx -s reload
+    # Bind-mount stale issue (документировано в памяти 2026-05):
+    # git pull --ff-only делает atomic rename → docker bind mount держит
+    # старый inode → `nginx -s reload` читает СТАРЫЙ файл. Решение —
+    # docker restart, тогда новый inode правильно подхватывается.
+    # nginx -t всё равно валидируем ДО restart чтобы не сломать прод.
+    echo "[$(date -Iseconds)] validating nginx config + restart (bind-mount fresh-inode)"
+    if docker exec cognitive_nginx nginx -t -c /tmp/.fresh-test 2>/dev/null; then
+        :  # noop — пройдём ниже
+    fi
+    # Копируем host-файл в /tmp в контейнере + валидируем — обход stale bind
+    if docker cp "$REPO_DIR/nginx/nginx.conf" cognitive_nginx:/tmp/.fresh-test.conf 2>/dev/null && \
+       docker exec cognitive_nginx nginx -t -c /tmp/.fresh-test.conf >/dev/null 2>&1; then
+        docker restart cognitive_nginx >/dev/null
+        sleep 2
+        if ! docker exec cognitive_nginx nginx -t >/dev/null 2>&1; then
+            echo "[$(date -Iseconds)] ERROR: nginx config invalid after restart — производство сломано" >&2
+            exit 1
+        fi
+        echo "[$(date -Iseconds)] nginx restarted (fresh inode)"
     else
-        echo "[$(date -Iseconds)] ERROR: nginx -t failed — config NOT reloaded, fix nginx.conf" >&2
-        docker exec cognitive_nginx nginx -t || true
+        echo "[$(date -Iseconds)] ERROR: nginx -t failed на новом config — НЕ restart, fix nginx.conf" >&2
+        docker cp "$REPO_DIR/nginx/nginx.conf" cognitive_nginx:/tmp/.fresh-test.conf 2>/dev/null
+        docker exec cognitive_nginx nginx -t -c /tmp/.fresh-test.conf 2>&1 | head -10 || true
         exit 1
     fi
 fi
