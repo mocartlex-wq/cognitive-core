@@ -399,30 +399,70 @@
     result.style.display = 'block';
     if (r.ok && j.token) {
       const promptText = j.prompt_for_agent || '';
+      // ВАЖНО: НЕ interpolate многострочный текст в inline onclick — кавычки
+      // и \n ломают HTML attribute. Сохраняем в data-* и хэндлим через
+      // addEventListener после insertHTML.
       result.innerHTML = `
         <p style="margin: 14px 0 6px; color: #4cc960; font-weight: 600;">✓ Готово! Код для агента:</p>
         <div class="api-key-display" style="font-size: 22px; letter-spacing: 3px; text-align: center; padding: 18px;">${esc(j.token)}</div>
         <p class="msg-line">Действителен ${Math.round(j.expires_in_seconds/60)} минут. После использования сгорает.</p>
         <p class="msg-line" style="margin-top: 14px;"><strong>agent_id будет:</strong> <code>${esc(j.agent_id)}</code></p>
         <p style="margin: 14px 0 6px; font-size: 12.5px; color: var(--glass-text-dim); font-weight: 600;">📋 Промпт для копирования в чат с помощником:</p>
-        <pre style="background: rgba(0,0,0,0.35); border: 1px solid var(--glass-border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; color: #e6edf3;">${esc(promptText)}</pre>
+        <pre id="claimPromptPre" style="background: rgba(0,0,0,0.35); border: 1px solid var(--glass-border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; color: #e6edf3; user-select: all;">${esc(promptText)}</pre>
         <div class="toolbar">
-          <button class="btn btn-sm" onclick="copyText(this, ${JSON.stringify(promptText)})">📋 Скопировать промпт</button>
-          <button class="btn secondary btn-sm" onclick="copyText(this, '${esc(j.token)}')">Скопировать только код</button>
-          <button class="btn secondary btn-sm" onclick="document.getElementById('claimTokenDialog').close(); location.reload();">Готово</button>
+          <button class="btn btn-sm" id="copyPromptBtn">📋 Скопировать промпт</button>
+          <button class="btn secondary btn-sm" id="copyTokenBtn" data-token="${esc(j.token)}">Скопировать только код</button>
+          <button class="btn secondary btn-sm" id="claimDoneBtn">Готово</button>
         </div>`;
+
+      // Хэндлеры через addEventListener — никакой interpolation в HTML
+      document.getElementById('copyPromptBtn').addEventListener('click', (e) => {
+        // Читаем текст напрямую из <pre> (gold-source, не из JS-переменной)
+        const text = document.getElementById('claimPromptPre').textContent;
+        copyToClipboard(text, e.currentTarget);
+      });
+      document.getElementById('copyTokenBtn').addEventListener('click', (e) => {
+        const token = e.currentTarget.dataset.token;
+        copyToClipboard(token, e.currentTarget);
+      });
+      document.getElementById('claimDoneBtn').addEventListener('click', () => {
+        document.getElementById('claimTokenDialog').close();
+        location.reload();
+      });
     } else {
       result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
     }
   });
-  function copyText(btn, text) {
-    navigator.clipboard.writeText(text).then(() => {
+
+  // Универсальный copy-to-clipboard с visual feedback. Async + fallback на
+  // execCommand если Clipboard API недоступен (старые браузеры / insecure ctx).
+  async function copyToClipboard(text, btn) {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch (e) {
+      // Fallback: создать <textarea>, select, execCommand
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (_) { ok = false; }
+    }
+    if (btn) {
       const orig = btn.textContent;
-      btn.textContent = '✓ Скопировано';
-      setTimeout(() => { btn.textContent = orig; }, 1500);
-    });
+      btn.textContent = ok ? '✓ Скопировано' : '⚠ Ошибка — выделите вручную';
+      btn.disabled = !ok;
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+    }
+    return ok;
   }
-  window.copyText = copyText;
+  window.copyToClipboard = copyToClipboard;
 
   document.getElementById('newAgentBtn').addEventListener('click', () => {
     document.getElementById('newAgentDialog').showModal();
