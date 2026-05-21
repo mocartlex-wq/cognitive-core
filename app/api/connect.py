@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.api.openapi_gen import build_custom_gpt_openapi
 from app.api.user import CreateAgentBody, _create_agent_core
 from app.db.postgres import get_pool
+from app.db.redis import get_redis
 from app.security.middleware import require_user
 
 logger = logging.getLogger(__name__)
@@ -575,13 +576,20 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
     # Default agent_id если не задан — суффикс от платформы
     default_id = body.agent_id or f"{body.platform.split('_')[0]}-{secrets.token_hex(3)}"
 
-    _CLAIM_TOKENS[token] = {
-        "user_id": user.user_id,
+    entry_data = {
+        "user_id": str(user.user_id),
         "agent_id": default_id,
         "machine_hint": body.machine_hint,
         "platform": body.platform,
         "created_at": time.time(),
     }
+    # Redis backed — переживает api restart (in-memory был fragile при deploy)
+    try:
+        r = await get_redis()
+        await r.setex(f"cogcore:claim:{token}", CLAIM_TTL_SECONDS, json.dumps(entry_data))
+    except Exception as e:
+        logger.warning("Redis SETEX failed, falling back to memory: %s", e)
+        _CLAIM_TOKENS[token] = entry_data
     return {
         "token": token,
         "expires_in_seconds": CLAIM_TTL_SECONDS,
@@ -659,7 +667,22 @@ async def claim_token(token: str, request: Request):
             ),
         )
 
-    entry = _CLAIM_TOKENS.pop(token_clean, None)
+    # Redis atomic getdel (Redis 6.2+) — survives api restart, prevents
+    # double-claim race (даже если две curl пришли одновременно, только одна
+    # увидит данные, вторая получит None).
+    entry = None
+    try:
+        r = await get_redis()
+        raw = await r.execute_command("GETDEL", f"cogcore:claim:{token_clean}")
+        if raw:
+            entry = json.loads(raw)
+    except Exception as e:
+        logger.warning("Redis GETDEL failed, falling back to memory: %s", e)
+        entry = _CLAIM_TOKENS.pop(token_clean, None)
+    # Memory fallback (на случай если Redis недоступен в момент issue)
+    if not entry:
+        entry = _CLAIM_TOKENS.pop(token_clean, None)
+
     if not entry:
         raise HTTPException(
             status_code=404,
