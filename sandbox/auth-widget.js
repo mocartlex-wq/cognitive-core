@@ -248,8 +248,20 @@
   const CACHE_KEY = 'cc_auth_status_cache_v1';
 
   function renderStatus(container, status) {
-    // Убираем все существующие виджеты + dynamic Профиль (полная пере-отрисовка)
-    container.querySelectorAll('.cc-auth').forEach(n => n.remove());
+    // Если есть pre-render skeleton от head-bootstrap.js с тем же email —
+    // не пересоздаём. Только догружаем dropdown (через apgrade в renderLoggedIn).
+    // Это устраняет визуальный скачок «skeleton → полный widget».
+    const pre = container.querySelector('.cc-auth[data-pre="1"]');
+    const preMatches = pre && status && status.authenticated && status.email &&
+                       (pre.querySelector('.cc-auth-email')?.textContent === status.email);
+
+    if (preMatches) {
+      // Upgrade in-place: убираем skeleton-метку и рендерим полноценный widget
+      pre.remove();
+    } else {
+      // Полная пере-отрисовка (старая логика)
+      container.querySelectorAll('.cc-auth').forEach(n => n.remove());
+    }
     const oldProf = document.querySelector('a[data-cc-injected="1"]');
     if (oldProf) oldProf.remove();
 

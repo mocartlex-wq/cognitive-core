@@ -131,6 +131,7 @@
     .card { padding: 18px; }
   }
 </style>
+<script src="/static/head-bootstrap.js?v=20260521"></script>
 </head>
 <body class="glass-mode">
 <div class="orb-3"></div>
@@ -155,7 +156,7 @@
       <svg class="icon icon-sun"><use href="#sun"/></svg>
       <svg class="icon icon-moon"><use href="#moon"/></svg>
     </button>
-    <button class="btn secondary btn-sm" id="logoutBtn">Выйти</button>
+    <!-- Кнопка «Выйти» убрана — auth-widget сам показывает email + dropdown с logout -->
   </div>
 </div>
 
@@ -211,8 +212,8 @@
 </dialog>
 
 <script src="/static/theme.js?v=20260520"></script>
-<script src="/static/error-reporter.js?v=20260520d" defer></script>
-<script src="/static/auth-widget.js?v=20260520i" defer></script>
+<script src="/static/error-reporter.js?v=20260521" defer></script>
+<script src="/static/auth-widget.js?v=20260521" defer></script>
 <script>
   async function api(path, opts = {}) {
     const r = await fetch(path, { credentials: 'same-origin', ...opts });
@@ -339,10 +340,8 @@
     await api('/auth/logout/all', { method: 'POST' });
     location.href = '/ui/login';
   }
-  document.getElementById('logoutBtn').addEventListener('click', async () => {
-    await api('/auth/logout', { method: 'POST' });
-    location.href = '/ui/login';
-  });
+  // Кнопка «Выйти» удалена из top-bar — logout теперь через auth-widget dropdown.
+  // Старый listener больше не нужен.
   document.getElementById('newAgentBtn').addEventListener('click', () => {
     document.getElementById('newAgentDialog').showModal();
   });
