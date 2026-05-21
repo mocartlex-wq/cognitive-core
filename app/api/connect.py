@@ -586,13 +586,23 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
         "token": token,
         "expires_in_seconds": CLAIM_TTL_SECONDS,
         "agent_id": default_id,
+        # ВАЖНО: НЕ embed полный URL в prompt — Yandex Browser / Telegram /
+        # антивирусы автоматически превьюят URL и съедают one-shot token до
+        # того как агент успеет claim'нуть. Даём куски — агент сам соберёт.
         "prompt_for_agent": (
-            f"Привет! Подключись к Cognitive Core под моим аккаунтом. "
-            f"Сделай GET https://mcp.xn----8sbwawqx4fza.xn--p1ai/user/connect/claim?token={token} — "
-            f"получишь свой api_key + готовый JSON для ~/.claude.json (mcp-remote). "
-            f"После получения через Edit tool аккуратно вставь mcpServers.cognitive-core "
-            f"в config (не перезаписывай existing servers). Затем попроси меня перезапустить "
-            f"Claude Code/Cursor — после рестарта у тебя появятся 24 MCP-инструмента."
+            f"Привет! У меня для тебя claim-token Cognitive Core (живёт 10 мин, one-shot, "
+            f"НЕ ставь URL в browser — съест preview):\n\n"
+            f"  TOKEN: {token}\n"
+            f"  BASE:  https://mcp.xn----8sbwawqx4fza.xn--p1ai\n"
+            f"  PATH:  /user/connect/claim?token=<вставь-TOKEN-сверху>\n\n"
+            f"Через Bash сделай curl с User-Agent (важно — не Mozilla):\n"
+            f"  curl -H 'User-Agent: claude-code-agent' -o /tmp/claim.json <BASE><PATH>\n\n"
+            f"В ответе будут api_key + готовый JSON для ~/.claude.json (mcp-remote).\n"
+            f"Edit-инструментом аккуратно вставь mcpServers.cognitive-core в config (НЕ "
+            f"перезаписывай existing servers, не печатай api_key в transcript — читай из "
+            f"/tmp/claim.json через python+env).\n"
+            f"После — попроси меня перезапустить Claude Code/Cursor. После рестарта у тебя "
+            f"появятся 24 MCP-инструмента (cognitive_remember, recall, room_post, ...)."
         ),
     }
 
@@ -627,6 +637,25 @@ async def claim_token(token: str, request: Request):
                 f"(IP …{audit['used_by_ip'][-8:]}). Часто это значит что URL "
                 f"открылся в browser-preview, антивирусе или search-краулере. "
                 f"Сгенерируйте НОВЫЙ токен и передайте его текстом, не как ссылку."
+            ),
+        )
+
+    # Browser-preview protection: если User-Agent похож на browser, отказываем
+    # БЕЗ consume — чтобы Yandex preview / Telegram bot / антивирус не съели
+    # one-shot token. Реальные агенты (Claude Code, curl, мой installer) ставят
+    # либо специфичный User-Agent либо никакой.
+    ua = (request.headers.get("user-agent") or "").lower()
+    browser_markers = ("mozilla/", "chrome/", "safari/", "firefox/", "edg/",
+                       "opr/", "yabrowser/", "telegrambot", "googlebot",
+                       "yandexbot", "facebookexternalhit", "twitterbot")
+    if any(m in ua for m in browser_markers):
+        # НЕ consume token — просто refuse. Token остаётся валидным для агента.
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Claim-token нельзя получить из браузера (защита от auto-preview). "
+                "Скопируйте токен и передайте текстом агенту — он claim'нет через "
+                "curl с правильным User-Agent."
             ),
         )
 
