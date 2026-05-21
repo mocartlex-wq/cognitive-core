@@ -86,15 +86,25 @@ if [ "$restart_full" = "1" ]; then
     exit 0
 fi
 
-if [ "$rebuild_api" = "1" ] && [ "$rebuild_mcp" = "1" ]; then
-    echo "[$(date -Iseconds)] rebuilding api+mcp (shared code changed)"
-    docker compose $COMPOSE_FILES up -d --build api mcp
-elif [ "$rebuild_api" = "1" ]; then
-    echo "[$(date -Iseconds)] rebuilding api"
-    docker compose $COMPOSE_FILES up -d --build api
-elif [ "$rebuild_mcp" = "1" ]; then
-    echo "[$(date -Iseconds)] rebuilding mcp"
-    docker compose $COMPOSE_FILES up -d --build mcp
+# Helper: rebuild только тех сервисов которые ДЕЙСТВИТЕЛЬНО есть в compose.
+# В 2026-05 mcp-контейнер был removed (FastMCP native в cognitive_api), и
+# попытка `docker compose up mcp` падает с "no such service: mcp" — что
+# заваливает auto-deploy в loop. Phase A 2026-05-21: фильтруем по
+# `docker compose config --services`.
+COMPOSE_SERVICES=$(docker compose $COMPOSE_FILES config --services 2>/dev/null | tr '\n' ' ')
+services_to_build=""
+if [ "$rebuild_api" = "1" ] && echo " $COMPOSE_SERVICES " | grep -q " api "; then
+    services_to_build="$services_to_build api"
+fi
+if [ "$rebuild_mcp" = "1" ] && echo " $COMPOSE_SERVICES " | grep -q " mcp "; then
+    services_to_build="$services_to_build mcp"
+fi
+
+if [ -n "$services_to_build" ]; then
+    echo "[$(date -Iseconds)] rebuilding:$services_to_build"
+    docker compose $COMPOSE_FILES up -d --build $services_to_build
+elif [ "$rebuild_api" = "1" ] || [ "$rebuild_mcp" = "1" ]; then
+    echo "[$(date -Iseconds)] api/mcp rebuild requested but no such services in compose ($COMPOSE_SERVICES) — skipping"
 fi
 
 if [ "$reload_nginx" = "1" ]; then
