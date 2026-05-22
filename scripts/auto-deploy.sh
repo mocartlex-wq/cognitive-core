@@ -21,6 +21,19 @@ SMOKE_ATTEMPTS="${COGNITIVE_SMOKE_ATTEMPTS:-6}"
 SMOKE_INTERVAL="${COGNITIVE_SMOKE_INTERVAL:-5}"
 SMOKE_MIN_OK="${COGNITIVE_SMOKE_MIN_OK:-5}"
 
+# PR #24: source env-файл чтобы получить GITHUB_PAT для git fetch через HTTPS.
+# Раньше auto-deploy полагался на /root/.ssh/github_cognitive_deploy который
+# не существует → git fetch падал → ничего не деплоилось. Теперь fetch
+# идёт через PAT, git remote остаётся SSH (для operator git push).
+if [ -f /etc/cognitive-deploy.env ]; then
+    # shellcheck source=/dev/null
+    set -a; . /etc/cognitive-deploy.env; set +a
+fi
+REPO_HTTPS_URL="${COGNITIVE_GIT_HTTPS_URL:-}"
+if [ -z "$REPO_HTTPS_URL" ] && [ -n "${GITHUB_PAT:-}" ]; then
+    REPO_HTTPS_URL="https://${GITHUB_PAT}@github.com/mocartlex-wq/cognitive-core.git"
+fi
+
 log() { echo "[$(date -Iseconds)] $*"; }
 
 # Telegram-alert helper: silent if TELEGRAM_BOT_TOKEN/CHAT_ID не заданы.
@@ -62,8 +75,21 @@ if ! git diff-index --quiet HEAD 2>/dev/null; then
 fi
 rm -f /var/run/cognitive/deploy-dirty.alerted 2>/dev/null
 
-# Не паникуем если git fetch упал по сети — попробуем в следующий тик
-if ! git fetch --quiet origin "$BRANCH" 2>&1; then
+# Не паникуем если git fetch упал по сети — попробуем в следующий тик.
+# PR #24: fetch через HTTPS+PAT (SSH ключ для deploy не настроен).
+# Маскируем PAT в логах sed-ом (защита от случайного попадания в журнал).
+fetch_ok=1
+if [ -n "$REPO_HTTPS_URL" ]; then
+    git fetch --quiet "$REPO_HTTPS_URL" "$BRANCH" 2>&1 \
+        | sed -E "s|https://[^@]+@|https://***@|g" \
+        || fetch_ok=0
+    # Sync origin/main ref так чтобы git rev-parse origin/$BRANCH работал.
+    # FETCH_HEAD актуален, но origin/<branch> может быть stale если remote SSH сломан.
+    git update-ref "refs/remotes/origin/$BRANCH" FETCH_HEAD 2>/dev/null || true
+else
+    git fetch --quiet origin "$BRANCH" 2>&1 || fetch_ok=0
+fi
+if [ "$fetch_ok" = "0" ]; then
     log "git fetch failed, will retry next tick" >&2
     exit 0
 fi
@@ -83,7 +109,9 @@ if ! git merge-base --is-ancestor "$PREV" "$NEW"; then
     exit 1
 fi
 
-git pull --ff-only --quiet origin "$BRANCH"
+# git pull --ff-only --quiet может пытаться SSH-fetch — используем
+# уже скачанный FETCH_HEAD через merge --ff-only.
+git merge --ff-only --quiet "$NEW" 2>/dev/null || git pull --ff-only --quiet origin "$BRANCH"
 
 # Применяем изменения через conditional_reload (forward direction PREV → NEW)
 "$REPO_DIR/scripts/conditional_reload.sh" "$PREV" "$NEW"
