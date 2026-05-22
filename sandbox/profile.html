@@ -280,6 +280,15 @@
     #accountDetails > summary:hover { background: rgba(255,255,255,0.02); }
   </style>
 
+  <!-- PR #23 multi-tenant: per-owner usage карточка (events/storage/agents)  -->
+  <div class="card" id="usageCard">
+    <h2>
+      Использование
+      <span id="usageTierBadge" style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:rgba(88,166,255,.15);border:1px solid rgba(88,166,255,.35);color:var(--glass-text);margin-left:auto"></span>
+    </h2>
+    <div id="usageBlock" class="empty">Загружаем…</div>
+  </div>
+
   <div class="card">
     <h2>Мои комнаты</h2>
     <div id="roomsBlock" class="empty">Загружаем…</div>
@@ -1044,7 +1053,61 @@
     block.outerHTML = `<div id="mediaBlock" class="grid">${list}</div>`;
   }
 
-  loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions();
+  // PR #23 multi-tenant: per-owner usage карточка
+  async function loadUsage() {
+    const block = document.getElementById('usageBlock');
+    const badge = document.getElementById('usageTierBadge');
+    if (!block) return;
+    try {
+      const r = await fetch('/user/usage', { credentials: 'same-origin' });
+      if (!r.ok) {
+        block.textContent = 'Не удалось загрузить usage (' + r.status + ').';
+        return;
+      }
+      const u = await r.json();
+      if (badge) {
+        const tierLabels = { free: 'FREE', pro: 'PRO', enterprise: 'ENTERPRISE', admin: 'ADMIN' };
+        badge.textContent = tierLabels[u.tier] || u.tier.toUpperCase();
+        if (u.tier === 'pro') badge.style.background = 'rgba(63,185,80,.15)', badge.style.borderColor = 'rgba(63,185,80,.45)';
+        else if (u.tier === 'enterprise') badge.style.background = 'rgba(188,140,255,.18)', badge.style.borderColor = 'rgba(188,140,255,.5)';
+        else if (u.tier === 'admin') badge.style.background = 'rgba(255,140,66,.18)', badge.style.borderColor = 'rgba(255,140,66,.5)';
+      }
+      const bar = (pct, label, used, max, unit) => {
+        const color = pct >= 90 ? '#f85149' : pct >= 70 ? '#d29922' : '#3fb950';
+        return `
+          <div style="margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:5px">
+              <span style="font-weight:500">${label}</span>
+              <span style="color:var(--glass-text-dim);font-variant-numeric:tabular-nums">
+                ${used.toLocaleString('ru-RU')} / ${max.toLocaleString('ru-RU')} ${unit}
+                <span style="margin-left:6px;font-weight:600;color:${color}">${pct}%</span>
+              </span>
+            </div>
+            <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${Math.min(100, pct)}%;background:${color};transition:width .3s"></div>
+            </div>
+          </div>`;
+      };
+      let html = '';
+      if (u.suspended) {
+        html += `<div style="padding:10px 14px;background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);border-radius:9px;color:#ffadab;margin-bottom:14px">⚠ Аккаунт подвешен. Обратитесь к админу.</div>`;
+      }
+      html += bar(u.events.pct, 'События сегодня', u.events.used, u.events.max, '');
+      html += bar(u.storage_mb.pct, 'Медиа в хранилище', u.storage_mb.used, u.storage_mb.max, 'МБ');
+      html += bar(u.agents.pct, 'Помощников', u.agents.used, u.agents.max, '');
+      if (u.tier === 'free' && (u.events.pct > 70 || u.storage_mb.pct > 70 || u.agents.pct > 70)) {
+        html += `<div style="margin-top:12px;padding:10px 14px;background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.3);border-radius:9px;font-size:13px">
+          Подходите к лимитам free-тарифа. <a href="#" style="color:var(--glass-orb-1);font-weight:600" onclick="alert('Pro-тариф пока недоступен — следите за анонсами'); return false">Перейти на Pro →</a>
+        </div>`;
+      }
+      block.innerHTML = html;
+      block.classList.remove('empty');
+    } catch (e) {
+      block.textContent = 'Ошибка загрузки usage: ' + e.message;
+    }
+  }
+
+  loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions(); loadUsage();
 </script>
 </body>
 </html>

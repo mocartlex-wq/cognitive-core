@@ -284,13 +284,28 @@ async def _call_self(
     params: dict | None = None,
     timeout_s: float = 8.0,
 ) -> dict:
-    """Make in-process ASGI call to own FastAPI app, propagating X-API-Key.
+    """Make in-process ASGI call to own FastAPI app, propagating X-API-Key
+    AND X-Owner-User-Id (если уже резолвен) — внутренние endpoints читают
+    его как trusted источник чтобы не дёргать БД повторно.
 
     Defensive timeout default 8s — overridable per-call. NEVER unbounded.
     """
     app = request.app
     api_key = request.headers.get("x-api-key", "")
-    headers = {"X-API-Key": api_key} if api_key else {}
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    # PR #23: пропагандируем owner_user_id чтобы внутренние memory-handler'ы
+    # могли применить tenant-фильтр без повторного DB-lookup.
+    cached_owner = getattr(request.state, "_resolved_owner_user_id", None)
+    if cached_owner is None:
+        # Если ещё не резолвен — попробуем взять из _resolved_agent (tuple)
+        resolved = getattr(request.state, "_resolved_agent", None)
+        if isinstance(resolved, tuple) and len(resolved) == 2:
+            cached_owner = resolved[1]
+    if cached_owner:
+        headers["X-Owner-User-Id"] = str(cached_owner)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://internal", timeout=timeout_s) as client:
         try:
@@ -329,34 +344,69 @@ def _load_keys() -> dict[str, str]:
     return data
 
 
-async def _resolve_agent(request: Request) -> str:
+async def _resolve_agent_full(request: Request) -> tuple[str, str | None]:
+    """Резолвит api_key в (agent_id, owner_user_id). Кеширует в request.state
+    чтобы не дёргать БД повторно на цепочке tool-вызовов одного request'а.
+
+    owner_user_id может быть None для legacy env-агентов (admin-pre-provisioned).
+    Для UI-созданных через /user/agents/create или claim-wizard — всегда есть.
+    """
+    cached = getattr(request.state, "_resolved_agent", None)
+    if cached is not None:
+        return cached
+
     api_key = request.headers.get("x-api-key", "")
     if not api_key:
         raise ValueError("X-API-Key header required (set in MCP client config or curl -H 'X-API-Key: ...')")
-    # 1. Сначала static env JSON (быстрый lookup, для admin-pre-provisioned ключей)
+
+    # 1. Static env JSON (быстрый lookup, admin-pre-provisioned ключи —
+    #    owner_user_id у них None — это owner-уровень доступа).
     keys = _load_keys()
     for agent_id, key in keys.items():
         if key == api_key:
-            return agent_id
-    # 2. Fallback на per-user agent_keys таблицу (для claim-wizard созданных,
-    #    /user/agents/create через UI — они НЕ в env, только в postgres).
+            result = (agent_id, None)
+            request.state._resolved_agent = result
+            return result
+
+    # 2. Postgres agent_keys — claim-wizard и /user/agents/create.
     try:
         from app.db.postgres import get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchval(
-                "SELECT agent_id FROM agent_keys WHERE api_key = $1 AND revoked_at IS NULL LIMIT 1",
+            row = await conn.fetchrow(
+                "SELECT agent_id, owner_user_id::text AS owner_user_id "
+                "FROM agent_keys WHERE api_key = $1 AND revoked_at IS NULL LIMIT 1",
                 api_key,
             )
         if row:
-            return row
+            result = (row["agent_id"], row["owner_user_id"])
+            request.state._resolved_agent = result
+            return result
     except Exception:
-        pass  # postgres недоступен — fall through к raise
+        pass
+
     raise ValueError(
         "API key not registered. Создан через /ui/profile + «Передать помощнику» "
         "wizard? Проверьте что agent_id есть в agent_keys таблице. "
         "Иначе — admin должен добавить в /opt/cognitive-core/.env AGENT_API_KEYS."
     )
+
+
+async def _resolve_agent(request: Request) -> str:
+    """Backward-compat: возвращает только agent_id. Новый код — _resolve_agent_full."""
+    agent_id, _ = await _resolve_agent_full(request)
+    return agent_id
+
+
+async def _resolve_owner(request: Request) -> str | None:
+    """Возвращает owner_user_id (str UUID) или None для legacy env-агентов.
+
+    Используется в memory-tools для WHERE owner_user_id = $1 фильтрации.
+    Для env-агентов (owner=None) подразумевается «admin access» — фильтр
+    не применяется (видят всё, для backward-compat и admin-debug).
+    """
+    _, owner = await _resolve_agent_full(request)
+    return owner
 
 
 def _human_since(iso_ts: str | None) -> str:

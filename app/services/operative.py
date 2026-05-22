@@ -203,33 +203,66 @@ async def restore_redis_from_pg(domain: str | None = None) -> dict:
     return {"restored": restored, "from": "pgvector"}
 
 
-async def search_pgvector(query_vec: list[float], domain: str, top_k: int = 5) -> list[dict]:
-    """KNN-поиск через pgvector (fallback когда Redis пустой)."""
+async def search_pgvector(
+    query_vec: list[float],
+    domain: str,
+    top_k: int = 5,
+    owner_user_id: str | None = None,
+) -> list[dict]:
+    """KNN-поиск через pgvector (fallback когда Redis пустой).
+
+    PR #23 multi-tenant: owner_user_id фильтр. None = admin mode (видит всё).
+    """
     pool = await get_pool()
     qvec = _vec_to_pg(query_vec)
+    owner_clause = " AND owner_user_id = $4::uuid" if owner_user_id else ""
     async with pool.acquire() as conn:
-        knowledge = await conn.fetch(
-            f"""
-            SELECT id, domain, knowledge_type, content,
-                   (embedding <=> $1::vector) AS distance
-            FROM l3_master_knowledge
-            WHERE domain = $2 AND effective_to IS NULL AND embedding IS NOT NULL
-            ORDER BY embedding <=> $1::vector
-            LIMIT $3
-            """,
-            qvec, domain, top_k,
-        )
-        tools = await conn.fetch(
-            f"""
-            SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns,
-                   (embedding <=> $1::vector) AS distance
-            FROM l3_tools_registry
-            WHERE domain = $2 AND effective_to IS NULL AND embedding IS NOT NULL
-            ORDER BY embedding <=> $1::vector
-            LIMIT $3
-            """,
-            qvec, domain, max(2, top_k // 2),
-        )
+        if owner_user_id:
+            knowledge = await conn.fetch(
+                f"""
+                SELECT id, domain, knowledge_type, content,
+                       (embedding <=> $1::vector) AS distance
+                FROM l3_master_knowledge
+                WHERE domain = $2 AND effective_to IS NULL AND embedding IS NOT NULL{owner_clause}
+                ORDER BY embedding <=> $1::vector
+                LIMIT $3
+                """,
+                qvec, domain, top_k, owner_user_id,
+            )
+            tools = await conn.fetch(
+                f"""
+                SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns,
+                       (embedding <=> $1::vector) AS distance
+                FROM l3_tools_registry
+                WHERE domain = $2 AND effective_to IS NULL AND embedding IS NOT NULL{owner_clause}
+                ORDER BY embedding <=> $1::vector
+                LIMIT $3
+                """,
+                qvec, domain, max(2, top_k // 2), owner_user_id,
+            )
+        else:
+            knowledge = await conn.fetch(
+                """
+                SELECT id, domain, knowledge_type, content,
+                       (embedding <=> $1::vector) AS distance
+                FROM l3_master_knowledge
+                WHERE domain = $2 AND effective_to IS NULL AND embedding IS NOT NULL
+                ORDER BY embedding <=> $1::vector
+                LIMIT $3
+                """,
+                qvec, domain, top_k,
+            )
+            tools = await conn.fetch(
+                """
+                SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns,
+                       (embedding <=> $1::vector) AS distance
+                FROM l3_tools_registry
+                WHERE domain = $2 AND effective_to IS NULL AND embedding IS NOT NULL
+                ORDER BY embedding <=> $1::vector
+                LIMIT $3
+                """,
+                qvec, domain, max(2, top_k // 2),
+            )
 
     results = []
     for k in knowledge:
@@ -292,58 +325,79 @@ async def _search_redis_vector(query_vec: list[float], domain: str, top_k: int =
         return []
 
 
-async def build_operative(query: str, domain: str, top_k: int = 5, include_tools: bool = True) -> list[dict]:
-    """KNN-поиск по L3: RediSearch → pgvector → Python fallback."""
+async def build_operative(
+    query: str,
+    domain: str,
+    top_k: int = 5,
+    include_tools: bool = True,
+    owner_user_id: str | None = None,
+) -> list[dict]:
+    """KNN-поиск по L3: RediSearch → pgvector → Python fallback.
+
+    PR #23 multi-tenant: owner_user_id фильтр на КАЖДОМ пути.
+    - RediSearch путь — пока bypass когда owner задан (Redis index без TAG owner),
+      future PR расширит индекс. Пока fallback к pgvector — он чуть медленнее
+      но корректно изолирует.
+    - pgvector + Python fallback — встроенный WHERE owner_user_id.
+    - Individual fetchrow при Redis hits — добавлен AND owner check (защита если
+      Redis вернул чужой ID до перестройки индекса).
+    """
     query_vec = await embed_text(query)
 
-    # Попытка 1: RediSearch векторный поиск (быстрее всего, с TAG-фильтром по domain)
-    redis_hits = await _search_redis_vector(query_vec, domain, top_k)
-    if redis_hits:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            results = []
-            for hit in redis_hits:
-                rid = hit.get("id", "")
-                rtype = hit.get("record_type", "knowledge")
-                if rtype == "knowledge":
-                    row = await conn.fetchrow(
-                        "SELECT id, domain, knowledge_type, content FROM l3_master_knowledge WHERE id = $1 AND effective_to IS NULL",
-                        UUID(rid),
-                    )
-                    if row:
-                        rd = dict(row)
-                        parsed = _parse_jsonb(rd.get("content", {}))
-                        results.append({
-                            "id": str(rd["id"]),
-                            "record_type": "knowledge",
-                            "domain": rd["domain"],
-                            "content": parsed,
-                            "knowledge_type": rd.get("knowledge_type", ""),
-                            "confidence": _extract_confidence(parsed),
-                            "distance": 0.0,
-                        })
-                elif rtype == "tool":
-                    row = await conn.fetchrow(
-                        "SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns FROM l3_tools_registry WHERE id = $1 AND effective_to IS NULL",
-                        UUID(rid),
-                    )
-                    if row:
-                        rt = dict(row)
-                        results.append({
-                            "id": str(rt["id"]),
-                            "record_type": "tool",
-                            "domain": rt["domain"],
-                            "tool_name": rt.get("tool_name", ""),
-                            "tool_type": rt.get("tool_type", ""),
-                            "config_schema": _parse_jsonb(rt.get("config_schema")),
-                            "usage": _parse_jsonb(rt.get("usage_patterns")),
-                            "distance": 0.0,
-                        })
-            if results:
-                return results
+    # Попытка 1: RediSearch — ТОЛЬКО для admin режима (owner=None) пока что.
+    # Redis index `idx:operative` не имеет @owner TAG, переиндексация будет
+    # отдельным PR. Multi-tenant запросы идут через pgvector — он correctly
+    # isolation-safe прямо в SQL.
+    if owner_user_id is None:
+        redis_hits = await _search_redis_vector(query_vec, domain, top_k)
+        if redis_hits:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                results = []
+                for hit in redis_hits:
+                    rid = hit.get("id", "")
+                    rtype = hit.get("record_type", "knowledge")
+                    if rtype == "knowledge":
+                        row = await conn.fetchrow(
+                            "SELECT id, domain, knowledge_type, content FROM l3_master_knowledge "
+                            "WHERE id = $1 AND effective_to IS NULL",
+                            UUID(rid),
+                        )
+                        if row:
+                            rd = dict(row)
+                            parsed = _parse_jsonb(rd.get("content", {}))
+                            results.append({
+                                "id": str(rd["id"]),
+                                "record_type": "knowledge",
+                                "domain": rd["domain"],
+                                "content": parsed,
+                                "knowledge_type": rd.get("knowledge_type", ""),
+                                "confidence": _extract_confidence(parsed),
+                                "distance": 0.0,
+                            })
+                    elif rtype == "tool":
+                        row = await conn.fetchrow(
+                            "SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns "
+                            "FROM l3_tools_registry WHERE id = $1 AND effective_to IS NULL",
+                            UUID(rid),
+                        )
+                        if row:
+                            rt = dict(row)
+                            results.append({
+                                "id": str(rt["id"]),
+                                "record_type": "tool",
+                                "domain": rt["domain"],
+                                "tool_name": rt.get("tool_name", ""),
+                                "tool_type": rt.get("tool_type", ""),
+                                "config_schema": _parse_jsonb(rt.get("config_schema")),
+                                "usage": _parse_jsonb(rt.get("usage_patterns")),
+                                "distance": 0.0,
+                            })
+                if results:
+                    return results
 
-    # Попытка 2: pgvector KNN (если Redis пуст — например после рестарта)
-    pg_results = await search_pgvector(query_vec, domain, top_k)
+    # Попытка 2: pgvector KNN (multi-tenant safe).
+    pg_results = await search_pgvector(query_vec, domain, top_k, owner_user_id=owner_user_id)
     if pg_results:
         # Параллельно восстанавливаем Redis для следующих запросов
         try:
@@ -357,26 +411,48 @@ async def build_operative(query: str, domain: str, top_k: int = 5, include_tools
     # Попытка 3: Python KNN (последний fallback — для свежесозданных без эмбеддингов)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        knowledge_rows = await conn.fetch(
-            """
-            SELECT id, domain, knowledge_type, content, version,
-                   derived_from_l2_ids, related_tool_ids, effective_from
-            FROM l3_master_knowledge
-            WHERE domain = $1 AND effective_to IS NULL
-            """,
-            domain,
-        )
-        tool_rows = []
-        if include_tools:
-            tool_rows = await conn.fetch(
+        if owner_user_id:
+            knowledge_rows = await conn.fetch(
                 """
-                SELECT id, domain, tool_name, tool_type, description,
-                       config_schema, usage_patterns, version
-                FROM l3_tools_registry
+                SELECT id, domain, knowledge_type, content, version,
+                       derived_from_l2_ids, related_tool_ids, effective_from
+                FROM l3_master_knowledge
+                WHERE domain = $1 AND effective_to IS NULL AND owner_user_id = $2::uuid
+                """,
+                domain, owner_user_id,
+            )
+        else:
+            knowledge_rows = await conn.fetch(
+                """
+                SELECT id, domain, knowledge_type, content, version,
+                       derived_from_l2_ids, related_tool_ids, effective_from
+                FROM l3_master_knowledge
                 WHERE domain = $1 AND effective_to IS NULL
                 """,
                 domain,
             )
+        tool_rows = []
+        if include_tools:
+            if owner_user_id:
+                tool_rows = await conn.fetch(
+                    """
+                    SELECT id, domain, tool_name, tool_type, description,
+                           config_schema, usage_patterns, version
+                    FROM l3_tools_registry
+                    WHERE domain = $1 AND effective_to IS NULL AND owner_user_id = $2::uuid
+                    """,
+                    domain, owner_user_id,
+                )
+            else:
+                tool_rows = await conn.fetch(
+                    """
+                    SELECT id, domain, tool_name, tool_type, description,
+                           config_schema, usage_patterns, version
+                    FROM l3_tools_registry
+                    WHERE domain = $1 AND effective_to IS NULL
+                    """,
+                    domain,
+                )
 
     knowledge_with_distance = []
     for k in knowledge_rows:

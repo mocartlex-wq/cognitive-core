@@ -3,7 +3,9 @@ from fastapi import APIRouter, Request, Depends
 from app.models.event import RawEventInput, EventResponse
 from app.security.auth import verify_api_key, check_rate_limit
 from app.security.sanitizer import sanitize_payload
+from app.security.owner import resolve_owner_user_id
 from app.services.ingestor import save_raw_event
+from app.services.quota_enforcer import enforce_event_quota
 from app.security.audit import log_audit
 from app.db.postgres import get_pool
 from datetime import datetime, timezone
@@ -14,7 +16,10 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 @router.post("", response_model=EventResponse)
 async def ingest_event(payload: RawEventInput, request: Request):
-    """6-шаговый пайплайн приёма события: auth → rate limit → schema → sanitize → save → audit.
+    """7-шаговый пайплайн приёма события: auth → rate limit → quota → schema
+    → sanitize → save → audit.
+
+    PR #23: добавлена per-owner квота. Free tier — 10k events/day.
 
     Дополнительно: после save в L1 — пишем в replication_outbox для NATS-based
     server→local replication (DS-architecture, Hybrid pattern). Если outbox или
@@ -23,17 +28,24 @@ async def ingest_event(payload: RawEventInput, request: Request):
     # Шаг 1: Аутентификация
     agent_id = await verify_api_key(request)
 
-    # Шаг 2: Rate limiting
+    # Шаг 2: Rate limiting (per-agent)
     await check_rate_limit(agent_id)
+
+    # Шаг 2b: Per-owner квота (multi-tenant) — 429 если over
+    await enforce_event_quota(request)
 
     # Шаг 3: Валидация схемы — уже выполнена Pydantic (RawEventInput)
 
     # Шаг 4: Санитизация payload
     sanitized = sanitize_payload(payload.payload)
 
-    # Шаг 5: Сохранение в L1
+    # Шаг 5: Сохранение в L1 — с owner_user_id для tenant-isolation
     now = datetime.now(timezone.utc)
-    event_id = await save_raw_event(agent_id, payload.domain, sanitized.payload)
+    owner_uid = await resolve_owner_user_id(request)
+    event_id = await save_raw_event(
+        agent_id, payload.domain, sanitized.payload,
+        owner_user_id=owner_uid,
+    )
 
     # Шаг 5b: Replication outbox — failure не блокирует основной flow
     try:

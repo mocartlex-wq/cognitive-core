@@ -75,6 +75,31 @@ async def post_checkpoint(agent_id: str, body: CheckpointInput, request: Request
     return result
 
 
+async def _enforce_owns_agent(request: Request, agent_id: str) -> None:
+    """PR #23 tenant isolation: проверяет что текущий caller владеет agent_id.
+
+    Если owner_user_id из request не совпадает с agent_states.owner_user_id —
+    выбрасывает HTTP 403. Legacy env-keys (owner=None) видят всё (admin mode).
+    """
+    from app.security.owner import resolve_owner_user_id
+    from fastapi import HTTPException
+    from app.db.postgres import get_pool
+
+    caller_owner = await resolve_owner_user_id(request)
+    if caller_owner is None:
+        return  # admin/legacy env-key — bypass
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        agent_owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1 LIMIT 1",
+            agent_id,
+        )
+    if agent_owner is None:
+        return  # legacy agent без owner — пропускаем (не наш)
+    if str(agent_owner) != str(caller_owner):
+        raise HTTPException(status_code=403, detail="agent not owned by caller")
+
+
 @router.get("/{agent_id}/state")
 async def get_state(
     agent_id: str,
@@ -88,6 +113,7 @@ async def get_state(
     из доменов где работал агент.
     """
     await verify_api_key(request)
+    await _enforce_owns_agent(request, agent_id)
     return await restore_state(
         agent_id=agent_id,
         include_recent_events=recent_events,
@@ -103,6 +129,7 @@ async def get_agent_history(
 ):
     """История checkpoints — для отката или анализа эволюции state."""
     await verify_api_key(request)
+    await _enforce_owns_agent(request, agent_id)
     return {
         "agent_id": agent_id,
         "items": await get_history(agent_id, limit),
