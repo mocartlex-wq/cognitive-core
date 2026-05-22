@@ -769,15 +769,25 @@
     }
     const kindIcon = { video: '🎬', image: '🖼️', audio: '🎵' };
     const fmtSize = (b) => b < 1024*1024 ? (b/1024).toFixed(0)+' KB' : (b/(1024*1024)).toFixed(1)+' MB';
-    // Owner-decision: «давай только список, наименование, размер, время и все»
-    const list = j.items.map(m => `
-      <div class="item" style="display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:10px 14px">
-        <span style="font-size:18px">${kindIcon[m.kind] || '📄'}</span>
-        <span class="name" style="font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.filename)}">${esc(m.filename)}</span>
-        <span class="meta" style="font-size:12px;color:var(--glass-text-dim);white-space:nowrap">${fmtSize(m.size_bytes)}</span>
-        <span class="meta" style="font-size:12px;color:var(--glass-text-dim);white-space:nowrap" title="${esc(fmtFullDate(m.timestamp))}">${fmtFullDate(m.timestamp)}</span>
-      </div>
-    `).join('');
+    const ttl = (j.ttl_minutes || 15) * 60 * 1000;
+    // Owner-decision: «хранение 15 мин, для анализа разного типа и повторного
+    // обращения». Список вместо grid, плюс chip «доступен/удалён».
+    const list = j.items.map(m => {
+      const ageMs = Date.now() - new Date(m.timestamp).getTime();
+      const cleaned = m.cleaned_up || ageMs > ttl;
+      const chip = cleaned
+        ? '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim);font-size:10.5px" title="Файл удалён из storage (TTL 15 мин), осталась только метаинформация">archived</span>'
+        : `<span class="chip online" style="font-size:10.5px" title="Файл в storage, доступен для анализа (${Math.round((ttl - ageMs)/60000)} мин до удаления)">доступен</span>`;
+      return `
+        <div class="item" style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:12px;align-items:center;padding:10px 14px">
+          <span style="font-size:18px">${kindIcon[m.kind] || '📄'}</span>
+          <span class="name" style="font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.filename)}">${esc(m.filename)}</span>
+          ${chip}
+          <span class="meta" style="font-size:12px;color:var(--glass-text-dim);white-space:nowrap">${fmtSize(m.size_bytes)}</span>
+          <span class="meta" style="font-size:12px;color:var(--glass-text-dim);white-space:nowrap">${fmtFullDate(m.timestamp)}</span>
+        </div>
+      `;
+    }).join('');
     block.outerHTML = `<div id="mediaBlock" class="grid">${list}</div>`;
   }
 

@@ -70,6 +70,16 @@ async def lifespan(app: FastAPI):
             log_event("warn", "Whisper pre-cache failed", error=str(e)[:200])
     asyncio.create_task(_prefetch_whisper())
 
+    # Media cleanup loop — TTL 15 мин, scan каждые 5 мин (owner-decision).
+    # Удаляет MinIO files старше TTL, L1 metadata остаётся вечно.
+    try:
+        from app.services.media_cleanup import cleanup_loop as _media_cleanup_loop
+        _media_cleanup_task = asyncio.create_task(_media_cleanup_loop())
+        app.state.media_cleanup_task = _media_cleanup_task
+        log_event("info", "media_cleanup loop started (TTL=15min)")
+    except Exception as e:
+        log_event("warn", "media_cleanup loop failed to start", error=str(e))
+
     log_event("info", "Cognitive Core ready")
     yield
 
@@ -77,6 +87,8 @@ async def lifespan(app: FastAPI):
         await _outbox_publisher.stop()
     if _scheduler_task:
         _scheduler_task.cancel()
+    if hasattr(app.state, "media_cleanup_task"):
+        app.state.media_cleanup_task.cancel()
     await close_db()
     await close_redis()
     log_event("info", "Cognitive Core shutdown")

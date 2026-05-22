@@ -476,8 +476,11 @@ async def my_media(request: Request, limit: int = 24):
         else:
             d["thumbnail"] = ""  # audio has no thumb
         d["transcript"] = (payload.get("transcript") or "") if isinstance(payload, dict) else ""
+        # TTL: 15 мин с момента upload. После — MinIO файлы удалены, metadata
+        # остаётся. UI показывает chip «удалён» вместо thumbnail.
+        d["cleaned_up"] = bool(payload.get("cleaned_up")) if isinstance(payload, dict) else False
         items.append(d)
-    return {"count": len(items), "items": items}
+    return {"count": len(items), "items": items, "ttl_minutes": 15}
 
 
 @router.delete("/agents/{agent_id}")
