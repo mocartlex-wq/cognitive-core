@@ -317,13 +317,29 @@ async def _resolve_agent(request: Request) -> str:
     api_key = request.headers.get("x-api-key", "")
     if not api_key:
         raise ValueError("X-API-Key header required (set in MCP client config or curl -H 'X-API-Key: ...')")
+    # 1. Сначала static env JSON (быстрый lookup, для admin-pre-provisioned ключей)
     keys = _load_keys()
     for agent_id, key in keys.items():
         if key == api_key:
             return agent_id
+    # 2. Fallback на per-user agent_keys таблицу (для claim-wizard созданных,
+    #    /user/agents/create через UI — они НЕ в env, только в postgres).
+    try:
+        from app.db.postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchval(
+                "SELECT agent_id FROM agent_keys WHERE api_key = $1 AND revoked_at IS NULL LIMIT 1",
+                api_key,
+            )
+        if row:
+            return row
+    except Exception:
+        pass  # postgres недоступен — fall through к raise
     raise ValueError(
-        "API key not registered in AGENT_API_KEYS. "
-        "Ask admin to add your agent to /opt/cognitive-core/.env and recreate api container."
+        "API key not registered. Создан через /ui/profile + «Передать помощнику» "
+        "wizard? Проверьте что agent_id есть в agent_keys таблице. "
+        "Иначе — admin должен добавить в /opt/cognitive-core/.env AGENT_API_KEYS."
     )
 
 
