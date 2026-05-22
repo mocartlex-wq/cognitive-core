@@ -283,17 +283,33 @@
     window.__me = data;  // для редактирования
     const adminChip = data.is_admin ? '<span class="chip admin">Админ</span>' : '';
     const verifiedChip = data.email_verified ? '<span class="chip">Подтверждён</span>' : '';
-    const avatarBlock = data.avatar_url
-      ? `<img src="${esc(data.avatar_url)}" alt="avatar" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:1px solid var(--glass-border)">`
-      : `<div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--glass-orb-1),var(--glass-orb-2));display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#0a0e14;font-size:18px">${esc((data.display_name || data.email || '?')[0].toUpperCase())}</div>`;
+    // Auto-generated avatar из инициалов (2-3 символа). Owner-decision:
+    // выбор картинки убран, аватар всегда буквенный.
+    function initials(src) {
+      if (!src) return '?';
+      // Если имя из нескольких слов: первая буква каждого, max 3
+      const words = String(src).trim().split(/[\s_\-.]+/).filter(Boolean);
+      if (words.length >= 2) {
+        return words.slice(0, 3).map(w => w[0].toUpperCase()).join('');
+      }
+      // Одно слово или email: первые 2 символа
+      const base = String(src).split('@')[0];  // email → local part
+      return base.slice(0, 2).toUpperCase();
+    }
+    const ini = initials(data.display_name || data.email);
+    // Цвет фона детерминирован user_id → у каждого юзера свой постоянный
+    function colorFromId(id) {
+      let h = 0;
+      for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+      return `hsl(${h}, 60%, 55%)`;
+    }
+    const bg = colorFromId(data.user_id || data.email || 'x');
+    const avatarBlock = `<div style="width:48px;height:48px;border-radius:50%;background:${bg};display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:${ini.length > 2 ? 14 : 17}px;letter-spacing:0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.3)">${esc(ini)}</div>`;
     document.getElementById('meBlock').outerHTML = `
       <div id="meBlock">
-        <div class="row" style="align-items:flex-start">
+        <div class="row" style="align-items:center">
           <span class="k">Аватар</span>
-          <span class="v" style="display:flex;align-items:center;gap:10px">
-            ${avatarBlock}
-            <button class="btn secondary btn-sm" onclick="editAvatar()">✏️</button>
-          </span>
+          <span class="v">${avatarBlock}</span>
         </div>
         <div class="row"><span class="k">Почта</span>
           <span class="v">${esc(data.email)} ${verifiedChip} ${adminChip}</span></div>
@@ -323,30 +339,8 @@
     else alert('Ошибка: ' + ((await r.json()).detail || r.status));
   };
 
-  window.editAvatar = async function() {
-    const cur = (window.__me || {}).avatar_url || '';
-    const v = prompt('URL аватара (https://..., пусто чтобы убрать):', cur);
-    if (v === null) return;  // cancel
-    const trimmed = v.trim();
-    // Pre-validate: если пусто → null (убрать аватар), иначе обязательно https://
-    let payload;
-    if (!trimmed) {
-      payload = { avatar_url: null };
-    } else if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
-      payload = { avatar_url: trimmed };
-    } else {
-      alert('URL должен начинаться с https:// или http://\nИли оставьте пустым чтобы убрать аватар.');
-      return;  // НЕ дёргаем backend — избежим 400 в console
-    }
-    const r = await api('/user/me', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!r) return;
-    if (r.ok) loadMe();
-    else alert('Ошибка: ' + ((await r.json()).detail || r.status));
-  };
+  // editAvatar убран — аватар auto-generated из инициалов имени.
+  // Owner-decision: «убери редактирование автора, пусть по первым 2 или 3 символам будет идти».
 
   async function loadRooms() {
     const r = await api('/user/rooms');
