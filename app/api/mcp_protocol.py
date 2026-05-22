@@ -640,68 +640,95 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
 # ─────────────────────────────────────────────────────────────────
 # Main JSON-RPC endpoint
 # ─────────────────────────────────────────────────────────────────
-@router.post("/messages")
-async def mcp_messages(request: Request) -> JSONResponse:
-    """JSON-RPC 2.0 dispatch endpoint."""
-    try:
-        raw = await request.json()
-    except Exception:
-        return JSONResponse(_err(None, -32700, "Parse error"))
-
+async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
+    """Process JSON-RPC request → return response dict (без HTTP wrapping)."""
     if not isinstance(raw, dict):
-        return JSONResponse(_err(None, -32600, "Invalid request"))
+        return _err(None, -32600, "Invalid request")
 
     try:
         req = JsonRpcRequest.model_validate(raw)
     except Exception as e:
-        return JSONResponse(_err(raw.get("id"), -32600, f"Invalid request: {e}"))
+        return _err(raw.get("id"), -32600, f"Invalid request: {e}")
 
     method = req.method
     req_id = req.id
 
     if method == "notifications/initialized" or method.startswith("notifications/"):
-        return JSONResponse({"jsonrpc": "2.0"}, status_code=200)
+        return {}  # notification — no response
 
     if method == "initialize":
-        return JSONResponse(_ok(req_id, {
+        return _ok(req_id, {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "cognitive-core", "version": "0.5.1"},
-        }))
+        })
 
     if method == "ping":
-        return JSONResponse(_ok(req_id, {}))
+        return _ok(req_id, {})
 
     if method == "tools/list":
-        return JSONResponse(_ok(req_id, {"tools": TOOLS}))
+        return _ok(req_id, {"tools": TOOLS})
 
     if method == "tools/call":
         params = req.params or {}
         tool_name = params.get("name") if isinstance(params, dict) else None
         tool_args = params.get("arguments", {}) if isinstance(params, dict) else {}
         if not tool_name:
-            return JSONResponse(_err(req_id, -32602, "tools/call requires 'name'"))
-        # Per-tool timeout, hard-capped by GLOBAL_HARD_CAP_S to never starve workers
+            return _err(req_id, -32602, "tools/call requires 'name'")
         per_tool_to = TOOL_TIMEOUTS_S.get(tool_name, DEFAULT_TOOL_TIMEOUT_S)
         wait_for_to = min(per_tool_to + 5.0, GLOBAL_HARD_CAP_S)
         try:
             result = await asyncio.wait_for(
                 _dispatch_tool(request, tool_name, tool_args), timeout=wait_for_to,
             )
-            return JSONResponse(_ok(req_id, {
+            return _ok(req_id, {
                 "content": [{"type": "text", "text": _format_text(result)}],
                 "structuredContent": result,
                 "isError": False,
-            }))
+            })
         except ValueError as e:
-            return JSONResponse(_err(req_id, -32602, str(e)))
+            return _err(req_id, -32602, str(e))
         except asyncio.TimeoutError:
-            return JSONResponse(_err(req_id, -32603, f"Tool '{tool_name}' timeout ({wait_for_to:.0f}s)"))
+            return _err(req_id, -32603, f"Tool '{tool_name}' timeout ({wait_for_to:.0f}s)")
         except Exception as e:
             log.exception(f"tool {tool_name} error")
-            return JSONResponse(_err(req_id, -32603, f"{type(e).__name__}: {e}"))
+            return _err(req_id, -32603, f"{type(e).__name__}: {e}")
 
-    return JSONResponse(_err(req_id, -32601, f"Method not found: {method}"))
+    return _err(req_id, -32601, f"Method not found: {method}")
+
+
+@router.post("/messages")
+async def mcp_messages(request: Request) -> JSONResponse:
+    """JSON-RPC 2.0 dispatch endpoint.
+
+    Два режима ответа:
+    1. `?session_id=XYZ` → enqueue response в SSE-stream session-а,
+       вернуть 202 Accepted с пустым body. Это proper MCP-SSE flow.
+    2. Без session_id → response inline в HTTP body (legacy curl mode).
+    """
+    try:
+        raw = await request.json()
+    except Exception:
+        return JSONResponse(_err(None, -32700, "Parse error"))
+
+    session_id = request.query_params.get("session_id", "").strip()
+    response = await _handle_jsonrpc(request, raw)
+
+    # Если это notification (нет response) — просто 200 пусто
+    if not response:
+        return JSONResponse({}, status_code=202 if session_id else 200)
+
+    # SSE-routed mode: enqueue в очередь session и вернуть 202
+    if session_id and session_id in _MCP_SSE_SESSIONS:
+        try:
+            await _MCP_SSE_SESSIONS[session_id].put(response)
+            return JSONResponse({}, status_code=202)
+        except Exception as e:
+            log.warning("SSE enqueue failed: %s", e)
+            # Fall through → inline response (degraded)
+
+    # Legacy mode — inline HTTP response (curl tests, no-SSE clients)
+    return JSONResponse(response)
 
 
 def _format_text(data: Any) -> str:
@@ -776,39 +803,63 @@ async def _mark_mcp_connected(request: Request) -> None:
         pass
 
 
+# ─────────────────────────────────────────────────────────────────
+# Session-based SSE message routing (proper MCP SSE transport)
+# ─────────────────────────────────────────────────────────────────
+# In-memory session store: session_id → asyncio.Queue
+# POST /mcp/messages?session_id=X enqueues response, SSE-generator
+# pulls and yields as `event: message` frames.
+# Single-process — для multi-worker нужен Redis pubsub, но для нашего
+# single-uvicorn-worker config достаточно.
+import uuid as _uuid
+_MCP_SSE_SESSIONS: dict[str, asyncio.Queue] = {}
+
+
 @router.get("/sse")
-async def mcp_sse_stub(request: Request) -> StreamingResponse:
-    """Hybrid SSE/HTTP transport.
+async def mcp_sse(request: Request) -> StreamingResponse:
+    """Proper MCP SSE transport с session-id и message-routing.
 
-    Mainstream MCP клиенты (Claude Code SDK, Claude Desktop, Cursor)
-    держат SSE-connection ВЕЧНО — клиент посылает JSON-RPC через POST
-    /mcp/messages, ждёт ответ или через HTTP body (legacy) или
-    через SSE-event message (modern). Если SSE close'ится — SDK
-    думает connection lost → retry → tools никогда не подгружаются.
+    Flow по MCP spec:
+    1. Client opens GET /sse
+    2. Server assigns session_id, sends `event: endpoint
+       data: /mcp/messages?session_id=XYZ`
+    3. Client POSTs JSON-RPC to /mcp/messages?session_id=XYZ
+    4. POST handler responds 202 Accepted + enqueues response
+    5. SSE generator pulls from queue → yields `event: message
+       data: {jsonrpc-response}`
+    6. Client SDK matches response.id, marks tool/method complete
 
-    Решение: keep-alive comment-events каждые 15 сек. Response-ы
-    приходят inline в HTTP POST (HTTP-direct mode, что мы и делаем
-    в /mcp/messages handler). SSE-stream играет роль liveness-probe.
+    Без session_id (legacy /mcp/messages) — response idёт в HTTP body
+    (backward compat для curl-тестов).
     """
     # Mark agent as MCP-connected (for /ui/profile green dot UI)
     await _mark_mcp_connected(request)
 
+    session_id = _uuid.uuid4().hex
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _MCP_SSE_SESSIONS[session_id] = queue
+    log.info("mcp_sse session opened: %s", session_id[:8])
+
     async def gen():
-        # Initial endpoint event — required by spec
-        yield "event: endpoint\n"
-        yield "data: /mcp/messages\n\n"
-        # Keep-alive forever каждые 15с. Claude Code SDK закрывает stream
-        # через 32с inactivity ЕСЛИ нет полноценных event-frames (SSE-comments
-        # `: ...\n\n` не считаются). Шлём event: ping с empty data — это
-        # SDK видит как живой стрим. MCP JSON-RPC ничего не теряет — наш
-        # обмен идёт через POST /mcp/messages (HTTP-direct mode).
         try:
+            # Initial endpoint event — session-bound POST URL
+            yield "event: endpoint\n"
+            yield f"data: /mcp/messages?session_id={session_id}\n\n"
+            # Pull responses from queue. Timeout 25s → send keep-alive event:ping.
             while True:
-                await asyncio.sleep(15)
-                yield "event: ping\n"
-                yield "data: {}\n\n"
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield "event: message\n"
+                    yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    # Keepalive — event:ping чтобы Claude Code SDK не закрыл по inactivity
+                    yield "event: ping\n"
+                    yield "data: {}\n\n"
         except asyncio.CancelledError:
+            log.info("mcp_sse session closed: %s", session_id[:8])
             return
+        finally:
+            _MCP_SSE_SESSIONS.pop(session_id, None)
 
     return StreamingResponse(
         gen(),
