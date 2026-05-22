@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin · Tenants · Cognitive Core</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<link rel="stylesheet" href="/static/shared.css?v=20260520j">
+<link rel="stylesheet" href="/static/glass.css?v=20260520i">
+<style>
+  html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }
+  main.page { max-width: 1400px; margin: 24px auto 80px; padding: 0 20px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 6px; }
+  .sub { color: var(--glass-text-dim); margin: 0 0 24px; font-size: 14px; }
+
+  .tenants-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  .tenants-table th, .tenants-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .tenants-table th {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--glass-text-dim);
+    font-weight: 600;
+    background: rgba(255,255,255,0.02);
+  }
+  .tenants-table tr:hover { background: rgba(255,255,255,0.015); }
+  .tenants-table td.email { font-family: var(--mono); font-size: 12.5px; }
+  .tier-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .tier-free  { background: rgba(110,118,129,.18); border:1px solid rgba(110,118,129,.4); color:#e6edf3; }
+  .tier-pro   { background: rgba(63,185,80,.18);  border:1px solid rgba(63,185,80,.5);  color:#d4f5dc; }
+  .tier-enterprise { background: rgba(188,140,255,.18); border:1px solid rgba(188,140,255,.5); color:#e6dcff; }
+  .tier-admin { background: rgba(255,140,66,.18); border:1px solid rgba(255,140,66,.5); color:#ffd6b3; }
+  .susp { color: #ff7770; font-weight: 700; font-size: 11px; margin-left: 6px; }
+
+  .pct-bar {
+    display: inline-block;
+    width: 60px;
+    height: 5px;
+    background: rgba(255,255,255,.06);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .pct-bar > span {
+    display: block; height: 100%;
+    background: #3fb950;
+  }
+  .pct-bar > span.warn { background: #d29922; }
+  .pct-bar > span.over { background: #f85149; }
+
+  .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .actions button {
+    padding: 4px 10px; font-size: 11.5px;
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text);
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .actions button:hover { background: rgba(88,166,255,.12); border-color: rgba(88,166,255,.45); }
+  .actions button.danger:hover { background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.5); }
+  .actions select {
+    padding: 4px 8px; font-size: 11.5px;
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text);
+    border-radius: 5px;
+    font-family: inherit;
+  }
+
+  .empty { padding: 40px; text-align: center; color: var(--glass-text-dim); }
+  .err { color: #ff7770; padding: 16px; }
+</style>
+<script src="/static/head-bootstrap.js?v=20260522"></script>
+</head>
+<body class="glass-mode">
+
+<div class="top-bar">
+  <a class="brand" href="/"><div class="brand-icon"><span class="brand-dot"></span></div>
+    <div><div class="brand-name">Cognitive Core</div><span class="brand-ver">admin</span></div>
+  </a>
+  <nav class="top-nav">
+    <a href="/ui/profile">Профиль</a>
+    <a href="/ui/admin/tenants" class="active">Tenants</a>
+    <a href="/ui/admin/media">Media</a>
+    <a href="/ui/admin/errors">Errors</a>
+  </nav>
+</div>
+
+<main class="page">
+  <h1>Tenants</h1>
+  <p class="sub">Все владельцы аккаунтов + их usage + tier. Меняй tier / suspend через кнопки в строке.</p>
+
+  <div id="tenantsBlock" class="empty">Загружаем…</div>
+</main>
+
+<script>
+  async function api(path, opts = {}) {
+    const r = await fetch(path, { credentials: 'same-origin', ...opts });
+    if (r.status === 401) { location.href = '/ui/login?return=' + encodeURIComponent(location.pathname); return null; }
+    if (r.status === 403) { document.body.innerHTML = '<main class="page"><h1>403 Forbidden</h1><p class="sub">Только админ имеет доступ. Текущий аккаунт не админ.</p></main>'; return null; }
+    return r;
+  }
+
+  function pctClass(p) { return p >= 90 ? 'over' : p >= 70 ? 'warn' : ''; }
+  function fmt(n) { return (n||0).toLocaleString('ru-RU'); }
+  function fmtDate(s) { try { return new Date(s).toLocaleDateString('ru-RU'); } catch { return s||'—'; } }
+
+  async function load() {
+    const block = document.getElementById('tenantsBlock');
+    block.textContent = 'Загружаем…';
+    const r = await api('/admin/tenants');
+    if (!r) return;
+    if (!r.ok) { block.innerHTML = '<p class="err">Ошибка ' + r.status + '</p>'; return; }
+    const j = await r.json();
+    if (!j.items || !j.items.length) { block.textContent = 'Нет tenants'; return; }
+
+    const rows = j.items.map(t => {
+      const ePct = Math.round(100 * t.events_today / Math.max(1, t.max_events_per_day));
+      const sPct = Math.round(100 * t.storage_mb_now / Math.max(1, t.max_storage_mb));
+      const aPct = Math.round(100 * t.agents_count / Math.max(1, t.max_agents));
+      return `
+        <tr data-owner="${t.owner_id}">
+          <td class="email">${t.email}${t.suspended?'<span class="susp">SUSP</span>':''}</td>
+          <td><span class="tier-badge tier-${t.tier}">${t.tier}</span></td>
+          <td>${fmt(t.events_today)} / ${fmt(t.max_events_per_day)} <span class="pct-bar"><span class="${pctClass(ePct)}" style="width:${Math.min(100,ePct)}%"></span></span></td>
+          <td>${t.storage_mb_now.toFixed(1)} / ${fmt(t.max_storage_mb)} МБ <span class="pct-bar"><span class="${pctClass(sPct)}" style="width:${Math.min(100,sPct)}%"></span></span></td>
+          <td>${t.agents_count} / ${t.max_agents} <span class="pct-bar"><span class="${pctClass(aPct)}" style="width:${Math.min(100,aPct)}%"></span></span></td>
+          <td>${fmtDate(t.created_at)}</td>
+          <td class="actions">
+            <select onchange="changeTier('${t.owner_id}', this.value, this)">
+              <option value="">Сменить tier</option>
+              ${['free','pro','enterprise','admin'].filter(x=>x!==t.tier).map(x=>`<option value="${x}">→ ${x}</option>`).join('')}
+            </select>
+            ${t.suspended
+              ? `<button onclick="unsuspend('${t.owner_id}')">Unsuspend</button>`
+              : `<button class="danger" onclick="suspend('${t.owner_id}', '${t.email}')">Suspend</button>`}
+          </td>
+        </tr>`;
+    }).join('');
+
+    block.outerHTML = `
+      <div id="tenantsBlock">
+        <table class="tenants-table">
+          <thead>
+            <tr>
+              <th>Email</th><th>Tier</th><th>События / день</th>
+              <th>Storage</th><th>Agents</th><th>Зарегистрирован</th><th>Действия</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <p class="sub" style="margin-top:12px;text-align:right">всего: ${j.count}</p>
+      </div>`;
+  }
+
+  async function changeTier(ownerId, newTier, selectEl) {
+    if (!newTier) return;
+    if (!confirm(`Сменить tier на ${newTier}? Лимиты обновятся автоматически.`)) {
+      selectEl.value = '';
+      return;
+    }
+    const r = await api(`/admin/tenants/${ownerId}/tier`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({tier: newTier}),
+    });
+    if (!r) return;
+    if (r.ok) load();
+    else alert('Ошибка: ' + r.status + ' ' + await r.text());
+  }
+  async function suspend(ownerId, email) {
+    if (!confirm(`Suspend ${email}? Все его API-вызовы вернут 403.`)) return;
+    const r = await api(`/admin/tenants/${ownerId}/suspend`, {method: 'POST'});
+    if (r && r.ok) load(); else if (r) alert('Ошибка');
+  }
+  async function unsuspend(ownerId) {
+    const r = await api(`/admin/tenants/${ownerId}/unsuspend`, {method: 'POST'});
+    if (r && r.ok) load(); else if (r) alert('Ошибка');
+  }
+
+  load();
+</script>
+
+<script src="/static/error-reporter.js?v=20260521" defer></script>
+<script src="/static/auth-widget.js?v=20260522" defer></script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Добро пожаловать · Cognitive Core</title>
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<link rel="stylesheet" href="/static/shared.css?v=20260520j">
+<link rel="stylesheet" href="/static/glass.css?v=20260520i">
+<style>
+  html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }
+  main.page { max-width: 760px; margin: 32px auto 80px; padding: 0 20px; }
+
+  .welcome-hero {
+    text-align: center;
+    padding: 24px 0 36px;
+  }
+  .welcome-hero h1 {
+    font-size: 36px;
+    font-weight: 700;
+    margin: 0 0 12px;
+    letter-spacing: -1px;
+    color: #ffffff;
+  }
+  .welcome-hero p {
+    font-size: 16px;
+    color: rgba(230,237,243,0.7);
+    margin: 0;
+  }
+
+  .step-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin-bottom: 14px;
+    transition: border-color .15s;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .step-card.done {
+    border-color: rgba(63,185,80,0.4);
+    background: rgba(63,185,80,0.04);
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    background: rgba(88,166,255,0.15);
+    border: 1px solid rgba(88,166,255,0.4);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px;
+    color: #58a6ff;
+  }
+  .step-card.done .step-num {
+    background: rgba(63,185,80,0.2);
+    border-color: rgba(63,185,80,0.6);
+    color: #3fb950;
+  }
+  .step-card.done .step-num::before { content: "✓"; font-size: 18px; }
+  .step-card.done .step-num span { display: none; }
+
+  .step-body { flex: 1; min-width: 0; }
+  .step-body h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; color: var(--glass-text); }
+  .step-body p { margin: 0 0 12px; font-size: 14px; color: rgba(230,237,243,0.65); line-height: 1.5; }
+  .step-cta {
+    display: inline-block;
+    padding: 9px 18px;
+    background: linear-gradient(135deg, #58a6ff, #4d8fdf);
+    color: #fff;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 13.5px;
+    transition: transform .15s, box-shadow .15s;
+  }
+  .step-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 18px -6px rgba(88,166,255,.6); }
+  .step-cta.done {
+    background: rgba(63,185,80,.15);
+    color: #3fb950;
+    pointer-events: none;
+  }
+
+  .footer-link {
+    text-align: center;
+    margin-top: 32px;
+  }
+  .footer-link a {
+    color: var(--glass-text-dim);
+    text-decoration: none;
+    font-size: 13.5px;
+  }
+  .footer-link a:hover { color: var(--glass-text); text-decoration: underline; }
+</style>
+<script src="/static/head-bootstrap.js?v=20260522"></script>
+</head>
+<body class="glass-mode">
+
+<div class="top-bar">
+  <a class="brand" href="/"><div class="brand-icon"><span class="brand-dot"></span></div>
+    <div><div class="brand-name">Cognitive Core</div></div>
+  </a>
+</div>
+
+<main class="page">
+  <section class="welcome-hero">
+    <h1>🎉 Добро пожаловать!</h1>
+    <p>3 шага и AI-помощник начнёт помнить вас между сессиями.</p>
+  </section>
+
+  <!-- Шаг 1: Привязать AI-клиента -->
+  <div class="step-card" id="step1">
+    <div class="step-num"><span>1</span></div>
+    <div class="step-body">
+      <h3>Привязать AI-помощника</h3>
+      <p>Подключи Claude Code / Cursor / ChatGPT / мобильное — мастер делает это за 5 минут.</p>
+      <a href="/ui/connect" class="step-cta" onclick="markDone('step1')">Открыть мастер →</a>
+    </div>
+  </div>
+
+  <!-- Шаг 2: Git-репозиторий (если Gitea доступен) -->
+  <div class="step-card" id="step2">
+    <div class="step-num"><span>2</span></div>
+    <div class="step-body">
+      <h3>Создать первый Git-репозиторий</h3>
+      <p>Твой код + configs будут жить на сервере, не на ноутбуке. Backup автоматический.</p>
+      <a id="giteaLink" href="#" class="step-cta" onclick="markDone('step2')">Открыть Git →</a>
+    </div>
+  </div>
+
+  <!-- Шаг 3: Тестовый prompt -->
+  <div class="step-card" id="step3">
+    <div class="step-num"><span>3</span></div>
+    <div class="step-body">
+      <h3>Сохрани первый факт</h3>
+      <p>В подключённом AI-чате попроси: <code>cognitive_remember</code> «меня зовут [имя], я работаю над [проект]». Потом в новой сессии спроси «что ты помнишь обо мне» — увидишь свой факт.</p>
+      <a href="/ui/profile" class="step-cta" onclick="markDone('step3')">Перейти в профиль →</a>
+    </div>
+  </div>
+
+  <div class="footer-link">
+    <a href="/ui/profile">Пропустить → перейти в профиль</a>
+  </div>
+</main>
+
+<script>
+  // Загрузка email для подстановки в Gitea link (org = email-local-part)
+  fetch('/user/me', { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : null)
+    .then(me => {
+      if (!me) return;
+      const orgSlug = (me.email || '').split('@')[0].replace(/[^a-z0-9_-]/gi, '').toLowerCase();
+      if (orgSlug) {
+        document.getElementById('giteaLink').href = `https://git.xn----8sbwawqx4fza.xn--p1ai/${orgSlug}`;
+      }
+    }).catch(() => {});
+
+  // localStorage tracking — какие шаги уже завершены
+  function markDone(id) {
+    localStorage.setItem('welcome_' + id, '1');
+    setTimeout(() => document.getElementById(id).classList.add('done'), 100);
+  }
+  ['step1', 'step2', 'step3'].forEach(id => {
+    if (localStorage.getItem('welcome_' + id)) {
+      document.getElementById(id).classList.add('done');
+    }
+  });
+</script>
+
+<script src="/static/error-reporter.js?v=20260521" defer></script>
+<script src="/static/auth-widget.js?v=20260522" defer></script>
+</body>
+</html>

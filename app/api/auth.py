@@ -205,12 +205,23 @@ async def verify_email_code(body: CodeVerifyBody, request: Request, response: Re
         except Exception as e:
             logger.warning("welcome_email_failed email=%s err=%s", verified_email, e)
 
+        # Phase 5C: auto-create Gitea org для нового tenant'а.
+        # Best-effort — если Gitea не deployed или down, не блокируем regstration.
+        try:
+            from app.services.gitea_client import ensure_org_for_owner
+            gitea_result = await ensure_org_for_owner(verified_email)
+            logger.info("gitea ensure_org email=%s ok=%s", verified_email, gitea_result.get("ok"))
+        except Exception as e:
+            logger.warning("gitea_org_create_failed email=%s err=%s", verified_email, e)
+
     return {
         "ok": True,
         "user_id": user_id,
         "email": verified_email,
         "is_new": is_new_account,
         "session_expires_at": expires_at.isoformat(),
+        # Phase 5C: hint UI для редиректа новичков на /ui/welcome
+        "redirect_to": "/ui/welcome" if is_new_account else "/ui/profile",
     }
 
 

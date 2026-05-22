@@ -283,6 +283,10 @@ app.include_router(agents_verify_router)
 from app.api.openapi_gen import router as openapi_router
 app.include_router(openapi_router)
 
+# Admin tenants management (Phase 5B 2026-05-22): /admin/tenants + tier change/suspend
+from app.api.admin import router as admin_router
+app.include_router(admin_router)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # UI страницы
@@ -329,6 +333,24 @@ async def connect_page():
 async def connect_mobile_page():
     """Mobile QR landing — single-screen с api_key + iOS Shortcut/Tasker hint."""
     return _html("connect-mobile.html")
+
+
+@app.get("/ui/pricing")
+async def pricing_page():
+    """Phase 5B — публичная landing с тарифами (Free / Pro / Enterprise)."""
+    return _html("pricing.html")
+
+
+@app.get("/ui/welcome")
+async def welcome_page():
+    """Phase 5C — onboarding flow после OTP signup. 3 шага до first remember."""
+    return _html("welcome.html")
+
+
+@app.get("/ui/admin/tenants")
+async def admin_tenants_page():
+    """Phase 5B — admin-only список tenant'ов с usage + actions. Auth-gate в JS."""
+    return _html("admin-tenants.html")
 
 
 # ─────────────────────────────────────────────────────────────────────────

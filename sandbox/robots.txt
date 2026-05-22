@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /$
+Allow: /ui/pricing
+Allow: /ui/connect
+Allow: /sandbox
+Allow: /docs/
+Disallow: /user/
+Disallow: /admin/
+Disallow: /agents/
+Disallow: /events
+Disallow: /memory/
+Disallow: /mcp/
+Disallow: /operative/
+
+Sitemap: https://mcp.xn----8sbwawqx4fza.xn--p1ai/sitemap.xml
