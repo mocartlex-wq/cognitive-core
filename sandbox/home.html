@@ -9,6 +9,7 @@
 <meta name="theme-color" content="#0a0e14">
 <link rel="stylesheet" href="/static/shared.css?v=20260520j">
 <link rel="stylesheet" href="/static/glass.css?v=20260520i">
+<meta name="cc-home-ver" content="20260522-design-fix">
 <style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }
 
 
@@ -157,7 +158,10 @@
     border: 1px solid rgba(88,166,255,0.35);
     display: inline-block; margin-top: 12px;
   }
-  /* Цветовые акценты для каждого слоя — рамка снизу */
+  /* Цветовые акценты для каждого слоя — рамка снизу + лёгкая обводка/glow по цвету слоя.
+     Раньше только L3 светился, остальные 4 карточки выглядели "мертво" — добавили
+     одинаковый тонкий ambient-glow и border-color по цвету слоя, чтобы система
+     визуально "дышала" целиком, а не только в L3. === */
   .glass-flow-node {
     position: relative; z-index: 2;
     text-align: center; padding: 18px 12px 16px;
@@ -170,11 +174,28 @@
     transform: translateY(-3px);
     border-color: var(--glass-border-strong);
   }
-  .glass-flow-node[data-layer="l1"] { border-bottom: 2px solid #58a6ff; }
-  .glass-flow-node[data-layer="l2"] { border-bottom: 2px solid #bc8cff; }
+  .glass-flow-node[data-layer="l1"] {
+    border-bottom: 2px solid #58a6ff;
+    box-shadow: 0 0 0 1px rgba(88,166,255,0.12), 0 0 18px -6px rgba(88,166,255,0.25);
+  }
+  .glass-flow-node[data-layer="l2"] {
+    border-bottom: 2px solid #bc8cff;
+    box-shadow: 0 0 0 1px rgba(188,140,255,0.12), 0 0 18px -6px rgba(188,140,255,0.25);
+  }
   .glass-flow-node[data-layer="l3"] { border-bottom: 2px solid #3fb950; }
-  .glass-flow-node[data-layer="l4"] { border-bottom: 2px solid #ff8c42; }
-  .glass-flow-node[data-layer="op"] { border-bottom: 2px solid #58a6ff; background: rgba(88,166,255,0.05); }
+  .glass-flow-node[data-layer="l4"] {
+    border-bottom: 2px solid #ff8c42;
+    box-shadow: 0 0 0 1px rgba(255,140,66,0.12), 0 0 18px -6px rgba(255,140,66,0.25);
+  }
+  .glass-flow-node[data-layer="op"] {
+    border-bottom: 2px solid #58a6ff;
+    background: rgba(88,166,255,0.05);
+    box-shadow: 0 0 0 1px rgba(88,166,255,0.18), 0 0 22px -6px rgba(88,166,255,0.30);
+  }
+  .glass-flow-node[data-layer="l1"]:hover { box-shadow: 0 0 0 1px rgba(88,166,255,0.30), 0 0 26px -2px rgba(88,166,255,0.45); }
+  .glass-flow-node[data-layer="l2"]:hover { box-shadow: 0 0 0 1px rgba(188,140,255,0.30), 0 0 26px -2px rgba(188,140,255,0.45); }
+  .glass-flow-node[data-layer="l4"]:hover { box-shadow: 0 0 0 1px rgba(255,140,66,0.30), 0 0 26px -2px rgba(255,140,66,0.45); }
+  .glass-flow-node[data-layer="op"]:hover { box-shadow: 0 0 0 1px rgba(88,166,255,0.40), 0 0 30px -2px rgba(88,166,255,0.55); }
 
   /* === L3 — завихрение звёзд ===
      L3 — точка расхождения. Знание раздваивается: одна копия в L4 (архив),
@@ -605,19 +626,28 @@
   .top-status .dot.err   { box-shadow: 0 0 6px rgba(248,81,73,0.6); }
   .top-status .dot.unknown { opacity: 0.5; }
 
-  /* === SECTION HEADERS: subtle accent line === */
+  /* === SECTION HEADERS: subtle accent bar UNDER the heading (not floating left)
+         Был баг: ::before абсолютно позиционировался по left:0 контейнера max-width:700,
+         центрированного в 1180px main → линия "уплывала" за пределы текста и местами
+         наезжала на содержимое предыдущей секции. Теперь — короткая полоска под заголовком. === */
   .glass-section-h {
     position: relative;
   }
-  .glass-section-h::before {
-    content: ""; position: absolute;
-    left: 0; top: 50%; transform: translateY(-50%);
-    width: 3px; height: 22px;
-    background: linear-gradient(180deg, #58a6ff, #3fb950);
-    border-radius: 3px;
-    opacity: 0.7;
+  .glass-section-h h2 {
+    display: inline-block;
+    padding-bottom: 8px;
+    position: relative;
   }
-  .glass-section-h h2 { padding-left: 14px; }
+  .glass-section-h h2::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: 0;
+    transform: translateX(-50%);
+    width: 48px; height: 2px;
+    background: linear-gradient(90deg, #58a6ff, #3fb950);
+    border-radius: 2px;
+    opacity: 0.65;
+  }
 
   /* === FOOT: тоньше + центрировано === */
   .glass-foot {
