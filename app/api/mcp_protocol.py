@@ -666,14 +666,17 @@ async def mcp_sse_stub() -> StreamingResponse:
         # Initial endpoint event — required by spec
         yield "event: endpoint\n"
         yield "data: /mcp/messages\n\n"
-        # Keep-alive forever — sends SSE-comment every 15s (ignored by client
-        # protocol parser, но FastMCP/SDK видят что connection alive).
+        # Keep-alive forever каждые 15с. Claude Code SDK закрывает stream
+        # через 32с inactivity ЕСЛИ нет полноценных event-frames (SSE-comments
+        # `: ...\n\n` не считаются). Шлём event: ping с empty data — это
+        # SDK видит как живой стрим. MCP JSON-RPC ничего не теряет — наш
+        # обмен идёт через POST /mcp/messages (HTTP-direct mode).
         try:
             while True:
                 await asyncio.sleep(15)
-                yield ": keepalive\n\n"
+                yield "event: ping\n"
+                yield "data: {}\n\n"
         except asyncio.CancelledError:
-            # Client closed connection — clean exit, no log spam
             return
 
     return StreamingResponse(
