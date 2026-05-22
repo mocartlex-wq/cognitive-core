@@ -519,15 +519,15 @@
         const task = payload.task || payload.event || payload.text || (typeof payload === 'string' ? payload : JSON.stringify(payload).slice(0, 100));
         const domain = e.domain || '?';
         const fullDate = fmtFullDate(e.timestamp);
+        const relDate = fmtDate(e.timestamp);
         return `
           <div style="padding:10px 0;border-bottom:1px solid var(--glass-border);font-size:13px">
-            <div style="display:flex;justify-content:space-between;gap:10px">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
               <span style="color:var(--glass-text)">${esc(String(task).slice(0,120))}</span>
-              <span class="meta" style="white-space:nowrap;flex-shrink:0" title="${esc(fullDate)}">${fmtDate(e.timestamp)}</span>
+              <span class="meta" style="white-space:nowrap;flex-shrink:0" title="${esc(relDate)}">${esc(fullDate)}</span>
             </div>
-            <div class="meta" style="font-size:11.5px;margin-top:3px;display:flex;gap:8px;align-items:center">
+            <div class="meta" style="font-size:11.5px;margin-top:3px">
               <span style="font-family:var(--mono);background:rgba(88,166,255,0.1);padding:1px 6px;border-radius:4px">${esc(domain)}</span>
-              <span style="color:var(--glass-text-dim)">${esc(fullDate)}</span>
             </div>
           </div>
         `;
