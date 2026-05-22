@@ -144,33 +144,48 @@
   .machine-picker .mp-input:focus {
     outline: none; border: 0 !important; box-shadow: none;
   }
-  /* Chip styles — pickable device tiles */
+  /* Chip styles — pickable device tiles. Иконка — inline SVG (а не emoji
+     🖥) чтобы рендерилась одинаково в Yandex/Chrome/Firefox без emoji-tofu. */
   .machine-chip {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 11px 5px 9px;
-    font-size: 12.5px; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 13px 6px 11px;
+    font-size: 13px; font-weight: 500;
+    font-family: inherit;
     background: rgba(88,166,255,0.10);
-    border: 1px solid rgba(88,166,255,0.30);
+    border: 1px solid rgba(88,166,255,0.32);
     color: var(--glass-text);
     border-radius: 99px; cursor: pointer;
     transition: background 0.15s, border-color 0.15s, transform 0.1s;
     user-select: none;
   }
+  .machine-chip::before {
+    content: "";
+    display: inline-block; width: 12px; height: 12px;
+    background-color: currentColor; opacity: 0.7;
+    -webkit-mask: var(--chip-icon-monitor) center/contain no-repeat;
+            mask: var(--chip-icon-monitor) center/contain no-repeat;
+    flex-shrink: 0;
+  }
   .machine-chip:hover {
     background: rgba(88,166,255,0.22);
-    border-color: rgba(88,166,255,0.55);
+    border-color: rgba(88,166,255,0.58);
     transform: translateY(-1px);
   }
   .machine-chip[data-active="1"] {
     background: rgba(63,185,80,0.22);
-    border-color: rgba(63,185,80,0.65);
+    border-color: rgba(63,185,80,0.68);
     color: #d4f5dc;
   }
   .machine-chip[data-active="1"]::before {
-    content: "✓"; font-weight: 700; color: #4cc960;
+    -webkit-mask: var(--chip-icon-check) center/contain no-repeat;
+            mask: var(--chip-icon-check) center/contain no-repeat;
+    background-color: #4cc960; opacity: 1;
+    width: 13px; height: 13px;
   }
-  .machine-chip:not([data-active="1"])::before {
-    content: "🖥"; font-size: 11px; opacity: 0.85;
+  :root {
+    /* Inline SVG icons — масштабируются и красятся через currentColor mask */
+    --chip-icon-monitor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 4h18a1 1 0 011 1v11a1 1 0 01-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 01-1-1V5a1 1 0 011-1zm1 2v9h16V6H4z'/></svg>");
+    --chip-icon-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'/></svg>");
   }
 
   .api-key-display {
