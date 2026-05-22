@@ -96,23 +96,60 @@
     border: 1px solid var(--glass-border); background: var(--glass-bg);
     -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
     border-radius: var(--apple-radius); padding: 28px;
-    width: min(95%, 460px); color: var(--glass-text);
+    width: min(95%, 480px); color: var(--glass-text);
     box-shadow: var(--glass-shadow-lg);
   }
   dialog::backdrop { background: rgba(0,0,0,0.6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-  dialog h3 { margin: 0 0 14px; font-size: 18px; font-weight: 600; }
-  dialog label {
-    display: block; font-size: 11.5px; text-transform: uppercase;
-    letter-spacing: 0.5px; color: var(--glass-text-dim);
-    margin: 12px 0 5px; font-weight: 600;
+  /* === DESIGN PASS (PR #15) — clean form pattern ===
+     Раньше label был uppercase 11.5px bold + mixed-weight span внутри —
+     это и наслаивалось визуально (разные веса шрифта на одной строке
+     дают неравномерный rendering). Теперь label — sentence-case medium
+     14px без span'ов, а «(необязательно)» вынесено в separate .field-opt
+     с light-color и собственной строкой. */
+  dialog h3 {
+    margin: 0 0 6px; font-size: 19px; font-weight: 600;
+    letter-spacing: -0.2px; line-height: 1.3;
   }
-  dialog input {
+  dialog .dlg-sub {
+    font-size: 13px; color: var(--glass-text-dim);
+    margin: 0 0 22px; line-height: 1.5;
+  }
+  dialog .field {
+    margin: 0 0 18px;
+  }
+  dialog .field > label {
+    display: block;
+    font-size: 13.5px; font-weight: 500;
+    color: var(--glass-text);
+    margin: 0 0 8px;
+    text-transform: none; letter-spacing: 0;
+  }
+  dialog .field > label .opt {
+    color: var(--glass-text-dim);
+    font-weight: 400; font-size: 12.5px;
+    margin-left: 6px;
+  }
+  dialog .field > .field-hint {
+    display: block;
+    font-size: 12px; color: var(--glass-text-dim);
+    margin: 8px 0 0; line-height: 1.5;
+  }
+  dialog input,
+  dialog select {
     width: 100%; padding: 11px 13px; font-size: 14px;
     border-radius: 9px; border: 1px solid var(--glass-border);
     background: var(--glass-bg-light); color: var(--glass-text);
-    font-family: var(--font);
+    font-family: var(--font); box-sizing: border-box;
   }
-  dialog input:focus { outline: none; border-color: var(--glass-orb-1); }
+  dialog input:focus,
+  dialog select:focus {
+    outline: none; border-color: var(--glass-orb-1);
+    box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
+  }
+  dialog .toolbar {
+    display: flex; justify-content: flex-end; gap: 8px;
+    margin-top: 22px;
+  }
 
   /* === Machine picker — chip-row + input в одной визуальной группе ===
      Раньше chip и input выглядели как 2 несвязанных элемента; теперь
@@ -276,41 +313,42 @@
 </main>
 
 <dialog id="claimTokenDialog">
-  <h3>🪄 Передать ключ помощнику</h3>
-  <p style="font-size:13px;color:var(--glass-text-dim);margin:0 0 14px;line-height:1.5">
-    Сгенерируем одноразовый код. Передайте его в чат с Claude Code / Cursor —
-    помощник сам подключится, отредактирует свой ~/.claude.json, попросит вас
-    перезапустить. Никаких manual edit'ов файлов.
+  <h3>Передать ключ помощнику</h3>
+  <p class="dlg-sub">
+    Одноразовый код для чата с Claude Code / Cursor — помощник сам подключится и попросит вас перезапустить.
   </p>
   <form id="claimTokenForm">
-    <label for="claimTokenAgentId">
-      Идентификатор помощника <span style="opacity:.6;font-weight:400">(необязательно)</span>
-    </label>
-    <input id="claimTokenAgentId" name="agent_id"
-           pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
-           placeholder="claude-laptop / gpt-mobile / пусто = авто">
-    <small style="display:block;margin:-6px 0 12px;font-size:11.5px;color:var(--glass-text-dim);line-height:1.45">
-      Латиница, цифры, <code>-._</code> · технический ID для URL и API.
-    </small>
-
-    <label for="claimTokenMachine">
-      Машина <span style="opacity:.6;font-weight:400">(необязательно)</span>
-    </label>
-    <div class="machine-picker">
-      <div id="claimMachineChips" class="mp-chips" style="display:none"></div>
-      <input id="claimTokenMachine" name="machine_hint" maxlength="128"
-             autocomplete="off" class="mp-input"
-             placeholder="напр: MacBook жены, рабочий ПК">
+    <div class="field">
+      <label for="claimTokenAgentId">
+        Идентификатор помощника<span class="opt">необязательно</span>
+      </label>
+      <input id="claimTokenAgentId" name="agent_id"
+             pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
+             placeholder="claude-laptop / gpt-mobile / пусто = авто">
+      <span class="field-hint">Латиница, цифры, <code>-._</code> · технический ID для URL и API.</span>
     </div>
-    <small id="claimMachinesHint" style="display:block;margin:6px 0 12px;font-size:11.5px;color:var(--glass-text-dim);line-height:1.45">
-      Можно по-русски.
-    </small>
 
-    <label for="claimTokenPlatform">Платформа</label>
-    <select id="claimTokenPlatform" name="platform" style="width:100%;padding:11px 13px;font-size:14px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--font);box-sizing:border-box">
-      <option value="claude_code">Claude Code (default)</option>
-      <option value="cursor">Cursor IDE</option>
-    </select>
+    <div class="field">
+      <label for="claimTokenMachine">
+        Машина<span class="opt">необязательно</span>
+      </label>
+      <div class="machine-picker">
+        <div id="claimMachineChips" class="mp-chips" style="display:none"></div>
+        <input id="claimTokenMachine" name="machine_hint" maxlength="128"
+               autocomplete="off" class="mp-input"
+               placeholder="напр: MacBook жены, рабочий ПК">
+      </div>
+      <span id="claimMachinesHint" class="field-hint">Можно по-русски.</span>
+    </div>
+
+    <div class="field">
+      <label for="claimTokenPlatform">Платформа</label>
+      <select id="claimTokenPlatform" name="platform">
+        <option value="claude_code">Claude Code (default)</option>
+        <option value="cursor">Cursor IDE</option>
+      </select>
+    </div>
+
     <div class="toolbar">
       <button type="button" class="btn secondary btn-sm" onclick="document.getElementById('claimTokenDialog').close()">Отмена</button>
       <button type="submit" class="btn btn-sm">Сгенерировать</button>
@@ -321,35 +359,38 @@
 
 <dialog id="newAgentDialog">
   <h3>Новый помощник</h3>
-  <p style="font-size:13px;color:var(--glass-text-dim);margin:0 0 14px;line-height:1.5">
+  <p class="dlg-sub">
     Хотите готовый конфиг для Claude Code / ChatGPT / мобильного?
-    <a href="/ui/connect" style="color:var(--glass-orb-1);font-weight:600">→ Пошаговый wizard</a>
-    (5 шагов, проверка end-to-end).
+    <a href="/ui/connect" style="color:var(--glass-orb-1);font-weight:600">→ Пошаговый wizard</a> (5 шагов, проверка end-to-end).
   </p>
   <form id="newAgentForm">
-    <label for="newAgentId">Идентификатор</label>
-    <input id="newAgentId" name="agent_id" required pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
-           placeholder="claude-laptop / cursor-work / gpt-bot">
-    <small style="display:block;margin:-6px 0 12px;font-size:11.5px;color:var(--glass-text-dim);line-height:1.45">
-      Латиница, цифры, <code>-._</code> · 3-64 символа · технический ID для URL и API.
-    </small>
-
-    <label for="newAgentDesc">Описание <span style="opacity:.6;font-weight:400">(необязательно)</span></label>
-    <input id="newAgentDesc" name="description" maxlength="300" placeholder="напр: домашний агент для заметок">
-
-    <label for="newAgentProject">Проект <span style="opacity:.6;font-weight:400">(необязательно)</span></label>
-    <input id="newAgentProject" name="project" maxlength="64" placeholder="личное / cogcore / клиент-X">
-
-    <label for="newAgentMachine">Машина <span style="opacity:.6;font-weight:400">(необязательно)</span></label>
-    <div class="machine-picker">
-      <div id="newAgentMachineChips" class="mp-chips" style="display:none"></div>
-      <input id="newAgentMachine" name="machine" maxlength="128" autocomplete="off"
-             class="mp-input"
-             placeholder="напр: MacBook жены, рабочий ПК">
+    <div class="field">
+      <label for="newAgentId">Идентификатор</label>
+      <input id="newAgentId" name="agent_id" required pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
+             placeholder="claude-laptop / cursor-work / gpt-bot">
+      <span class="field-hint">Латиница, цифры, <code>-._</code> · 3-64 символа · технический ID для URL и API.</span>
     </div>
-    <small id="newAgentMachineHint" style="display:block;margin:6px 0 12px;font-size:11.5px;color:var(--glass-text-dim);line-height:1.45">
-      Можно по-русски.
-    </small>
+
+    <div class="field">
+      <label for="newAgentDesc">Описание<span class="opt">необязательно</span></label>
+      <input id="newAgentDesc" name="description" maxlength="300" placeholder="напр: домашний агент для заметок">
+    </div>
+
+    <div class="field">
+      <label for="newAgentProject">Проект<span class="opt">необязательно</span></label>
+      <input id="newAgentProject" name="project" maxlength="64" placeholder="личное / cogcore / клиент-X">
+    </div>
+
+    <div class="field">
+      <label for="newAgentMachine">Машина<span class="opt">необязательно</span></label>
+      <div class="machine-picker">
+        <div id="newAgentMachineChips" class="mp-chips" style="display:none"></div>
+        <input id="newAgentMachine" name="machine" maxlength="128" autocomplete="off"
+               class="mp-input"
+               placeholder="напр: MacBook жены, рабочий ПК">
+      </div>
+      <span id="newAgentMachineHint" class="field-hint">Можно по-русски.</span>
+    </div>
 
     <div class="toolbar">
       <button type="button" class="btn secondary btn-sm" onclick="document.getElementById('newAgentDialog').close()">Отмена</button>
