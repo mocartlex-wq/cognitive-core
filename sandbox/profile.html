@@ -718,8 +718,8 @@
         <p class="msg-line">Действителен ${Math.round(j.expires_in_seconds/60)} минут. После использования сгорает.</p>
         <p class="msg-line" style="margin-top: 14px;"><strong>agent_id будет:</strong> <code>${esc(j.agent_id)}</code></p>
         <div class="toolbar" style="margin-top:14px">
-          <button class="btn btn-sm" id="copyTokenBtn" data-token="${esc(j.token)}">📋 Скопировать код</button>
-          <button class="btn secondary btn-sm" id="claimDoneBtn">Готово</button>
+          <button type="button" class="btn btn-sm" id="copyTokenBtn" data-token="${esc(j.token)}">📋 Скопировать код</button>
+          <button type="button" class="btn secondary btn-sm" id="claimDoneBtn">Готово</button>
         </div>
         <details style="margin-top:16px;border-top:1px solid var(--glass-border);padding-top:12px">
           <summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);font-weight:600;user-select:none;list-style:none;display:flex;align-items:center;gap:6px">
@@ -729,7 +729,7 @@
           </summary>
           <pre id="claimPromptPre" style="margin-top:10px;background:rgba(0,0,0,0.35);border:1px solid var(--glass-border);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto;color:#e6edf3;user-select:all">${esc(promptText)}</pre>
           <div class="toolbar" style="margin-top:8px">
-            <button class="btn secondary btn-sm" id="copyPromptBtn">📋 Скопировать промпт целиком</button>
+            <button type="button" class="btn secondary btn-sm" id="copyPromptBtn">📋 Скопировать промпт целиком</button>
           </div>
         </details>
         <style>
