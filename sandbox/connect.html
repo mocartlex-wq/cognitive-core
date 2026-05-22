@@ -144,14 +144,7 @@
     transition: background 0.15s, border-color 0.15s, transform 0.1s;
     user-select: none;
   }
-  .machine-chip::before {
-    content: "";
-    display: inline-block; width: 12px; height: 12px;
-    background-color: currentColor; opacity: 0.7;
-    -webkit-mask: var(--chip-icon-monitor) center/contain no-repeat;
-            mask: var(--chip-icon-monitor) center/contain no-repeat;
-    flex-shrink: 0;
-  }
+  .machine-chip svg { flex-shrink: 0; }
   .machine-chip:hover {
     background: rgba(88,166,255,0.22);
     border-color: rgba(88,166,255,0.58);
@@ -162,16 +155,10 @@
     border-color: rgba(63,185,80,0.68);
     color: #d4f5dc;
   }
-  .machine-chip[data-active="1"]::before {
-    -webkit-mask: var(--chip-icon-check) center/contain no-repeat;
-            mask: var(--chip-icon-check) center/contain no-repeat;
-    background-color: #4cc960; opacity: 1;
-    width: 13px; height: 13px;
-  }
-  :root {
-    --chip-icon-monitor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 4h18a1 1 0 011 1v11a1 1 0 01-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 01-1-1V5a1 1 0 011-1zm1 2v9h16V6H4z'/></svg>");
-    --chip-icon-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'/></svg>");
-  }
+  .machine-chip[data-active="1"] svg.chip-icon-monitor { display: none; }
+  .machine-chip:not([data-active="1"]) svg.chip-icon-check { display: none; }
+  .machine-chip svg.chip-icon-monitor { color: #88c5ff; opacity: 0.85; }
+  .machine-chip svg.chip-icon-check { color: #4cc960; }
 
   /* ── Buttons ─────────────────────────────────────────────────── */
   .btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
@@ -607,7 +594,15 @@ async function populateMachineChipsInWizard() {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'machine-chip';
-      btn.textContent = label;
+      btn.innerHTML = `
+        <svg class="chip-icon-monitor" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M3 4h18a1 1 0 011 1v11a1 1 0 01-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 01-1-1V5a1 1 0 011-1zm1 2v9h16V6H4z"/>
+        </svg>
+        <svg class="chip-icon-check" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/>
+        </svg>
+        <span class="chip-label"></span>`;
+      btn.querySelector('.chip-label').textContent = label;
       btn.dataset.active = '0';
       btn.addEventListener('click', () => {
         input.value = label;
