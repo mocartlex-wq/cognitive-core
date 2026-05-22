@@ -141,17 +141,21 @@ async def my_agents(request: Request):
         rows = await conn.fetch(
             """
             SELECT agent_id, current_task, project, machine, capabilities,
-                   last_heartbeat_at, total_events, total_checkpoints, updated_at
+                   last_heartbeat_at, total_events, total_checkpoints, updated_at,
+                   last_mcp_connect_at,
+                   -- Presence: MCP-online если connect в последние 60 сек
+                   (last_mcp_connect_at IS NOT NULL
+                    AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online
               FROM agent_states
              WHERE owner_user_id = $1::uuid
-             ORDER BY last_heartbeat_at DESC NULLS LAST
+             ORDER BY mcp_online DESC, last_heartbeat_at DESC NULLS LAST
             """,
             user.user_id,
         )
     items: list[dict[str, Any]] = []
     for r in rows:
         d = dict(r)
-        for k in ("last_heartbeat_at", "updated_at"):
+        for k in ("last_heartbeat_at", "updated_at", "last_mcp_connect_at"):
             v = d.get(k)
             if isinstance(v, datetime):
                 d[k] = v.isoformat()

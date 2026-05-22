@@ -325,18 +325,38 @@
       return;
     }
     const grid = j.items.map(a => {
-      const online = a.last_heartbeat_at && (Date.now() - Date.parse(a.last_heartbeat_at)) < 90000;
+      // MCP-online: server обновляет last_mcp_connect_at при каждом SSE-connect.
+      // Если связь живая (Claude Code SDK держит SSE открытым + keepalive ping
+      // каждые 15с) — клиент переподключается каждые 30-60с → мы видим
+      // last_mcp_connect_at свежий → зелёный dot.
+      const mcpOnline = a.mcp_online === true;
+      const eventOnline = a.last_heartbeat_at && (Date.now() - Date.parse(a.last_heartbeat_at)) < 90000;
+      // Приоритет: MCP-online (стабильное real-time SSE), потом event-online (старые heartbeats)
+      let dot = '<span title="MCP не подключён" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#444;margin-right:6px;vertical-align:middle"></span>';
+      let chip = '';
+      if (mcpOnline) {
+        dot = '<span title="MCP подключён (SSE active)" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#4cc960;box-shadow:0 0 6px rgba(76,201,96,0.7);margin-right:6px;vertical-align:middle"></span>';
+        chip = '<span class="chip online" title="MCP-канал live, можно слать запросы">MCP</span>';
+      } else if (eventOnline) {
+        dot = '<span title="Активность за последние 90 сек (но MCP может быть не подключён)" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ff8c42;margin-right:6px;vertical-align:middle"></span>';
+        chip = '<span class="chip" style="background:rgba(255,140,66,0.15);color:#ff8c42">REST</span>';
+      }
+      const mcpTime = a.last_mcp_connect_at ? `MCP ${fmtDate(a.last_mcp_connect_at)}` : 'MCP никогда';
       return `
       <div class="item">
         <div>
-          <div class="name">${esc(a.agent_id)} ${online ? '<span class="chip online">онлайн</span>' : ''}</div>
-          <div class="meta">${esc(a.project || '—')} · ${esc(a.machine || '—')} · ${a.total_events || 0} событий</div>
+          <div class="name">${dot}${esc(a.agent_id)} ${chip}</div>
+          <div class="meta">${esc(a.project || '—')} · ${esc(a.machine || '—')} · ${a.total_events || 0} событий · ${mcpTime}</div>
         </div>
         <span class="meta">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
       </div>`;
     }).join('');
     block.outerHTML = `<div id="agentsBlock" class="grid">${grid}</div>`;
   }
+
+  // Auto-refresh «Мои помощники» каждые 20 сек — owner видит когда
+  // его агент подключается (зелёный загорается через 0-20 сек после connect).
+  setInterval(() => { loadAgents(); }, 20000);
 
   async function loadSessions() {
     const r = await api('/auth/sessions');

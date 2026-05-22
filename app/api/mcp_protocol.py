@@ -648,8 +648,28 @@ def _format_text(data: Any) -> str:
         return str(data)[:8000]
 
 
+async def _mark_mcp_connected(request: Request) -> None:
+    """Записать «MCP-клиент только что подключился» в agent_states.
+
+    Используется для UI presence indicator (зелёный/серый dot в /ui/profile).
+    Best-effort — если postgres недоступен или agent не resolved, тихо
+    пропускаем (не блокируем сам SSE handshake).
+    """
+    try:
+        agent_id = await _resolve_agent(request)
+        from app.db.postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE agent_states SET last_mcp_connect_at = NOW() WHERE agent_id = $1",
+                agent_id,
+            )
+    except Exception:
+        pass
+
+
 @router.get("/sse")
-async def mcp_sse_stub() -> StreamingResponse:
+async def mcp_sse_stub(request: Request) -> StreamingResponse:
     """Hybrid SSE/HTTP transport.
 
     Mainstream MCP клиенты (Claude Code SDK, Claude Desktop, Cursor)
@@ -662,6 +682,9 @@ async def mcp_sse_stub() -> StreamingResponse:
     приходят inline в HTTP POST (HTTP-direct mode, что мы и делаем
     в /mcp/messages handler). SSE-stream играет роль liveness-probe.
     """
+    # Mark agent as MCP-connected (for /ui/profile green dot UI)
+    await _mark_mcp_connected(request)
+
     async def gen():
         # Initial endpoint event — required by spec
         yield "event: endpoint\n"
