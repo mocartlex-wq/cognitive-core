@@ -163,10 +163,25 @@
 <main class="page">
   <div class="page-title">Мой профиль</div>
 
-  <div class="card">
-    <h2>Аккаунт <span id="avatarSlot"></span></h2>
-    <div id="meBlock" class="empty">Загружаем…</div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <details id="accountDetails">
+      <summary style="cursor:pointer;padding:18px 28px;list-style:none;display:flex;align-items:center;gap:14px;user-select:none">
+        <span id="avatarSlot"></span>
+        <span style="flex:1;min-width:0">
+          <span id="accountSummaryLine" style="font-size:14px;color:var(--glass-text-dim)">Загружаем…</span>
+        </span>
+        <span style="font-size:14px;color:var(--glass-text-dim)" class="acc-chevron">▾</span>
+      </summary>
+      <div style="padding:0 28px 24px">
+        <div id="meBlock" class="empty">Загружаем…</div>
+      </div>
+    </details>
   </div>
+  <style>
+    #accountDetails > summary::-webkit-details-marker { display:none; }
+    #accountDetails[open] .acc-chevron { transform: rotate(180deg); display:inline-block; transition: transform 0.2s }
+    #accountDetails > summary:hover { background: rgba(255,255,255,0.02); }
+  </style>
 
   <div class="card">
     <h2>Мои комнаты</h2>
@@ -305,9 +320,20 @@
     }
     const bg = colorFromId(data.user_id || data.email || 'x');
     // Avatar теперь в заголовке card (правый верхний угол) — не отдельной строкой
-    const avatarBlock = `<div title="${esc(data.display_name || data.email)}" style="width:42px;height:42px;border-radius:50%;background:${bg};display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:${ini.length > 2 ? 13 : 15}px;letter-spacing:0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.3);vertical-align:middle">${esc(ini)}</div>`;
+    const avatarBlock = `<div title="${esc(data.display_name || data.email)}" style="width:38px;height:38px;border-radius:50%;background:${bg};display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:${ini.length > 2 ? 12 : 14}px;letter-spacing:0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.3);flex-shrink:0">${esc(ini)}</div>`;
     const avatarSlot = document.getElementById('avatarSlot');
     if (avatarSlot) avatarSlot.innerHTML = avatarBlock;
+
+    // Сжатая строка для свёрнутого вида карточки «Аккаунт»
+    const summary = document.getElementById('accountSummaryLine');
+    if (summary) {
+      summary.innerHTML = `
+        <strong style="color:var(--glass-text);font-size:15px">${esc(data.display_name || '—')}</strong>
+        <span style="color:var(--glass-text-dim);margin:0 8px">·</span>
+        <span style="color:var(--glass-text-dim);font-size:13.5px">${esc(data.email)}</span>
+        ${verifiedChip} ${adminChip}
+      `;
+    }
 
     document.getElementById('meBlock').outerHTML = `
       <div id="meBlock">
@@ -316,7 +342,7 @@
         <div class="row"><span class="k">Имя</span>
           <span class="v" style="display:flex;align-items:center;gap:8px">
             ${esc(data.display_name || '—')}
-            <button class="btn secondary btn-sm" onclick="editDisplayName()">✏️</button>
+            <button class="btn secondary btn-sm" onclick="editDisplayName(event)">✏️</button>
           </span></div>
         <div class="row"><span class="k">user_id</span>
           <span class="v" style="font-family: var(--mono); font-size: 12px;">${esc(data.user_id)}</span></div>
@@ -325,7 +351,12 @@
       </div>`;
   }
 
-  window.editDisplayName = async function() {
+  window.editDisplayName = async function(e) {
+    // Не дать клику пробросить на summary (иначе toggle details)
+    if (e && e.stopPropagation) e.stopPropagation();
+    // Раскрыть card если свёрнут — owner видит что редактирует
+    const d = document.getElementById('accountDetails');
+    if (d && !d.open) d.open = true;
     const cur = (window.__me || {}).display_name || '';
     const v = prompt('Ваше имя (как видят другие в комнатах):', cur);
     if (v === null) return;
