@@ -291,6 +291,17 @@
     } catch (e) { return iso; }
   }
 
+  // Полные дата+время в локальной зоне — для tooltip и absolute display
+  function fmtFullDate(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const date = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      return `${date} ${time}`;
+    } catch (e) { return iso; }
+  }
+
   async function loadMe() {
     const r = await api('/user/me');
     if (!r) return;
@@ -428,15 +439,18 @@
         ? '<span title="Есть онлайн агент" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4cc960;box-shadow:0 0 8px rgba(76,201,96,0.8);margin-right:8px;vertical-align:middle"></span>'
         : '<span title="Нет онлайн агентов" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#444;margin-right:8px;vertical-align:middle"></span>';
       const fp = m.machine_fingerprint ? ` <span class="meta" style="font-family:var(--mono);font-size:11px;color:var(--glass-text-dim)">fp:${esc(m.machine_fingerprint.slice(0,8))}</span>` : '';
-      const agentsHtml = m.agents.map(a => `
+      const agentsHtml = m.agents.map(a => {
+        const createdISO = a.updated_at || a.last_heartbeat_at || '';
+        const createdFull = createdISO ? fmtFullDate(createdISO) : '—';
+        return `
         <details style="margin-left:12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:14px;padding:0">
           <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;gap:14px;align-items:center" data-agent-id="${esc(a.agent_id)}" onclick="loadAgentEvents(event, '${esc(a.agent_id)}')">
             <div style="flex:1;min-width:0">
               <div class="name">${agentDot(a)}${esc(a.agent_id)} ${agentChip(a)}</div>
-              <div class="meta">${esc(a.project || '—')} · ${a.total_events || 0} событий · ${a.last_mcp_connect_at ? 'MCP ' + fmtDate(a.last_mcp_connect_at) : 'MCP никогда'}</div>
+              <div class="meta">${esc(a.project || '—')} · ${a.total_events || 0} событий · создан ${esc(createdFull)} · ${a.last_mcp_connect_at ? 'MCP ' + fmtDate(a.last_mcp_connect_at) : 'MCP никогда'}</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
-              <span class="meta" style="margin-right:6px">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
+              <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
               <button class="btn secondary btn-sm" title="Переименовать машину" onclick="event.stopPropagation();event.preventDefault();renameAgent('${esc(a.agent_id)}', '${esc((a.machine_label || '').replace(/'/g, '&#39;'))}')">✏️</button>
               <button class="btn danger btn-sm" title="Удалить помощника + revoke ключи" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc(a.agent_id)}')">🗑️</button>
               <span class="meta" style="color:var(--glass-text-dim)">▾</span>
@@ -445,8 +459,8 @@
           <div class="agent-events" id="events-${esc(a.agent_id)}" style="padding:0 16px 14px;border-top:1px solid var(--glass-border)">
             <div class="meta" style="padding:12px 0;color:var(--glass-text-dim)">Загружаем события…</div>
           </div>
-        </details>
-      `).join('');
+        </details>`;
+      }).join('');
       return `
         <details open style="margin-bottom:14px">
           <summary style="cursor:pointer; padding:8px 12px; background:var(--glass-bg-light); border:1px solid var(--glass-border); border-radius:10px; user-select:none; font-weight:600">
@@ -504,14 +518,16 @@
         const payload = typeof e.raw_payload === 'string' ? JSON.parse(e.raw_payload) : e.raw_payload;
         const task = payload.task || payload.event || payload.text || (typeof payload === 'string' ? payload : JSON.stringify(payload).slice(0, 100));
         const domain = e.domain || '?';
+        const fullDate = fmtFullDate(e.timestamp);
         return `
           <div style="padding:10px 0;border-bottom:1px solid var(--glass-border);font-size:13px">
             <div style="display:flex;justify-content:space-between;gap:10px">
               <span style="color:var(--glass-text)">${esc(String(task).slice(0,120))}</span>
-              <span class="meta" style="white-space:nowrap;flex-shrink:0">${fmtDate(e.timestamp)}</span>
+              <span class="meta" style="white-space:nowrap;flex-shrink:0" title="${esc(fullDate)}">${fmtDate(e.timestamp)}</span>
             </div>
-            <div class="meta" style="font-size:11.5px;margin-top:3px">
+            <div class="meta" style="font-size:11.5px;margin-top:3px;display:flex;gap:8px;align-items:center">
               <span style="font-family:var(--mono);background:rgba(88,166,255,0.1);padding:1px 6px;border-radius:4px">${esc(domain)}</span>
+              <span style="color:var(--glass-text-dim)">${esc(fullDate)}</span>
             </div>
           </div>
         `;
