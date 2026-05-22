@@ -104,6 +104,62 @@
   .field .hint { font-size: 12px; color: var(--glass-text-dim); margin-top: 5px; }
   .field .err { font-size: 12px; color: #ff7770; margin-top: 5px; }
 
+  /* === Machine picker — chip-row + input в одной визуальной группе === */
+  .machine-picker {
+    background: var(--glass-bg-light, rgba(255,255,255,0.04));
+    border: 1px solid var(--glass-border);
+    border-radius: 9px;
+    overflow: hidden;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .machine-picker:focus-within {
+    border-color: var(--glass-orb-1, #58a6ff);
+    box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
+  }
+  .machine-picker .mp-chips {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 9px 10px;
+    background: rgba(255,255,255,0.025);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .machine-picker .mp-chips:empty { display: none !important; }
+  .field .machine-picker .mp-input {
+    width: 100%; border: 0 !important; border-radius: 0 !important;
+    background: transparent !important;
+    padding: 10px 13px; font-size: 14px;
+    color: var(--glass-text); font-family: var(--font);
+  }
+  .field .machine-picker .mp-input:focus {
+    outline: none !important; border: 0 !important; box-shadow: none !important;
+  }
+  .machine-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 11px 5px 9px;
+    font-size: 12.5px; font-family: inherit;
+    background: rgba(88,166,255,0.10);
+    border: 1px solid rgba(88,166,255,0.30);
+    color: var(--glass-text);
+    border-radius: 99px; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    user-select: none;
+  }
+  .machine-chip:hover {
+    background: rgba(88,166,255,0.22);
+    border-color: rgba(88,166,255,0.55);
+    transform: translateY(-1px);
+  }
+  .machine-chip[data-active="1"] {
+    background: rgba(63,185,80,0.22);
+    border-color: rgba(63,185,80,0.65);
+    color: #d4f5dc;
+  }
+  .machine-chip[data-active="1"]::before {
+    content: "✓"; font-weight: 700; color: #4cc960;
+  }
+  .machine-chip:not([data-active="1"])::before {
+    content: "🖥"; font-size: 11px; opacity: 0.85;
+  }
+
   /* ── Buttons ─────────────────────────────────────────────────── */
   .btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
   .btn-row.between { justify-content: space-between; }
@@ -315,8 +371,12 @@
     </div>
     <div class="field">
       <label>Машина (необязательно)</label>
-      <input type="text" id="machineInput" placeholder="MacBook Pro M2 / ноут жены / офис">
-      <div class="hint">Для отличия если у вас несколько помощников</div>
+      <div class="machine-picker">
+        <div id="machineChips" class="mp-chips" style="display:none"></div>
+        <input type="text" id="machineInput" class="mp-input" autocomplete="off"
+               placeholder="напр: MacBook жены, рабочий ПК">
+      </div>
+      <div class="hint" id="machineHint">Для отличия если у вас несколько помощников</div>
     </div>
     <div class="btn-row between">
       <button class="btn secondary" onclick="goStep(1)">← Назад</button>
@@ -507,7 +567,46 @@ $('step1Next').addEventListener('click', () => {
   $('agentIdInput').value = `${platformShort}-${rand}`;
   $('step2Next').disabled = false;
   goStep(2);
+  // Populate machine-picker chips из существующих машин владельца
+  populateMachineChipsInWizard();
 });
+
+// Chip-picker для Step 2 «Машина» — те же patterns что в profile.html
+async function populateMachineChipsInWizard() {
+  const chips = $('machineChips');
+  const input = $('machineInput');
+  const hint = $('machineHint');
+  if (!chips || !input) return;
+  chips.innerHTML = '';
+  chips.style.display = 'none';
+  try {
+    const r = await fetch('/user/agents', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    const j = await r.json();
+    const machines = (j.machines || [])
+      .map(m => m.machine_label)
+      .filter(l => l && l !== 'Без машины')
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort();
+    if (!machines.length) return;
+    chips.style.display = 'flex';
+    machines.forEach(label => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'machine-chip';
+      btn.textContent = label;
+      btn.dataset.active = '0';
+      btn.addEventListener('click', () => {
+        input.value = label;
+        chips.querySelectorAll('.machine-chip').forEach(c => c.dataset.active = '0');
+        btn.dataset.active = '1';
+        input.focus();
+      });
+      chips.appendChild(btn);
+    });
+    if (hint) hint.textContent = 'Кликни существующую сверху или введи новую.';
+  } catch (e) { /* fail silent */ }
+}
 
 // ─── Step 2: name + machine ─────────────────────────────────────
 $('agentIdInput').addEventListener('input', async () => {
