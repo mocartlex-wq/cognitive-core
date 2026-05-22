@@ -265,14 +265,27 @@
     (5 шагов, проверка end-to-end).
   </p>
   <form id="newAgentForm">
-    <label for="newAgentId">Идентификатор (латиница, цифры, дефис)</label>
-    <input id="newAgentId" name="agent_id" required pattern="[a-zA-Z0-9._\-]+" maxlength="64">
-    <label for="newAgentDesc">Описание</label>
-    <input id="newAgentDesc" name="description" maxlength="300">
-    <label for="newAgentProject">Проект</label>
-    <input id="newAgentProject" name="project" maxlength="64">
-    <label for="newAgentMachine">Машина</label>
-    <input id="newAgentMachine" name="machine" maxlength="128" placeholder="ноутбук-mocar / сервер-prod">
+    <label for="newAgentId">Идентификатор</label>
+    <input id="newAgentId" name="agent_id" required pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
+           placeholder="claude-laptop / cursor-work / gpt-bot">
+    <small style="display:block;margin:-6px 0 12px;font-size:11.5px;color:var(--glass-text-dim);line-height:1.45">
+      Латиница, цифры, <code>-._</code> · 3-64 символа · технический ID для URL и API.
+    </small>
+
+    <label for="newAgentDesc">Описание <span style="opacity:.6;font-weight:400">(необязательно)</span></label>
+    <input id="newAgentDesc" name="description" maxlength="300" placeholder="напр: домашний агент для заметок">
+
+    <label for="newAgentProject">Проект <span style="opacity:.6;font-weight:400">(необязательно)</span></label>
+    <input id="newAgentProject" name="project" maxlength="64" placeholder="личное / cogcore / клиент-X">
+
+    <label for="newAgentMachine">Машина <span style="opacity:.6;font-weight:400">(необязательно)</span></label>
+    <div id="newAgentMachineChips" style="display:none;flex-wrap:wrap;gap:6px;margin:0 0 8px"></div>
+    <input id="newAgentMachine" name="machine" maxlength="128" autocomplete="off"
+           placeholder="напр: MacBook жены, рабочий ПК">
+    <small id="newAgentMachineHint" style="display:block;margin:-6px 0 12px;font-size:11.5px;color:var(--glass-text-dim);line-height:1.45">
+      Можно по-русски.
+    </small>
+
     <div class="toolbar">
       <button type="button" class="btn secondary btn-sm" onclick="document.getElementById('newAgentDialog').close()">Отмена</button>
       <button type="submit" class="btn btn-sm">Создать</button>
@@ -634,77 +647,87 @@
   }
   // Кнопка «Выйти» удалена из top-bar — logout теперь через auth-widget dropdown.
   // Старый listener больше не нужен.
-  // ─── Claim-token: «🪄 Передать ключ помощнику» ──────────────────
-  // При открытии диалога подтягиваем существующие машины владельца —
-  // показываем chip'ами над input'ом (click → подставит в input),
+  // ─── Reusable: chip-picker для существующих машин владельца ──────
+  // Используется и в claim-dialog, и в newAgent-dialog: показываем
+  // chip'ами над input'ом (click → подставит в input + станет зелёным),
   // плюс input всегда доступен чтобы ввести новую.
-  async function populateMachineChips() {
-    const chips = document.getElementById('claimMachineChips');
-    const input = document.getElementById('claimTokenMachine');
-    const hint = document.getElementById('claimMachinesHint');
-    if (!chips) return;
-    chips.innerHTML = '';
-    chips.style.display = 'none';
+  async function fetchUniqueMachines() {
     try {
       const r = await fetch('/user/agents', { credentials: 'same-origin' });
-      if (!r.ok) return;
+      if (!r.ok) return [];
       const j = await r.json();
-      const machines = (j.machines || [])
+      return (j.machines || [])
         .map(m => m.machine_label)
         .filter(l => l && l !== 'Без машины')
         .filter((v, i, a) => a.indexOf(v) === i)
         .sort();
-      if (!machines.length) return;
-      chips.style.display = 'flex';
-      machines.forEach(m => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'machine-chip';
-        btn.textContent = m;
-        btn.style.cssText = 'padding:6px 12px;font-size:12.5px;background:rgba(88,166,255,.10);border:1px solid rgba(88,166,255,.35);color:#e6edf3;border-radius:99px;cursor:pointer;font-family:inherit;transition:background .15s,border-color .15s,transform .1s';
-        btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(88,166,255,.22)'; });
-        btn.addEventListener('mouseleave', () => { btn.style.background = btn.dataset.active === '1' ? 'rgba(63,185,80,.25)' : 'rgba(88,166,255,.10)'; });
-        btn.addEventListener('click', () => {
-          // Подставляем в input + помечаем chip как «активный»
-          input.value = m;
-          chips.querySelectorAll('.machine-chip').forEach(c => {
-            c.dataset.active = '0';
-            c.style.background = 'rgba(88,166,255,.10)';
-            c.style.borderColor = 'rgba(88,166,255,.35)';
-          });
-          btn.dataset.active = '1';
-          btn.style.background = 'rgba(63,185,80,.25)';
-          btn.style.borderColor = 'rgba(63,185,80,.6)';
-        });
-        chips.appendChild(btn);
-      });
-      if (hint) {
-        hint.innerHTML = `Можно по-русски. Кликни существующую сверху ↑ или введи новую.`;
-      }
-    } catch (e) { /* fail silent */ }
+    } catch (e) { return []; }
   }
-  // Кастомное сообщение валидации для agent_id (browser default плохо
-  // переводится на русский и не объясняет какие символы можно).
-  const claimAgentIdInput = document.getElementById('claimTokenAgentId');
-  if (claimAgentIdInput) {
-    claimAgentIdInput.addEventListener('invalid', (e) => {
+  function buildMachineChip(label, input, allChipsContainer) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'machine-chip';
+    btn.textContent = label;
+    btn.style.cssText = 'padding:6px 12px;font-size:12.5px;background:rgba(88,166,255,.10);border:1px solid rgba(88,166,255,.35);color:#e6edf3;border-radius:99px;cursor:pointer;font-family:inherit;transition:background .15s,border-color .15s';
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(88,166,255,.22)'; });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = btn.dataset.active === '1' ? 'rgba(63,185,80,.25)' : 'rgba(88,166,255,.10)';
+    });
+    btn.addEventListener('click', () => {
+      input.value = label;
+      allChipsContainer.querySelectorAll('.machine-chip').forEach(c => {
+        c.dataset.active = '0';
+        c.style.background = 'rgba(88,166,255,.10)';
+        c.style.borderColor = 'rgba(88,166,255,.35)';
+      });
+      btn.dataset.active = '1';
+      btn.style.background = 'rgba(63,185,80,.25)';
+      btn.style.borderColor = 'rgba(63,185,80,.6)';
+    });
+    return btn;
+  }
+  async function populateChipsInto(chipsId, inputId, hintId) {
+    const chips = document.getElementById(chipsId);
+    const input = document.getElementById(inputId);
+    const hint = hintId ? document.getElementById(hintId) : null;
+    if (!chips || !input) return;
+    chips.innerHTML = '';
+    chips.style.display = 'none';
+    const machines = await fetchUniqueMachines();
+    if (!machines.length) return;
+    chips.style.display = 'flex';
+    machines.forEach(m => chips.appendChild(buildMachineChip(m, input, chips)));
+    if (hint) {
+      hint.innerHTML = `Можно по-русски. Кликни существующую сверху ↑ или введи новую.`;
+    }
+  }
+  // Custom validation для agent_id (нормальное русское сообщение
+  // вместо browser-default «Please match the requested format»).
+  function attachAgentIdValidator(inputId) {
+    const inp = document.getElementById(inputId);
+    if (!inp) return;
+    inp.addEventListener('invalid', (e) => {
       const v = e.target.value;
-      if (!v) {
-        e.target.setCustomValidity('');
-        return;
-      }
+      if (!v && !e.target.required) { e.target.setCustomValidity(''); return; }
       if (v.length < 3) {
-        e.target.setCustomValidity('Минимум 3 символа (или оставьте пусто — сгенерируем сами).');
+        e.target.setCustomValidity('Минимум 3 символа.');
       } else if (!/^[a-zA-Z0-9._\-]+$/.test(v)) {
-        e.target.setCustomValidity('Только латиница (a-z, A-Z), цифры (0-9), дефис (-), точка (.) и подчёркивание (_). Кириллица и пробелы нельзя — это технический ID.');
+        e.target.setCustomValidity('Только латиница (a-z, A-Z), цифры (0-9), дефис, точка и нижнее подчёркивание. Кириллица и пробелы нельзя — это технический ID.');
       } else {
         e.target.setCustomValidity('');
       }
     });
-    claimAgentIdInput.addEventListener('input', (e) => {
-      e.target.setCustomValidity('');
-    });
+    inp.addEventListener('input', (e) => { e.target.setCustomValidity(''); });
   }
+  // Wrapper для claim-dialog (старое имя оставлено для совместимости с
+  // существующим event-listener в коде ниже).
+  async function populateMachineChips() {
+    await populateChipsInto('claimMachineChips', 'claimTokenMachine', 'claimMachinesHint');
+  }
+  // Активируем validator на оба agent_id input'а сразу при load (один раз).
+  attachAgentIdValidator('claimTokenAgentId');
+  attachAgentIdValidator('newAgentId');
+  // Validator подключён выше через attachAgentIdValidator('claimTokenAgentId').
   document.getElementById('claimTokenBtn').addEventListener('click', () => {
     document.getElementById('claimTokenResult').style.display = 'none';
     document.getElementById('claimTokenResult').innerHTML = '';
@@ -810,6 +833,7 @@
 
   document.getElementById('newAgentBtn').addEventListener('click', () => {
     document.getElementById('newAgentDialog').showModal();
+    populateChipsInto('newAgentMachineChips', 'newAgentMachine', 'newAgentMachineHint');
   });
   document.getElementById('newAgentForm').addEventListener('submit', async (e) => {
     e.preventDefault();
