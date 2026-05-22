@@ -60,10 +60,16 @@ sleep 30 && sudo docker compose ps gitea
 # Status должен быть "healthy" (Gitea на старте мигрирует свои таблицы в gitea_db)
 ```
 
-### 6. Reload nginx (подхватит conf.d/gitea.conf)
+### 6. Активировать gitea.conf + reload nginx
 ```bash
-sudo docker exec cognitive_nginx nginx -t  # validate
-sudo docker exec cognitive_nginx nginx -s reload
+# gitea.conf лежит .disabled в репо — активируем после старта Gitea
+sudo mv /opt/cognitive-core/nginx/conf.d/gitea.conf.disabled \
+        /opt/cognitive-core/nginx/conf.d/gitea.conf
+
+# validate + restart (bind-mount stale inode workaround — нужен restart, не reload)
+sudo docker cp /opt/cognitive-core/nginx/nginx.conf cognitive_nginx:/tmp/.fresh.conf
+sudo docker exec cognitive_nginx nginx -t -c /tmp/.fresh.conf
+sudo docker restart cognitive_nginx
 ```
 
 ### 7. Smoke-test
