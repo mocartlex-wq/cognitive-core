@@ -413,6 +413,73 @@ async def patch_agent(agent_id: str, body: PatchAgentBody, request: Request):
     return {"ok": True, "agent_id": agent_id}
 
 
+@router.get("/media")
+async def my_media(request: Request, limit: int = 24):
+    """Список последних загрузок media владельца (через cogmedia или /ui/admin/media).
+
+    Для admin показываем все L1 события domain=media_analysis (owner-key auth
+    не имеет user_id binding, но admin владеет всем). Для не-admin —
+    события где source_agent принадлежит этому user_id.
+    """
+    user = await require_user(request)
+    limit = max(1, min(int(limit), 100))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if user.is_admin:
+            # Admin видит ВСЕ медиа на сервере
+            rows = await conn.fetch(
+                """
+                SELECT id::text AS id, source_agent, raw_payload, timestamp::text AS timestamp
+                  FROM l1_raw_events
+                 WHERE domain = 'media_analysis'
+                 ORDER BY timestamp DESC
+                 LIMIT $1
+                """,
+                limit,
+            )
+        else:
+            # Non-admin: только своих агентов
+            rows = await conn.fetch(
+                """
+                SELECT e.id::text AS id, e.source_agent, e.raw_payload, e.timestamp::text AS timestamp
+                  FROM l1_raw_events e
+                  JOIN agent_states ast ON ast.agent_id = e.source_agent
+                 WHERE e.domain = 'media_analysis'
+                   AND ast.owner_user_id = $1::uuid
+                 ORDER BY e.timestamp DESC
+                 LIMIT $2
+                """,
+                user.user_id, limit,
+            )
+    items = []
+    for r in rows:
+        d = dict(r)
+        payload = d.get("raw_payload")
+        if isinstance(payload, str):
+            try:
+                import json as _j
+                payload = _j.loads(payload)
+            except Exception:
+                payload = {}
+        d["raw_payload"] = payload
+        # Compact summary fields for UI
+        d["media_id"] = payload.get("media_id", "?") if isinstance(payload, dict) else "?"
+        d["kind"] = payload.get("kind", "?") if isinstance(payload, dict) else "?"
+        d["filename"] = payload.get("filename", "?") if isinstance(payload, dict) else "?"
+        d["size_bytes"] = payload.get("size_bytes", 0) if isinstance(payload, dict) else 0
+        # Thumbnail URL
+        if d["kind"] == "video" and isinstance(payload, dict):
+            frames = payload.get("frames", [])
+            d["thumbnail"] = frames[0].get("url", "") if frames else ""
+        elif d["kind"] == "image" and isinstance(payload, dict):
+            d["thumbnail"] = payload.get("url", "")
+        else:
+            d["thumbnail"] = ""  # audio has no thumb
+        d["transcript"] = (payload.get("transcript") or "") if isinstance(payload, dict) else ""
+        items.append(d)
+    return {"count": len(items), "items": items}
+
+
 @router.delete("/agents/{agent_id}")
 async def delete_agent(agent_id: str, request: Request):
     """Удалить помощника: revoke все api_keys + удалить agent_states.
