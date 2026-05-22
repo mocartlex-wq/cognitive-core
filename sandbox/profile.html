@@ -352,11 +352,15 @@
       const fp = m.machine_fingerprint ? ` <span class="meta" style="font-family:var(--mono);font-size:11px;color:var(--glass-text-dim)">fp:${esc(m.machine_fingerprint.slice(0,8))}</span>` : '';
       const agentsHtml = m.agents.map(a => `
         <div class="item" style="margin-left:12px">
-          <div>
+          <div style="flex:1;min-width:0">
             <div class="name">${agentDot(a)}${esc(a.agent_id)} ${agentChip(a)}</div>
             <div class="meta">${esc(a.project || '—')} · ${a.total_events || 0} событий · ${a.last_mcp_connect_at ? 'MCP ' + fmtDate(a.last_mcp_connect_at) : 'MCP никогда'}</div>
           </div>
-          <span class="meta">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="meta" style="margin-right:6px">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
+            <button class="btn secondary btn-sm" title="Переименовать машину" onclick="renameAgent('${esc(a.agent_id)}', '${esc((a.machine_label || '').replace(/'/g, '&#39;'))}')">✏️</button>
+            <button class="btn danger btn-sm" title="Удалить помощника + revoke ключи" onclick="deleteAgent('${esc(a.agent_id)}')">🗑️</button>
+          </div>
         </div>
       `).join('');
       return `
@@ -374,6 +378,39 @@
 
   // Auto-refresh каждые 20 сек — owner видит когда агент подключается
   setInterval(() => { loadAgents(); }, 20000);
+
+  // v3: rename machine_label
+  window.renameAgent = async function(agentId, currentLabel) {
+    const newLabel = prompt(`Новое имя машины для «${agentId}»:`, currentLabel || '');
+    if (newLabel === null) return;  // cancel
+    const r = await api(`/user/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machine_label: newLabel.trim() || null }),
+    });
+    if (!r) return;
+    if (r.ok) {
+      loadAgents();
+    } else {
+      const e = await r.json();
+      alert(`Ошибка: ${e.detail || r.status}`);
+    }
+  };
+
+  // v3: delete agent + revoke keys
+  window.deleteAgent = async function(agentId) {
+    if (!confirm(`Удалить помощника «${agentId}»?\n\nЭто:\n• revoke все его api_keys (агент не сможет писать)\n• удалит запись из реестра\n• L1/L2 события от него ОСТАНУТСЯ (история не теряется)\n\nПродолжить?`)) return;
+    const r = await api(`/user/agents/${encodeURIComponent(agentId)}`, {
+      method: 'DELETE',
+    });
+    if (!r) return;
+    if (r.ok) {
+      loadAgents();
+    } else {
+      const e = await r.json();
+      alert(`Ошибка: ${e.detail || r.status}`);
+    }
+  };
 
   async function loadSessions() {
     const r = await api('/auth/sessions');

@@ -275,6 +275,84 @@ async def create_agent(body: CreateAgentBody, request: Request):
     return await _create_agent_core(user, body)
 
 
+class PatchAgentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    machine_label: str | None = Field(None, max_length=128)
+    description: str | None = Field(None, max_length=300)
+    project: str | None = Field(None, max_length=64)
+
+
+@router.patch("/agents/{agent_id}")
+async def patch_agent(agent_id: str, body: PatchAgentBody, request: Request):
+    """Переименовать машину / описание helper-а. Только owner может."""
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1",
+            agent_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Помощник не найден")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваш помощник")
+        # Build dynamic UPDATE
+        sets = []
+        vals = []
+        if body.machine_label is not None:
+            sets.append(f"machine_label = ${len(vals)+1}")
+            vals.append(body.machine_label)
+        if body.description is not None:
+            sets.append(f"notes = ${len(vals)+1}")
+            vals.append(body.description)
+        if body.project is not None:
+            sets.append(f"project = ${len(vals)+1}")
+            vals.append(body.project)
+        if not sets:
+            return {"ok": True, "changed": 0}
+        sets.append("updated_at = NOW()")
+        vals.append(agent_id)
+        await conn.execute(
+            f"UPDATE agent_states SET {', '.join(sets)} WHERE agent_id = ${len(vals)}",
+            *vals,
+        )
+    logger.info("agent_patched user=%s agent=%s fields=%s", user.user_id, agent_id, len(sets) - 1)
+    return {"ok": True, "agent_id": agent_id}
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_agent(agent_id: str, request: Request):
+    """Удалить помощника: revoke все api_keys + удалить agent_states.
+
+    Hard delete — записи L1/L2 от этого agent_id остаются (история не теряется),
+    но agent больше не может писать новые события (key revoked).
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1",
+            agent_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Помощник не найден")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваш помощник")
+        async with conn.transaction():
+            # Revoke all api_keys (soft revoke — last_used_at + revoked_at = NOW)
+            await conn.execute(
+                "UPDATE agent_keys SET revoked_at = NOW() WHERE agent_id = $1 AND revoked_at IS NULL",
+                agent_id,
+            )
+            # Hard delete agent_states row
+            await conn.execute(
+                "DELETE FROM agent_states WHERE agent_id = $1",
+                agent_id,
+            )
+    logger.info("agent_deleted user=%s agent=%s", user.user_id, agent_id)
+    return {"ok": True, "agent_id": agent_id, "message": "Помощник удалён, api_keys revoke'нуты"}
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # /user/account — soft delete
 # ─────────────────────────────────────────────────────────────────────────
