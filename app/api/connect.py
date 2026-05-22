@@ -638,7 +638,19 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
             f"/tmp/claim.json через python+env).\n\n"
             f"=== ШАГ 3 — ASK FOR RESTART ===\n"
             f"Попроси owner'а перезапустить Claude Code/Cursor. После рестарта у тебя "
-            f"появятся 24 MCP-инструмента."
+            f"появятся 24 MCP-инструмента.\n\n"
+            f"=== ШАГ 4 — ВНИКНИ В ВОЗМОЖНОСТИ (важно!) ===\n"
+            f"Первым делом после рестарта вызови `cognitive_agent_manifest` — он вернёт:\n"
+            f"  • твою историю + state\n"
+            f"  • categorized список tools (memory / rooms / dm / utils)\n"
+            f"  • best_practices (когда remember, когда recall, как rooms работают)\n"
+            f"  • rate-limits (не превышай — будет throttle)\n"
+            f"  • твой agent_id\n\n"
+            f"Затем для контекста — `cognitive_continue` (читает последние твои события + "
+            f"pending DM). Это твой «memory restore» после рестарта.\n\n"
+            f"Дальше пользуйся активно: после каждого важного факта/решения/lesson → "
+            f"`cognitive_remember`. Перед новой задачей → `cognitive_recall` чтобы не "
+            f"дублировать работу. С другими агентами — через `room_*` или `cognitive_send`."
         ),
     }
 

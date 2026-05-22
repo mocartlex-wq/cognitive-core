@@ -560,7 +560,61 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             _call_self(request, "GET", f"/agents/{agent_id}/history", params={"limit": 5}, timeout_s=5.0),
             return_exceptions=False,
         )
-        return {"agent_id": agent_id, "state": state, "recent_history": history.get("items", []) if isinstance(history, dict) else []}
+        # PR #22: добавлен usage_guide — категории tools + best practices.
+        # Owner: «дай в нем информацию и на память, на все функции, что бы ИИ
+        # их использовала». Claim-промпт инструктирует агента вызвать этот
+        # tool первым после connect — тогда сам узнает что и как использовать.
+        usage_guide = {
+            "what_is_this": (
+                "Cognitive Core — 5-слойная самохостимая память + комнаты + DM "
+                "для AI-агентов. У тебя теперь есть постоянная память между "
+                "сессиями + способ общаться с другими агентами того же владельца."
+            ),
+            "tool_categories": {
+                "memory": {
+                    "save": ["cognitive_remember (важный факт/lesson/decision)"],
+                    "search": ["cognitive_recall (семантический поиск по L3)"],
+                    "history": ["cognitive_my_history", "cognitive_continue", "cognitive_my_events"],
+                    "state": ["cognitive_save_state (working memory)", "cognitive_resume (read)"],
+                    "manual": ["cognitive_consolidate (force L1→L2→L3 trigger)"],
+                },
+                "rooms": {
+                    "join_read": ["room_join", "room_read"],
+                    "post": ["room_post (broadcast)"],
+                    "ask_answer": ["room_ask (long-poll Q)", "room_pending", "room_answer"],
+                },
+                "dm": {
+                    "send_recv": ["cognitive_send", "cognitive_inbox"],
+                    "discover": ["cognitive_online", "cognitive_my_team"],
+                },
+                "utils": ["cognitive_health", "cognitive_heartbeat", "cognitive_domains", "cognitive_list", "cognitive_tools"],
+            },
+            "best_practices": [
+                "После каждого важного решения/lesson → cognitive_remember (lessons-поле, без — — двойного дефиса и без ; ).",
+                "ПЕРЕД новой задачей → cognitive_recall(query) — проверь не делал ли уже похожее.",
+                "Длинная сессия → cognitive_save_state в начале (snapshot working memory).",
+                "Команда — через rooms (открытый коллективный чат) или DM (приватный 1-to-1).",
+                "Heartbeat каждые ~5 мин если ты долгоживущий daemon (cognitive_heartbeat).",
+                "Не печатай api_key в transcript / логах / коммитах — он секретный.",
+            ],
+            "rate_limits": {
+                "remember": "≤ 60 events/min",
+                "recall": "≤ 30 queries/min (LLM-семантический поиск дорогой)",
+                "room_post": "≤ 10/min per room (anti-spam)",
+                "consolidate": "manual triggers throttled to 1/hour per domain",
+            },
+            "your_identity": {
+                "agent_id": agent_id,
+                "note": "owner создаёт тебя через /ui/profile, machine_label привязан к hostname. Если хочешь сменить роль — попроси owner-а.",
+            },
+            "more_info": "https://mcp.xn----8sbwawqx4fza.xn--p1ai/sandbox — все endpoints с примерами",
+        }
+        return {
+            "agent_id": agent_id,
+            "state": state,
+            "recent_history": history.get("items", []) if isinstance(history, dict) else [],
+            "usage_guide": usage_guide,
+        }
 
     if name == "cognitive_send":
         body = {
