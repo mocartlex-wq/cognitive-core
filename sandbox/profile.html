@@ -769,24 +769,16 @@
     }
     const kindIcon = { video: '🎬', image: '🖼️', audio: '🎵' };
     const fmtSize = (b) => b < 1024*1024 ? (b/1024).toFixed(0)+' KB' : (b/(1024*1024)).toFixed(1)+' MB';
-    const grid = j.items.map(m => {
-      const thumb = m.thumbnail
-        ? `<img src="${esc(m.thumbnail)}" alt="" loading="lazy" style="width:100%;height:120px;object-fit:cover;display:block">`
-        : `<div style="width:100%;height:120px;background:var(--glass-bg-light);display:flex;align-items:center;justify-content:center;font-size:48px">${kindIcon[m.kind] || '📄'}</div>`;
-      const trans = m.transcript ? `<div class="meta" style="font-size:11px;color:var(--glass-text-dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.transcript)}">«${esc(m.transcript.slice(0,80))}»</div>` : '';
-      return `
-        <div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:10px;overflow:hidden">
-          <a href="${m.thumbnail ? esc(m.thumbnail) : '#'}" target="_blank" style="display:block;text-decoration:none">${thumb}</a>
-          <div style="padding:8px 10px">
-            <div class="name" style="font-size:13px;font-weight:600;color:var(--glass-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.filename)}">${kindIcon[m.kind] || '📄'} ${esc(m.filename)}</div>
-            <div class="meta" style="font-size:11.5px">${fmtSize(m.size_bytes)} · ${esc(m.source_agent)}</div>
-            <div class="meta" style="font-size:11px;color:var(--glass-text-dim)">${fmtFullDate(m.timestamp)}</div>
-            ${trans}
-          </div>
-        </div>
-      `;
-    }).join('');
-    block.outerHTML = `<div id="mediaBlock" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">${grid}</div>`;
+    // Owner-decision: «давай только список, наименование, размер, время и все»
+    const list = j.items.map(m => `
+      <div class="item" style="display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:10px 14px">
+        <span style="font-size:18px">${kindIcon[m.kind] || '📄'}</span>
+        <span class="name" style="font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(m.filename)}">${esc(m.filename)}</span>
+        <span class="meta" style="font-size:12px;color:var(--glass-text-dim);white-space:nowrap">${fmtSize(m.size_bytes)}</span>
+        <span class="meta" style="font-size:12px;color:var(--glass-text-dim);white-space:nowrap" title="${esc(fmtFullDate(m.timestamp))}">${fmtFullDate(m.timestamp)}</span>
+      </div>
+    `).join('');
+    block.outerHTML = `<div id="mediaBlock" class="grid">${list}</div>`;
   }
 
   loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions();
