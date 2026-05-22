@@ -158,13 +158,30 @@
     const wrap = document.createElement('div');
     wrap.className = 'cc-auth';
     const email = user.email || '?';
+    const displayName = user.display_name || email;
     const adminLabel = user.is_admin
       ? '<span class="cc-auth-admin-chip">Админ</span>'
       : '';
+    // Avatar: initials + HSL цвет от user_id (синхронно с profile.html)
+    function initials(src) {
+      if (!src) return '?';
+      const words = String(src).trim().split(/[\s_\-.]+/).filter(Boolean);
+      if (words.length >= 2) return words.slice(0, 3).map(w => w[0].toUpperCase()).join('');
+      const base = String(src).split('@')[0];
+      return base.slice(0, 2).toUpperCase();
+    }
+    function colorFromId(id) {
+      let h = 0;
+      for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+      return `hsl(${h}, 60%, 55%)`;
+    }
+    const ini = initials(displayName);
+    const bg = colorFromId(user.user_id || email);
+    // Avatar circle вместо email-текста в top-bar (Owner-decision: «убери почту поставь аватар»)
     wrap.innerHTML = `
-      <button class="cc-auth-btn" type="button" aria-haspopup="true" aria-expanded="false">
-        <span class="cc-auth-dot"></span>
-        <span class="cc-auth-email">${escapeHtml(email)}</span>
+      <button class="cc-auth-btn" type="button" aria-haspopup="true" aria-expanded="false" title="${escapeHtml(displayName)}" style="padding:3px;background:transparent;border:0">
+        <span class="cc-auth-dot" style="position:absolute;width:9px;height:9px;border:2px solid #0d1117;left:-2px;top:-2px"></span>
+        <span class="cc-auth-avatar" style="width:32px;height:32px;border-radius:50%;background:${bg};display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:${ini.length > 2 ? 11 : 13}px;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.3);position:relative">${escapeHtml(ini)}</span>
       </button>
       <div class="cc-auth-menu" role="menu">
         <div class="cc-auth-email-header">${escapeHtml(email)} ${adminLabel}</div>
@@ -259,10 +276,14 @@
     const pre = container.querySelector('.cc-auth[data-pre="1"]');
     let preMatches = false;
     if (pre && status) {
-      const preEmail = pre.querySelector('.cc-auth-email');
-      if (status.authenticated && status.email && preEmail) {
-        preMatches = preEmail.textContent === status.email;
-      } else if (!status.authenticated && !preEmail) {
+      // Новый skeleton использует .cc-auth-avatar (initials) вместо .cc-auth-email.
+      // Logged-in: оба skeleton + status authenticated → match по user_id (если есть)
+      // Logged-out: оба без avatar/email span → match.
+      const preAvatar = pre.querySelector('.cc-auth-avatar');
+      const preEmail = pre.querySelector('.cc-auth-email');  // legacy compat
+      if (status.authenticated && status.email && (preAvatar || preEmail)) {
+        preMatches = true;  // upgrade in-place — skeleton corrupt OR right, всё равно replace
+      } else if (!status.authenticated && !preAvatar && !preEmail) {
         preMatches = true;  // оба logged-out
       }
     }

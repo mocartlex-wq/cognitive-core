@@ -49,37 +49,48 @@
   if (!cached) return;  // первый визит — пусть auth-widget сам отработает
 
   var isLoggedIn = cached.authenticated && cached.email;
-  var email = isLoggedIn
-    ? String(cached.email).replace(/[&<>"']/g, function(ch) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
-      })
-    : '';
+  var displayName = isLoggedIn ? (cached.display_name || cached.email) : '';
+
+  // Avatar helpers (sync с auth-widget.js + profile.html)
+  function initials(src) {
+    if (!src) return '?';
+    var words = String(src).trim().split(/[\s_\-.]+/).filter(Boolean);
+    if (words.length >= 2) return words.slice(0, 3).map(function(w){return w[0].toUpperCase();}).join('');
+    var base = String(src).split('@')[0];
+    return base.slice(0, 2).toUpperCase();
+  }
+  function colorFromId(id) {
+    var h = 0;
+    for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ', 60%, 55%)';
+  }
 
   function renderSkeleton() {
     var status = document.querySelector('.top-status');
     if (!status) return;
-    if (status.querySelector('.cc-auth')) return;  // уже отрисован
-    // skeleton помечен data-pre="1" — auth-widget.js его заменит на полноценный
-    // виджет с dropdown «Профиль / Мои комнаты / Выйти» без визуального скачка
+    if (status.querySelector('.cc-auth')) return;
     var html;
     if (isLoggedIn) {
+      var ini = initials(displayName);
+      var bg = colorFromId(cached.user_id || cached.email);
+      var iniEsc = ini.replace(/[&<>"']/g, function(ch) {
+        return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch];
+      });
+      var fontSize = ini.length > 2 ? 11 : 13;
       html =
         '<div class="cc-auth" data-pre="1">' +
-          '<button class="cc-auth-btn" type="button" aria-haspopup="true" aria-expanded="false">' +
-            '<span class="cc-auth-dot"></span>' +
-            '<span class="cc-auth-email">' + email + '</span>' +
+          '<button class="cc-auth-btn" type="button" aria-haspopup="true" aria-expanded="false" style="padding:3px;background:transparent;border:0">' +
+            '<span class="cc-auth-dot" style="position:absolute;width:9px;height:9px;border:2px solid #0d1117;left:-2px;top:-2px"></span>' +
+            '<span class="cc-auth-avatar" style="width:32px;height:32px;border-radius:50%;background:' + bg + ';display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:' + fontSize + 'px;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.3);position:relative">' + iniEsc + '</span>' +
           '</button>' +
         '</div>';
     } else {
-      // logged-out skeleton — точно такой же href что и auth-widget renderLoggedOut
       html =
         '<div class="cc-auth" data-pre="1">' +
           '<a class="cc-auth-btn" href="/ui/login">Войти</a>' +
         '</div>';
     }
     status.insertAdjacentHTML('beforeend', html);
-    // Стили для skeleton (минимум — чтобы выглядел как готовый виджет).
-    // Полноценные стили вставит auth-widget.js при загрузке.
     if (!document.getElementById('cc-auth-pre-styles')) {
       var st = document.createElement('style');
       st.id = 'cc-auth-pre-styles';
@@ -90,7 +101,6 @@
         'border-radius:8px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap}' +
         '.cc-auth-dot{width:6px;height:6px;border-radius:50%;background:#3fb950;' +
         'box-shadow:0 0 5px rgba(63,185,80,0.7)}' +
-        '.cc-auth-email{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
         '.cc-auth-admin-chip{display:inline-block;padding:1px 6px;margin-left:4px;' +
         'background:rgba(255,140,66,0.18);color:#ff8c42;border-radius:999px;' +
         'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px}';

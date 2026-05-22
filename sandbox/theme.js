@@ -53,7 +53,7 @@
   // На каждой странице с .top-bar — нужен auth-widget. На каждой — error-reporter.
   document.addEventListener('DOMContentLoaded', () => {
     if (document.querySelector('.top-bar, .top-status')) {
-      ensureScript('/static/auth-widget.js?v=20260521b', '__ccAuthWidgetLoaded');
+      ensureScript('/static/auth-widget.js?v=20260522', '__ccAuthWidgetLoaded');
     }
     ensureScript('/static/error-reporter.js?v=20260521', '__ccErrorReporterLoaded');
   });
