@@ -17,10 +17,39 @@ def get_s3() -> Minio:
     return _client
 
 
-def snapshot_key(domain: str, snapshot_id: str) -> str:
-    """S3-ключ для L4-снапшота."""
+def snapshot_key(
+    domain: str,
+    snapshot_id: str,
+    owner_user_id: str | None = None,
+) -> str:
+    """S3-ключ для L4-снапшота.
+
+    PR #23 multi-tenant: per-owner path prefix. None = legacy admin путь.
+    Format:
+      - owner-aware: l4/<owner_uuid>/<domain>/<id>.json
+      - legacy:     l4/<domain>/<id>.json (admin/migration)
+    """
     sid = str(snapshot_id)
+    if owner_user_id:
+        return f"l4/{owner_user_id}/{domain}/{sid}.json"
     return f"l4/{domain}/{sid}.json"
+
+
+def media_key(
+    kind: str,
+    media_id: str,
+    filename: str,
+    owner_user_id: str | None = None,
+) -> str:
+    """S3-ключ для media (video/image/audio + frames).
+
+    PR #23 multi-tenant:
+      - owner-aware: <kind>/<owner_uuid>/<media_id>/<filename>
+      - legacy:     <kind>/<media_id>/<filename>
+    """
+    if owner_user_id:
+        return f"{kind}/{owner_user_id}/{media_id}/{filename}"
+    return f"{kind}/{media_id}/{filename}"
 
 
 def init_s3() -> None:

@@ -355,6 +355,58 @@ async def agent_events(agent_id: str, request: Request, limit: int = 20):
     }
 
 
+@router.get("/usage")
+async def get_usage(request: Request):
+    """PR #23 multi-tenant: per-owner usage summary для profile.html карточки.
+
+    Возвращает tier + (events/storage/agents): used/max/pct.
+    Если owner_quotas строка не существует — fallback к defaults free-tier.
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT tier, max_events_per_day, max_storage_mb, max_agents,
+                   max_recall_per_min, events_today, storage_mb_now,
+                   agents_count, suspended
+              FROM owner_quotas
+             WHERE owner_user_id = $1
+            """,
+            user.id,
+        )
+    if not row:
+        # Триггер ensure_owner_quota должен был создать строку при регистрации,
+        # но если миграция 0007 ещё не применилась — возвращаем сырые defaults.
+        return {
+            "tier": "free",
+            "events": {"used": 0, "max": 10000, "pct": 0},
+            "storage_mb": {"used": 0, "max": 1024, "pct": 0},
+            "agents": {"used": 0, "max": 10, "pct": 0},
+            "suspended": False,
+            "note": "owner_quotas row не найдена (migration 0007 не применена?)",
+        }
+    return {
+        "tier": row["tier"],
+        "events": {
+            "used": row["events_today"],
+            "max": row["max_events_per_day"],
+            "pct": round(100 * row["events_today"] / max(1, row["max_events_per_day"]), 1),
+        },
+        "storage_mb": {
+            "used": round(float(row["storage_mb_now"]), 2),
+            "max": row["max_storage_mb"],
+            "pct": round(100 * float(row["storage_mb_now"]) / max(1, row["max_storage_mb"]), 1),
+        },
+        "agents": {
+            "used": row["agents_count"],
+            "max": row["max_agents"],
+            "pct": round(100 * row["agents_count"] / max(1, row["max_agents"]), 1),
+        },
+        "suspended": bool(row["suspended"]),
+    }
+
+
 @router.post("/agents/create")
 async def create_agent(body: CreateAgentBody, request: Request):
     """Зарегистрировать нового помощника и выдать ему API key.

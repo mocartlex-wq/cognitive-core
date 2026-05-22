@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Query
 from app.models.operative import OperativeQuery, OperativeClose, OperativeFeedback
 from app.security.auth import verify_api_key
+from app.security.owner import resolve_owner_user_id
 from app.services.operative import build_operative, create_session, close_session, feedback_record
 
 router = APIRouter(prefix="/operative", tags=["operative"])
@@ -50,12 +51,14 @@ async def query_operative(
       session_id, domain, expires_in, frame: {patterns:[], mistakes:[], rules:[], tools:[], all:[]}
     """
     await verify_api_key(request)
+    owner_user_id = await resolve_owner_user_id(request)
 
     results = await build_operative(
         query=body.context or body.domain,
         domain=body.domain,
         top_k=body.top_k,
         include_tools=body.include_tools,
+        owner_user_id=owner_user_id,
     )
 
     session = await create_session(body.domain, results)
