@@ -189,9 +189,79 @@ services:
       timeout: 5s
       retries: 5
 
+  # ════════════════════════════════════════════════════════════════
+  # Gitea — self-hosted git server (Phase 5A)
+  # ════════════════════════════════════════════════════════════════
+  # Self-hosted git for owner + paying tenants. Каждый tenant получает
+  # свой org (auto-create при email-verify через welcome-flow).
+  # Хранение кода + configs + LFS на сервере, не на ноутах клиентов.
+  #
+  # DB: используем существующий cognitive_postgres (отдельная database
+  # gitea_db, создаётся в lifespan через init-script). SQLite не выбран —
+  # пропадает общий backup и tooling.
+  #
+  # Storage: named docker volume gitea_data (MVP). После первого месяца
+  # production — мигрировать на bind /mnt/cold-storage/gitea/ если репо
+  # начнут расти выше 50 GB.
+  #
+  # Порт 3000 не торчит наружу — только через nginx git.ии-память.рф.
+  # SSH-доступ к repos (git@git.ии-память.рф:22002) — экспозим 22002 на
+  # хосте (22 занят системным sshd, не конфликт).
+  gitea:
+    image: gitea/gitea:latest-rootless
+    container_name: cognitive_gitea
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: postgres:5432
+      GITEA__database__NAME: gitea_db
+      GITEA__database__USER: cognitive
+      GITEA__database__PASSWD: ${POSTGRES_PASSWORD:-change_me}
+      GITEA__server__DOMAIN: git.xn----8sbwawqx4fza.xn--p1ai
+      GITEA__server__SSH_DOMAIN: git.xn----8sbwawqx4fza.xn--p1ai
+      GITEA__server__ROOT_URL: https://git.xn----8sbwawqx4fza.xn--p1ai/
+      GITEA__server__SSH_PORT: "22002"
+      GITEA__server__SSH_LISTEN_PORT: "2222"  # internal в контейнере
+      GITEA__server__START_SSH_SERVER: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"  # только admin создаёт users
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "true"  # repos private по умолчанию
+      GITEA__repository__DEFAULT_PRIVATE: "private"
+      GITEA__security__INSTALL_LOCK: "true"  # не показывать setup-wizard
+      GITEA__security__SECRET_KEY: ${GITEA_SECRET_KEY:-change_me_to_random_64_chars}
+      GITEA__security__INTERNAL_TOKEN: ${GITEA_INTERNAL_TOKEN:-change_me_to_random_token}
+      GITEA__webhook__ALLOWED_HOST_LIST: "*.xn----8sbwawqx4fza.xn--p1ai,private"
+    expose:
+      - "3000"
+    ports:
+      - "22002:2222"  # SSH для git clone/push через ssh
+    volumes:
+      - gitea_data:/var/lib/gitea
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 1G }
+        reservations: { cpus: '0.1', memory: 256M }
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
 volumes:
   nginx_logs:
   nats_data:
     name: cognitive_nats_data
   whisper_cache:
     name: cognitive_whisper_cache
+  gitea_data:
+    name: cognitive_gitea_data
