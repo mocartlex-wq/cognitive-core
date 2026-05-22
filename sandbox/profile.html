@@ -164,7 +164,7 @@
   <div class="page-title">Мой профиль</div>
 
   <div class="card">
-    <h2>Аккаунт</h2>
+    <h2>Аккаунт <span id="avatarSlot"></span></h2>
     <div id="meBlock" class="empty">Загружаем…</div>
   </div>
 
@@ -304,13 +304,13 @@
       return `hsl(${h}, 60%, 55%)`;
     }
     const bg = colorFromId(data.user_id || data.email || 'x');
-    const avatarBlock = `<div style="width:48px;height:48px;border-radius:50%;background:${bg};display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:${ini.length > 2 ? 14 : 17}px;letter-spacing:0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.3)">${esc(ini)}</div>`;
+    // Avatar теперь в заголовке card (правый верхний угол) — не отдельной строкой
+    const avatarBlock = `<div title="${esc(data.display_name || data.email)}" style="width:42px;height:42px;border-radius:50%;background:${bg};display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:${ini.length > 2 ? 13 : 15}px;letter-spacing:0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.3);vertical-align:middle">${esc(ini)}</div>`;
+    const avatarSlot = document.getElementById('avatarSlot');
+    if (avatarSlot) avatarSlot.innerHTML = avatarBlock;
+
     document.getElementById('meBlock').outerHTML = `
       <div id="meBlock">
-        <div class="row" style="align-items:center">
-          <span class="k">Аватар</span>
-          <span class="v">${avatarBlock}</span>
-        </div>
         <div class="row"><span class="k">Почта</span>
           <span class="v">${esc(data.email)} ${verifiedChip} ${adminChip}</span></div>
         <div class="row"><span class="k">Имя</span>
