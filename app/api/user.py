@@ -250,6 +250,25 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
                 api_key, body.agent_id, body.description,
             )
 
+    # v3+: lifecycle event — owner видит «agent_id зарегистрирован» в списке
+    # событий, можно использовать для billing/audit (когда какой agent был создан)
+    try:
+        import json as _j
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) VALUES ($1, $2, $3::jsonb)",
+                body.agent_id, "agent_lifecycle",
+                _j.dumps({
+                    "event": "agent_created",
+                    "task": "agent зарегистрирован",
+                    "project": body.project or "?",
+                    "machine": body.machine,
+                    "description": body.description,
+                }, ensure_ascii=False),
+            )
+    except Exception:
+        pass  # lifecycle event — не критично если упало
+
     logger.info(
         "agent_created user_id=%s agent_id=%s project=%s",
         user.user_id, body.agent_id, body.project or "?",
@@ -259,6 +278,49 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
         "agent_id": body.agent_id,
         "api_key": api_key,
         "warning": "Сохраните api_key — больше его показать нельзя.",
+    }
+
+
+@router.get("/agents/{agent_id}/events")
+async def agent_events(agent_id: str, request: Request, limit: int = 20):
+    """Список последних L1-событий конкретного помощника.
+
+    Owner может развернуть card агента → увидеть что он делал. Используется
+    для:
+    - Audit log (история действий)
+    - Billing readiness — счётчик event-ов под подписку/тариф
+    - Debug — понять чем агент занят
+
+    Owner-check: проверяем что agent принадлежит user'у.
+    """
+    user = await require_user(request)
+    limit = max(1, min(int(limit), 100))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1",
+            agent_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Помощник не найден")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваш помощник")
+        rows = await conn.fetch(
+            """
+            SELECT id::text AS id, domain, raw_payload, timestamp::text AS timestamp
+              FROM l1_raw_events
+             WHERE source_agent = $1
+             ORDER BY timestamp DESC
+             LIMIT $2
+            """,
+            agent_id, limit,
+        )
+    items = [dict(r) for r in rows]
+    return {
+        "agent_id": agent_id,
+        "count": len(items),
+        "limit": limit,
+        "events": items,
     }
 
 
