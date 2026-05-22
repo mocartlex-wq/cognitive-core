@@ -650,10 +650,31 @@ def _format_text(data: Any) -> str:
 
 @router.get("/sse")
 async def mcp_sse_stub() -> StreamingResponse:
+    """Hybrid SSE/HTTP transport.
+
+    Mainstream MCP клиенты (Claude Code SDK, Claude Desktop, Cursor)
+    держат SSE-connection ВЕЧНО — клиент посылает JSON-RPC через POST
+    /mcp/messages, ждёт ответ или через HTTP body (legacy) или
+    через SSE-event message (modern). Если SSE close'ится — SDK
+    думает connection lost → retry → tools никогда не подгружаются.
+
+    Решение: keep-alive comment-events каждые 15 сек. Response-ы
+    приходят inline в HTTP POST (HTTP-direct mode, что мы и делаем
+    в /mcp/messages handler). SSE-stream играет роль liveness-probe.
+    """
     async def gen():
+        # Initial endpoint event — required by spec
         yield "event: endpoint\n"
         yield "data: /mcp/messages\n\n"
-        await asyncio.sleep(1)
+        # Keep-alive forever — sends SSE-comment every 15s (ignored by client
+        # protocol parser, но FastMCP/SDK видят что connection alive).
+        try:
+            while True:
+                await asyncio.sleep(15)
+                yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            # Client closed connection — clean exit, no log spam
+            return
 
     return StreamingResponse(
         gen(),
