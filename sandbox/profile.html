@@ -939,6 +939,19 @@
   }
   window.copyToClipboard = copyToClipboard;
 
+  // ─── Click-outside-to-close для всех <dialog> ────────────────────
+  // По умолчанию HTML <dialog> opened через showModal() НЕ закрывается
+  // при клике на backdrop. Owner ожидает что клик вне рамки = отмена,
+  // как в любом modern UI. Trick: клик на сам <dialog> элемент имеет
+  // target === dialog (backdrop pseudo-фон), а клик ВНУТРИ — target
+  // это вложенный child. По этому отличаем outside vs inside.
+  // ESC уже работает нативно для showModal() — ничего не добавляем.
+  document.querySelectorAll('dialog').forEach(dlg => {
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg) dlg.close();
+    });
+  });
+
   document.getElementById('newAgentBtn').addEventListener('click', () => {
     document.getElementById('newAgentDialog').showModal();
     populateChipsInto('newAgentMachineChips', 'newAgentMachine', 'newAgentMachineHint');
