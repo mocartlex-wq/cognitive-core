@@ -280,20 +280,62 @@
     const r = await api('/user/me');
     if (!r) return;
     const data = await r.json();
+    window.__me = data;  // для редактирования
     const adminChip = data.is_admin ? '<span class="chip admin">Админ</span>' : '';
     const verifiedChip = data.email_verified ? '<span class="chip">Подтверждён</span>' : '';
+    const avatarBlock = data.avatar_url
+      ? `<img src="${esc(data.avatar_url)}" alt="avatar" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:1px solid var(--glass-border)">`
+      : `<div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--glass-orb-1),var(--glass-orb-2));display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#0a0e14;font-size:18px">${esc((data.display_name || data.email || '?')[0].toUpperCase())}</div>`;
     document.getElementById('meBlock').outerHTML = `
       <div id="meBlock">
+        <div class="row" style="align-items:flex-start">
+          <span class="k">Аватар</span>
+          <span class="v" style="display:flex;align-items:center;gap:10px">
+            ${avatarBlock}
+            <button class="btn secondary btn-sm" onclick="editAvatar()">✏️</button>
+          </span>
+        </div>
         <div class="row"><span class="k">Почта</span>
           <span class="v">${esc(data.email)} ${verifiedChip} ${adminChip}</span></div>
         <div class="row"><span class="k">Имя</span>
-          <span class="v">${esc(data.display_name || '—')}</span></div>
+          <span class="v" style="display:flex;align-items:center;gap:8px">
+            ${esc(data.display_name || '—')}
+            <button class="btn secondary btn-sm" onclick="editDisplayName()">✏️</button>
+          </span></div>
         <div class="row"><span class="k">user_id</span>
           <span class="v" style="font-family: var(--mono); font-size: 12px;">${esc(data.user_id)}</span></div>
         <div class="row"><span class="k">Создан</span>
           <span class="v">${fmtDate(data.created_at)}</span></div>
       </div>`;
   }
+
+  window.editDisplayName = async function() {
+    const cur = (window.__me || {}).display_name || '';
+    const v = prompt('Ваше имя (как видят другие в комнатах):', cur);
+    if (v === null) return;
+    const r = await api('/user/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: v.trim() || null }),
+    });
+    if (!r) return;
+    if (r.ok) loadMe();
+    else alert('Ошибка: ' + ((await r.json()).detail || r.status));
+  };
+
+  window.editAvatar = async function() {
+    const cur = (window.__me || {}).avatar_url || '';
+    const v = prompt('URL аватара (https://..., пусто чтобы убрать):', cur);
+    if (v === null) return;
+    const r = await api('/user/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ avatar_url: v.trim() || null }),
+    });
+    if (!r) return;
+    if (r.ok) loadMe();
+    else alert('Ошибка: ' + ((await r.json()).detail || r.status));
+  };
 
   async function loadRooms() {
     const r = await api('/user/rooms');
@@ -412,6 +454,26 @@
     }
   };
 
+  function parseUA(ua) {
+    // Human-readable device label из user_agent
+    if (!ua) return { browser: '?', os: '?', icon: '💻' };
+    const lower = ua.toLowerCase();
+    let browser = 'Браузер';
+    if (lower.includes('yabrowser/')) browser = 'Яндекс Браузер';
+    else if (lower.includes('edg/')) browser = 'Edge';
+    else if (lower.includes('chrome/')) browser = 'Chrome';
+    else if (lower.includes('firefox/')) browser = 'Firefox';
+    else if (lower.includes('safari/') && !lower.includes('chrome')) browser = 'Safari';
+    else if (lower.includes('opr/')) browser = 'Opera';
+    let os = 'OS', icon = '💻';
+    if (lower.includes('windows')) { os = 'Windows'; icon = '🪟'; }
+    else if (lower.includes('mac os') || lower.includes('macintosh')) { os = 'macOS'; icon = '🍎'; }
+    else if (lower.includes('android')) { os = 'Android'; icon = '📱'; }
+    else if (lower.includes('iphone') || lower.includes('ipad')) { os = 'iOS'; icon = '📱'; }
+    else if (lower.includes('linux')) { os = 'Linux'; icon = '🐧'; }
+    return { browser, os, icon };
+  }
+
   async function loadSessions() {
     const r = await api('/auth/sessions');
     if (!r) return;
@@ -420,20 +482,21 @@
     if (j.count === 0) { block.outerHTML = '<div id="sessionsBlock" class="empty">—</div>'; return; }
     const grid = j.items.map(s => {
       const ua = (s.device_info && s.device_info.user_agent) || '?';
-      const uaShort = ua.length > 60 ? ua.slice(0, 60) + '…' : ua;
       const ip = (s.device_info && s.device_info.ip) || '?';
+      const dev = parseUA(ua);
       return `
       <div class="item">
-        <div>
-          <div class="name">${s.is_current ? '<span class="chip">Это устройство</span> ' : ''}${esc(uaShort)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="name">${dev.icon} ${esc(dev.browser)} · ${esc(dev.os)} ${s.is_current ? '<span class="chip online">Это устройство</span>' : ''}</div>
           <div class="meta">IP ${esc(ip)} · был ${fmtDate(s.last_used_at)}</div>
+          <div class="meta" style="font-size:11px;color:var(--glass-text-dim);font-family:var(--mono);margin-top:2px" title="${esc(ua)}">${esc(ua.length > 80 ? ua.slice(0,80) + '…' : ua)}</div>
         </div>
-        ${s.is_current ? '' : `<button class="btn secondary btn-sm" onclick="revokeSession('${esc(s.session_id)}')">Выйти</button>`}
+        ${s.is_current ? '' : `<button class="btn danger btn-sm" title="Завершить сессию + revoke cookie" onclick="revokeSession('${esc(s.session_id)}')">🗑️</button>`}
       </div>`;
     }).join('');
     block.outerHTML = `<div id="sessionsBlock" class="grid">${grid}
-      <div style="text-align: right; margin-top: 8px;">
-        <button class="btn secondary btn-sm" onclick="logoutAll()">Выйти отовсюду</button>
+      <div style="text-align: right; margin-top: 12px;">
+        <button class="btn danger btn-sm" onclick="logoutAll()">🚪 Выйти отовсюду</button>
       </div></div>`;
   }
 
