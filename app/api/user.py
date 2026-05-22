@@ -315,7 +315,38 @@ async def agent_events(agent_id: str, request: Request, limit: int = 20):
             """,
             agent_id, limit,
         )
-    items = [dict(r) for r in rows]
+        items = [dict(r) for r in rows]
+
+        # Synthetic «agent_created» event для legacy агентов без lifecycle-записи.
+        # Берётся из agent_states.updated_at (когда впервые зарегистрирован).
+        # Cмотрим есть ли уже lifecycle event с domain=agent_lifecycle — если нет,
+        # добавляем синтетический в конец списка.
+        has_lifecycle = any(
+            (i.get("domain") == "agent_lifecycle") for i in items
+        )
+        if not has_lifecycle:
+            meta = await conn.fetchrow(
+                """
+                SELECT updated_at::text AS created, machine_label, project, notes
+                  FROM agent_states WHERE agent_id = $1
+                """,
+                agent_id,
+            )
+            if meta:
+                items.append({
+                    "id": "synthetic-lifecycle",
+                    "domain": "agent_lifecycle",
+                    "raw_payload": {
+                        "event": "agent_registered",
+                        "task": "agent зарегистрирован",
+                        "project": meta["project"] or "—",
+                        "machine": meta["machine_label"] or "—",
+                        "description": meta["notes"] or None,
+                        "synthetic": True,
+                    },
+                    "timestamp": meta["created"],
+                })
+
     return {
         "agent_id": agent_id,
         "count": len(items),
