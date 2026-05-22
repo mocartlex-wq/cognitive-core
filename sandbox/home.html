@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#0a0e14">
 <link rel="stylesheet" href="/static/shared.css?v=20260520j">
 <link rel="stylesheet" href="/static/glass.css?v=20260520i">
-<meta name="cc-home-ver" content="20260522-design-fix">
+<meta name="cc-home-ver" content="20260522-design-fix-h2">
 <style>html, body { background: #0a0e14 !important; color: #e6edf3 !important; color-scheme: dark; }
 
 
@@ -626,27 +626,51 @@
   .top-status .dot.err   { box-shadow: 0 0 6px rgba(248,81,73,0.6); }
   .top-status .dot.unknown { opacity: 0.5; }
 
-  /* === SECTION HEADERS: subtle accent bar UNDER the heading (not floating left)
-         Был баг: ::before абсолютно позиционировался по left:0 контейнера max-width:700,
-         центрированного в 1180px main → линия "уплывала" за пределы текста и местами
-         наезжала на содержимое предыдущей секции. Теперь — короткая полоска под заголовком. === */
+  /* === SECTION HEADERS — FORCE solid text (kill glass.css shimmer-clip-text) ===
+         glass.css line 740-755 пытается рендерить h2 как «градиент в форме букв»:
+         background: linear-gradient + -webkit-background-clip: text + text-fill-color: transparent.
+         В Yandex Browser background-clip:text иногда не применяется → градиент рендерится
+         сплошной полосой, а текст становится невидимым (он transparent). Перекрываем
+         !important — solid белый текст + короткая градиентная полоска под ним. === */
   .glass-section-h {
     position: relative;
+    text-align: center;
+    margin: 0 auto 28px;
+    max-width: 700px;
   }
   .glass-section-h h2 {
     display: inline-block;
-    padding-bottom: 8px;
+    padding: 0 0 10px;
+    margin: 0 auto 6px;
     position: relative;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.2;
+    /* KILL the gradient-text shimmer from glass.css */
+    background: none !important;
+    background-image: none !important;
+    -webkit-background-clip: border-box !important;
+            background-clip: border-box !important;
+    -webkit-text-fill-color: #ffffff !important;
+            color: #ffffff !important;
+    animation: none !important;
   }
   .glass-section-h h2::after {
     content: "";
     position: absolute;
     left: 50%; bottom: 0;
     transform: translateX(-50%);
-    width: 48px; height: 2px;
+    width: 56px; height: 2px;
     background: linear-gradient(90deg, #58a6ff, #3fb950);
     border-radius: 2px;
-    opacity: 0.65;
+    opacity: 0.75;
+  }
+  .glass-section-h p {
+    color: rgba(230,237,243,0.62);
+    font-size: 14.5px;
+    margin: 0 auto;
+    max-width: 580px;
   }
 
   /* === FOOT: тоньше + центрировано === */
