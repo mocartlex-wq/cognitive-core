@@ -326,11 +326,22 @@
   window.editAvatar = async function() {
     const cur = (window.__me || {}).avatar_url || '';
     const v = prompt('URL аватара (https://..., пусто чтобы убрать):', cur);
-    if (v === null) return;
+    if (v === null) return;  // cancel
+    const trimmed = v.trim();
+    // Pre-validate: если пусто → null (убрать аватар), иначе обязательно https://
+    let payload;
+    if (!trimmed) {
+      payload = { avatar_url: null };
+    } else if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+      payload = { avatar_url: trimmed };
+    } else {
+      alert('URL должен начинаться с https:// или http://\nИли оставьте пустым чтобы убрать аватар.');
+      return;  // НЕ дёргаем backend — избежим 400 в console
+    }
     const r = await api('/user/me', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ avatar_url: v.trim() || null }),
+      body: JSON.stringify(payload),
     });
     if (!r) return;
     if (r.ok) loadMe();
