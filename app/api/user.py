@@ -142,25 +142,51 @@ async def my_agents(request: Request):
             """
             SELECT agent_id, current_task, project, machine, capabilities,
                    last_heartbeat_at, total_events, total_checkpoints, updated_at,
-                   last_mcp_connect_at,
+                   last_mcp_connect_at, last_mcp_disconnect_at,
+                   first_mcp_connect_at,
+                   machine_fingerprint, machine_label,
                    -- Presence: MCP-online если connect в последние 60 сек
                    (last_mcp_connect_at IS NOT NULL
                     AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online
               FROM agent_states
              WHERE owner_user_id = $1::uuid
-             ORDER BY mcp_online DESC, last_heartbeat_at DESC NULLS LAST
+             ORDER BY machine_fingerprint NULLS LAST,
+                      mcp_online DESC,
+                      last_heartbeat_at DESC NULLS LAST
             """,
             user.user_id,
         )
     items: list[dict[str, Any]] = []
     for r in rows:
         d = dict(r)
-        for k in ("last_heartbeat_at", "updated_at", "last_mcp_connect_at"):
+        for k in ("last_heartbeat_at", "updated_at", "last_mcp_connect_at",
+                  "last_mcp_disconnect_at", "first_mcp_connect_at"):
             v = d.get(k)
             if isinstance(v, datetime):
                 d[k] = v.isoformat()
         items.append(d)
-    return {"count": len(items), "items": items}
+
+    # v3: группируем по machine_fingerprint в отдельной структуре для UI
+    # (агенты без fp идут в группу «legacy» — те что без installer-а)
+    machines: dict[str, dict[str, Any]] = {}
+    for item in items:
+        fp = item.get("machine_fingerprint") or "_no_machine"
+        if fp not in machines:
+            machines[fp] = {
+                "machine_fingerprint": item.get("machine_fingerprint"),
+                "machine_label": item.get("machine_label") or "Без машины",
+                "agents": [],
+                "any_online": False,
+            }
+        machines[fp]["agents"].append(item)
+        if item.get("mcp_online"):
+            machines[fp]["any_online"] = True
+
+    return {
+        "count": len(items),
+        "items": items,  # backward compat — flat list
+        "machines": list(machines.values()),  # v3 — grouped by machine
+    }
 
 
 class CreateAgentBody(BaseModel):

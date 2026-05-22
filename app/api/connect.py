@@ -556,6 +556,10 @@ class IssueClaimBody(BaseModel):
     agent_id: str | None = Field(None, min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
     machine_hint: str | None = Field(None, max_length=128)
     platform: str = Field("claude_code", description="claude_code|cursor — определяет mcp config target")
+    # v3 multi-agent registry: машина-fingerprint, owner может передать
+    # ожидаемый fp (e.g. с UI auto-detect) — при claim, если есть agent
+    # с тем же (owner_user_id, fp) → reuse api_key вместо создания нового.
+    machine_fingerprint: str | None = Field(None, min_length=8, max_length=32, pattern=r"^[a-f0-9]+$")
 
 
 @router.post("/issue-claim-token")
@@ -584,6 +588,7 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
         "agent_id": default_id,
         "machine_hint": body.machine_hint,
         "platform": body.platform,
+        "machine_fingerprint": body.machine_fingerprint,
         "created_at": time.time(),
     }
     # Redis backed — переживает api restart (in-memory был fragile при deploy)
@@ -705,12 +710,72 @@ async def claim_token(token: str, request: Request):
         "agent_id": entry["agent_id"],
     }
 
+    # v3 multi-agent registry: REUSE если у owner-а уже есть agent с тем же
+    # machine_fingerprint — возвращаем existing api_key, не создаём нового.
+    # Это предотвращает дубликаты при повторном wizard на той же машине.
+    fp = entry.get("machine_fingerprint")
+    if fp:
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT ast.agent_id, ak.api_key, ast.machine_label
+                  FROM agent_states ast
+                  JOIN agent_keys ak ON ak.agent_id = ast.agent_id
+                 WHERE ast.owner_user_id = $1::uuid
+                   AND ast.machine_fingerprint = $2
+                   AND ak.revoked_at IS NULL
+                 ORDER BY ak.created_at DESC
+                 LIMIT 1
+                """,
+                entry["user_id"], fp,
+            )
+        if existing:
+            # Bump heartbeat + update machine label
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE agent_states
+                       SET machine_label = COALESCE($1, machine_label),
+                           last_heartbeat_at = NOW(),
+                           updated_at = NOW()
+                     WHERE agent_id = $2
+                    """,
+                    entry.get("machine_hint"), existing["agent_id"],
+                )
+            logger.info(
+                "claim REUSE user=%s machine_fp=%s → existing agent=%s",
+                entry["user_id"], fp[:8], existing["agent_id"],
+            )
+            mcp_config_reuse = {
+                "mcpServers": {
+                    "cognitive-core": {
+                        "type": "sse",
+                        "url": MCP_SSE_URL,
+                        "headers": {"X-API-Key": existing["api_key"]},
+                    },
+                },
+            }
+            return {
+                "agent_id": existing["agent_id"],
+                "api_key": existing["api_key"],
+                "platform": platform,
+                "mcp_url": MCP_SSE_URL,
+                "base_url": BASE_URL,
+                "mcp_config": mcp_config_reuse,
+                "reused": True,
+                "instructions": (
+                    f"♻ Re-используем существующего helper-а `{existing['agent_id']}` "
+                    f"на этой машине (machine_fp совпал). НЕ создаём дубликат. "
+                    f"Если нужен новый — owner может revoke в /ui/profile и issue новый claim-token."
+                ),
+            }
+
     # Защитный fallback на случай legacy токенов выпущенных ДО min_length=3
     # фикса (там agent_id мог быть короткий или странный). Регенерим default.
     requested_agent_id = entry["agent_id"] or ""
     if len(requested_agent_id) < 3 or not requested_agent_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
-        platform = entry.get("platform", "claude_code")
-        requested_agent_id = f"{platform.split('_')[0]}-{secrets.token_hex(3)}"
+        platform_short = entry.get("platform", "claude_code")
+        requested_agent_id = f"{platform_short.split('_')[0]}-{secrets.token_hex(3)}"
         logger.warning("legacy short agent_id from claim, regenerated to %s", requested_agent_id)
 
     # Создаём агента под этого user'a — используем reusable _create_agent_core
@@ -736,19 +801,31 @@ async def claim_token(token: str, request: Request):
     api_key = agent["api_key"]
     platform = entry.get("platform", "claude_code")
 
-    # Строим mcp config (для Claude Code / Cursor одинаковый)
+    # v3: bind machine_fingerprint к новому агенту (для idempotent re-onboard)
+    if fp:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE agent_states SET machine_fingerprint = $1 WHERE agent_id = $2",
+                    fp, requested_agent_id,
+                )
+        except Exception as e:
+            logger.warning("Failed to bind machine_fp: %s", e)
+
+    # Строим mcp config — direct SSE (Claude Code / Cursor native)
     mcp_config = {
         "mcpServers": {
             "cognitive-core": {
-                "command": "npx",
-                "args": ["-y", "mcp-remote", MCP_SSE_URL, "--header", f"X-API-Key: {api_key}"],
+                "type": "sse",
+                "url": MCP_SSE_URL,
+                "headers": {"X-API-Key": api_key},
             },
         },
     }
 
     logger.info(
-        "claim_consumed user_id=%s agent_id=%s platform=%s",
-        entry["user_id"], entry["agent_id"], platform,
+        "claim_consumed user_id=%s agent_id=%s platform=%s fp=%s",
+        entry["user_id"], entry["agent_id"], platform, (fp[:8] if fp else "none"),
     )
 
     return {
@@ -771,6 +848,112 @@ async def claim_token(token: str, request: Request):
             f"5. После рестарта у вас появятся 24 MCP-инструмента."
         ),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Auto-onboard — idempotent installer + machine fingerprint flow
+# ─────────────────────────────────────────────────────────────────────────
+class AutoOnboardBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    machine_fingerprint: str = Field(..., min_length=8, max_length=32, pattern=r"^[a-f0-9]+$")
+    machine_label: str | None = Field(None, max_length=128)
+    api_key: str | None = Field(None, min_length=20, max_length=128)
+
+
+@router.post("/auto-onboard")
+async def auto_onboard(body: AutoOnboardBody):
+    """Idempotent endpoint для installer-а.
+
+    Логика:
+      1. Если передан api_key И он валидный → bump heartbeat + update
+         machine_fingerprint/label → return existing agent. Owner может
+         re-run installer 100 раз — НИЧЕГО не дублируется.
+      2. Если api_key НЕТ, но передан fingerprint → lookup agent_states
+         WHERE machine_fingerprint=$1. Если найден И не revoked →
+         для security НЕ возвращаем api_key (это public endpoint),
+         но возвращаем 200 с status=existing + agent_id, чтобы
+         installer мог попросить owner вручную re-claim.
+      3. Если ничего не найдено → 404 с подсказкой run /ui/connect
+         или передать claim-token.
+
+    Security: не возвращаем api_key без подтверждения через valid api_key
+    или claim-token. Это endpoint reuse-only.
+    """
+    pool = await get_pool()
+    fp = body.machine_fingerprint.lower()
+
+    # Path 1: api_key передан — bump + return reuse confirmation
+    if body.api_key:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT ak.agent_id, ast.owner_user_id::text AS owner_user_id
+                  FROM agent_keys ak
+                  JOIN agent_states ast ON ast.agent_id = ak.agent_id
+                 WHERE ak.api_key = $1 AND ak.revoked_at IS NULL
+                 LIMIT 1
+                """,
+                body.api_key,
+            )
+        if not row:
+            raise HTTPException(status_code=401, detail="api_key неизвестен или revoked. Перезапустите claim-token wizard.")
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE agent_states
+                   SET machine_fingerprint = $1,
+                       machine_label = COALESCE($2, machine_label),
+                       last_heartbeat_at = NOW(),
+                       updated_at = NOW()
+                 WHERE agent_id = $3
+                """,
+                fp, body.machine_label, row["agent_id"],
+            )
+            await conn.execute(
+                "UPDATE agent_keys SET last_used_at = NOW() WHERE api_key = $1",
+                body.api_key,
+            )
+        logger.info(
+            "auto_onboard reuse user=%s agent=%s machine=%s",
+            row["owner_user_id"], row["agent_id"], fp,
+        )
+        return {
+            "status": "reused",
+            "agent_id": row["agent_id"],
+            "message": f"Helper уже установлен как `{row['agent_id']}`, heartbeat обновлён.",
+        }
+
+    # Path 2: только fingerprint — lookup, но НЕ возвращаем key (security)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT agent_id, owner_user_id::text AS owner_user_id, machine_label
+              FROM agent_states
+             WHERE machine_fingerprint = $1
+             LIMIT 1
+            """,
+            fp,
+        )
+    if row:
+        return {
+            "status": "found_but_locked",
+            "agent_id": row["agent_id"],
+            "machine_label": row["machine_label"],
+            "message": (
+                f"На этой машине уже установлен helper `{row['agent_id']}`. "
+                f"Если потеряли api_key — owner должен issue новый claim-token "
+                f"в /ui/profile. Старый key продолжит работать параллельно."
+            ),
+        }
+
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"Машина с fingerprint {fp[:8]}… ещё не зарегистрирована. "
+            f"Owner должен открыть https://mcp.xn----8sbwawqx4fza.xn--p1ai/ui/profile → "
+            f"«🪄 Передать помощнику» → передать токен installer-у."
+        ),
+    )
 
 
 @router.post("/track")

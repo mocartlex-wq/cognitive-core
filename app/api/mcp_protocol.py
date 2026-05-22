@@ -232,6 +232,22 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {"current_task": {"type": "string"}},
         },
     },
+    {
+        "name": "cognitive_my_team",
+        "description": (
+            "v3: список ВСЕХ агентов того же владельца аккаунта (multi-machine "
+            "registry). Каждый: agent_id, machine_label, mcp_online, "
+            "last_mcp_connect_at, total_events. Полезно для cross-agent "
+            "коллаборации — узнать кто online, передать DM или присоединиться "
+            "к общей комнате owner-а."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "only_online": {"type": "boolean", "default": False, "description": "Только агенты с MCP-online"},
+            },
+        },
+    },
 ]
 
 
@@ -571,6 +587,53 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         body = {"current_task": a.get("current_task")}
         return await _call_self(request, "POST", "/agents/heartbeat", json_body=body, timeout_s=4.0)
 
+    if name == "cognitive_my_team":
+        # v3: возвращаем agents того же owner-а. Resolve owner через api_key.
+        agent_id = await _resolve_agent(request)
+        only_online = bool(a.get("only_online", False))
+        try:
+            from app.db.postgres import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                # Owner_user_id текущего агента
+                me = await conn.fetchrow(
+                    "SELECT owner_user_id FROM agent_states WHERE agent_id = $1",
+                    agent_id,
+                )
+                if not me or not me["owner_user_id"]:
+                    return {"team": [], "note": "Этот агент не привязан к owner-у (legacy admin-key)"}
+
+                online_filter = "AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds'" if only_online else ""
+                rows = await conn.fetch(
+                    f"""
+                    SELECT agent_id, machine_label, machine_fingerprint,
+                           total_events, total_checkpoints,
+                           last_mcp_connect_at, last_heartbeat_at,
+                           (last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online
+                      FROM agent_states
+                     WHERE owner_user_id = $1 {online_filter}
+                     ORDER BY mcp_online DESC NULLS LAST, last_heartbeat_at DESC NULLS LAST
+                    """,
+                    me["owner_user_id"],
+                )
+            team = []
+            for r in rows:
+                d = dict(r)
+                d["is_me"] = (d["agent_id"] == agent_id)
+                for k in ("last_mcp_connect_at", "last_heartbeat_at"):
+                    v = d.get(k)
+                    if v:
+                        d[k] = v.isoformat()
+                team.append(d)
+            return {
+                "team_size": len(team),
+                "online_count": sum(1 for t in team if t.get("mcp_online")),
+                "team": team,
+                "me": agent_id,
+            }
+        except Exception as e:
+            return {"_error": f"my_team failed: {e}"}
+
     raise ValueError(f"unknown tool: {name}")
 
 
@@ -654,16 +717,61 @@ async def _mark_mcp_connected(request: Request) -> None:
     Используется для UI presence indicator (зелёный/серый dot в /ui/profile).
     Best-effort — если postgres недоступен или agent не resolved, тихо
     пропускаем (не блокируем сам SSE handshake).
+
+    v3: при ПЕРВОМ connect (first_mcp_connect_at IS NULL) — auto-DM всем
+    online агентам того же owner-а «🟢 новый агент подключился».
     """
     try:
         agent_id = await _resolve_agent(request)
         from app.db.postgres import get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE agent_states SET last_mcp_connect_at = NOW() WHERE agent_id = $1",
+            # UPDATE возвращает прежнее значение first_mcp_connect_at и owner_user_id
+            row = await conn.fetchrow(
+                """
+                UPDATE agent_states
+                   SET last_mcp_connect_at = NOW(),
+                       first_mcp_connect_at = COALESCE(first_mcp_connect_at, NOW())
+                 WHERE agent_id = $1
+                RETURNING owner_user_id::text AS owner_user_id,
+                          (first_mcp_connect_at = last_mcp_connect_at) AS is_first,
+                          machine_label
+                """,
                 agent_id,
             )
+            if not row or not row["owner_user_id"] or not row["is_first"]:
+                return  # legacy admin agent OR не первый коннект
+            # Auto-DM всем online агентам того же owner-а
+            online_peers = await conn.fetch(
+                """
+                SELECT agent_id FROM agent_states
+                 WHERE owner_user_id = $1::uuid
+                   AND agent_id != $2
+                   AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds'
+                """,
+                row["owner_user_id"], agent_id,
+            )
+            if not online_peers:
+                return
+            ml = row["machine_label"] or "?"
+            for peer in online_peers:
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO l1_raw_events (source_agent, domain, raw_payload)
+                        VALUES ($1, $2, $3::jsonb)
+                        """,
+                        "server-runtime",
+                        "agent_inbox",
+                        json.dumps({
+                            "to": peer["agent_id"],
+                            "from": "server-runtime",
+                            "text": f"🟢 Новый агент `{agent_id}` (machine: {ml}) подключился к команде. Используй cognitive_my_team чтобы увидеть всех.",
+                            "context": {"event": "agent_joined", "agent_id": agent_id, "machine_label": ml},
+                        }, ensure_ascii=False),
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass
 
