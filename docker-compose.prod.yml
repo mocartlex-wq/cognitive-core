@@ -88,6 +88,10 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
       - nginx_logs:/var/log/nginx
+      # ACME webroot для Let's Encrypt HTTP-01 challenge (выпуск/обновление сертов
+      # под любые новые hostname без stop/start nginx). Папка создаётся certbot'ом
+      # автоматически при первом --webroot run; nginx читает её для отдачи токенов.
+      - /var/www/certbot:/var/www/certbot:ro
     deploy:
       resources:
         limits: { cpus: '0.5', memory: 256M }
