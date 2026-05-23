@@ -657,7 +657,7 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
                 "agent_id": agent_id,
                 "note": "owner создаёт тебя через /ui/profile, machine_label привязан к hostname. Если хочешь сменить роль — попроси owner-а.",
             },
-            "more_info": "https://mcp.xn----8sbwawqx4fza.xn--p1ai/sandbox — все endpoints с примерами",
+            "more_info": "https://mcp.me-ai.ru/sandbox — все endpoints с примерами",
         }
         return {
             "agent_id": agent_id,

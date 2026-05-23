@@ -102,7 +102,7 @@ app = FastAPI(
 )
 
 # CORS: разрешены креды для cookie-flow. Origins по умолчанию — все.
-# Для production'а ставим в .env CORS_ORIGINS_CSV="https://aimail.art,https://mcp.ии-память.рф"
+# Для production'а ставим в .env CORS_ORIGINS_CSV="https://aimail.art,https://mcp.me-ai.ru,https://mcp.ии-память.рф"
 _origins_env = os.getenv("CORS_ORIGINS_CSV", "").strip()
 if _origins_env:
     _origins = [o.strip() for o in _origins_env.split(",") if o.strip()]

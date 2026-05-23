@@ -3,10 +3,10 @@
 #
 # Usage:
 #   # Первая установка (нужен claim-token):
-#   curl -sSL https://mcp.xn----8sbwawqx4fza.xn--p1ai/static/install-cogcore.sh | COGNITIVE_API_KEY='...' bash
+#   curl -sSL https://mcp.me-ai.ru/static/install-cogcore.sh | COGNITIVE_API_KEY='...' bash
 #
 #   # Re-install / heartbeat — без COGNITIVE_API_KEY (использует существующий):
-#   curl -sSL https://mcp.xn----8sbwawqx4fza.xn--p1ai/static/install-cogcore.sh | bash
+#   curl -sSL https://mcp.me-ai.ru/static/install-cogcore.sh | bash
 #
 # v3 features:
 #   - Machine fingerprint = sha256(hostname+user+os)[:16] (стабильный id машины)
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-BASE_URL="${COGCORE_BASE_URL:-https://mcp.xn----8sbwawqx4fza.xn--p1ai}"
+BASE_URL="${COGCORE_BASE_URL:-https://mcp.me-ai.ru}"
 BIN_DIR="$HOME/.local/bin"
 CFG_DIR="$HOME/.cognitive-core"
 AGENT_REG="$CFG_DIR/agent.json"
