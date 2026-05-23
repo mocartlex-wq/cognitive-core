@@ -583,6 +583,26 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
     # Default agent_id если не задан — суффикс от платформы
     default_id = body.agent_id or f"{body.platform.split('_')[0]}-{secrets.token_hex(3)}"
 
+    # PR #35 (2026-05-23): СРАЗУ создаём pending agent_states row чтобы
+    # owner видел в /ui/profile «pending claim» с countdown 10 мин.
+    # При успешном claim — статус → 'active'. Если 10 мин не claim'нул —
+    # cron удалит. UX-проблема «нажал генерировать — где агент?» решена.
+    try:
+        from app.db.postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # UPSERT — если agent_id уже есть, не пересоздаём (для idempotent issue)
+            await conn.execute(
+                """
+                INSERT INTO agent_states (agent_id, owner_user_id, machine_label, status)
+                VALUES ($1, $2::uuid, $3, 'pending_claim')
+                ON CONFLICT (agent_id) DO NOTHING
+                """,
+                default_id, str(user.user_id), body.machine_hint,
+            )
+    except Exception as e:
+        logger.warning("Failed to pre-create pending agent_states for %s: %s", default_id, e)
+
     entry_data = {
         "user_id": str(user.user_id),
         "agent_id": default_id,
@@ -591,7 +611,6 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
         "machine_fingerprint": body.machine_fingerprint,
         "created_at": time.time(),
     }
-    # Redis backed — переживает api restart (in-memory был fragile при deploy)
     try:
         r = await get_redis()
         await r.setex(f"cogcore:claim:{token}", CLAIM_TTL_SECONDS, json.dumps(entry_data))
@@ -845,27 +864,53 @@ async def claim_token(token: str, request: Request):
         requested_agent_id = f"{platform_short.split('_')[0]}-{secrets.token_hex(3)}"
         logger.warning("legacy short agent_id from claim, regenerated to %s", requested_agent_id)
 
-    # Создаём агента под этого user'a — используем reusable _create_agent_core
-    class _FakeUser:
-        user_id = entry["user_id"]
-    create_body = CreateAgentBody(
-        agent_id=requested_agent_id,
-        description=f"Self-onboarded via claim-token at {datetime.utcnow().isoformat()}",
-        machine=entry.get("machine_hint"),
-        project="claim-onboard",
-    )
-    try:
-        agent = await _create_agent_core(_FakeUser(), create_body)
-    except HTTPException as e:
-        if e.status_code == 409:
-            # Race / re-claim попытка: возможно агент уже создан, скажем нет
-            raise HTTPException(
-                status_code=409,
-                detail=f"Помощник с id «{entry['agent_id']}» уже существует. Сгенерируйте новый claim-token.",
+    # PR #35: проверить pending row (создан при issue-claim). Если есть —
+    # просто convert to active + создать api_key, не зовём _create_agent_core
+    # (он бы упал с 409 на UNIQUE agent_id).
+    api_key = None
+    pool_db = await get_pool()
+    async with pool_db.acquire() as conn:
+        pending = await conn.fetchrow(
+            "SELECT agent_id FROM agent_states WHERE agent_id = $1 "
+            "AND owner_user_id = $2::uuid AND status = 'pending_claim'",
+            requested_agent_id, entry["user_id"],
+        )
+        if pending:
+            api_key = secrets.token_urlsafe(32)
+            await conn.execute(
+                "INSERT INTO agent_keys (api_key, agent_id, description, owner_user_id) "
+                "VALUES ($1, $2, $3, $4::uuid) ON CONFLICT (agent_id) DO UPDATE SET api_key=EXCLUDED.api_key, revoked_at=NULL",
+                api_key, requested_agent_id,
+                f"Claim-onboarded at {datetime.utcnow().isoformat()}",
+                entry["user_id"],
             )
-        raise
+            await conn.execute(
+                "UPDATE agent_states SET status='active', machine=COALESCE($2, machine) WHERE agent_id=$1",
+                requested_agent_id, entry.get("machine_hint"),
+            )
+            agent = {"api_key": api_key, "agent_id": requested_agent_id}
 
-    api_key = agent["api_key"]
+    if api_key is None:
+        # Нет pending row — fallback к старой логике (legacy токены до PR #35,
+        # или edge-case если pending был удалён cleanup'ом)
+        class _FakeUser:
+            user_id = entry["user_id"]
+        create_body = CreateAgentBody(
+            agent_id=requested_agent_id,
+            description=f"Self-onboarded via claim-token at {datetime.utcnow().isoformat()}",
+            machine=entry.get("machine_hint"),
+            project="claim-onboard",
+        )
+        try:
+            agent = await _create_agent_core(_FakeUser(), create_body)
+        except HTTPException as e:
+            if e.status_code == 409:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Помощник с id «{entry['agent_id']}» уже существует. Сгенерируйте новый claim-token.",
+                )
+            raise
+        api_key = agent["api_key"]
     platform = entry.get("platform", "claude_code")
 
     # v3: bind machine_fingerprint к новому агенту (для idempotent re-onboard)

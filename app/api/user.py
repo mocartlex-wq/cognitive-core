@@ -145,12 +145,16 @@ async def my_agents(request: Request):
                    last_mcp_connect_at, last_mcp_disconnect_at,
                    first_mcp_connect_at,
                    machine_fingerprint, machine_label,
+                   status, created_at,
                    -- Presence: MCP-online если connect в последние 60 сек
                    (last_mcp_connect_at IS NOT NULL
-                    AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online
+                    AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online,
+                   -- PR #35: pending_claim TTL — секунд до auto-delete
+                   GREATEST(0, EXTRACT(EPOCH FROM (created_at + INTERVAL '10 minutes' - NOW()))::int) AS pending_ttl_sec
               FROM agent_states
              WHERE owner_user_id = $1::uuid
-             ORDER BY machine_fingerprint NULLS LAST,
+             ORDER BY (status = 'pending_claim') DESC,  -- pending наверху
+                      machine_fingerprint NULLS LAST,
                       mcp_online DESC,
                       last_heartbeat_at DESC NULLS LAST
             """,
@@ -160,7 +164,7 @@ async def my_agents(request: Request):
     for r in rows:
         d = dict(r)
         for k in ("last_heartbeat_at", "updated_at", "last_mcp_connect_at",
-                  "last_mcp_disconnect_at", "first_mcp_connect_at"):
+                  "last_mcp_disconnect_at", "first_mcp_connect_at", "created_at"):
             v = d.get(k)
             if isinstance(v, datetime):
                 d[k] = v.isoformat()

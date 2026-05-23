@@ -115,8 +115,35 @@ async def cleanup_expired_media() -> dict:
     return stats
 
 
+async def cleanup_stale_pending_agents() -> int:
+    """PR #35: удалить agent_states pending_claim старше 10 мин (CLAIM_TTL).
+
+    Если owner нажал «Передать ключ» но никто не сделал claim — pending row
+    висит. Через 10 мин (CLAIM_TTL_SECONDS из connect.py) удаляем.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM agent_states "
+            "WHERE status = 'pending_claim' "
+            "  AND created_at < NOW() - INTERVAL '10 minutes'"
+        )
+    # Result format: "DELETE N"
+    try:
+        n = int(result.split()[-1])
+    except Exception:
+        n = 0
+    if n > 0:
+        logger.info("cleanup_stale_pending_agents: deleted %d expired pending agents", n)
+    return n
+
+
 async def cleanup_loop() -> None:
     """Бесконечный loop — каждые SCAN_INTERVAL_SECONDS вызывает cleanup.
+
+    Делает 2 задачи:
+    1. media_cleanup — удаляет файлы + L1 строки старше 15 мин
+    2. pending_agents — удаляет неclaim'нутые agent_states старше 10 мин
 
     Запускается из app/main.py lifespan startup. Cancel при shutdown.
     """
@@ -134,8 +161,13 @@ async def cleanup_loop() -> None:
                 if stats["errors"]:
                     logger.warning("media_cleanup errors: %s", stats["errors"][:5])
         except asyncio.CancelledError:
-            logger.info("media_cleanup loop cancelled")
+            logger.info("cleanup loop cancelled")
             raise
         except Exception as e:
             logger.exception("media_cleanup tick error: %s", e)
+        # Cleanup pending agents (PR #35) — отдельно чтобы не мешать media
+        try:
+            await cleanup_stale_pending_agents()
+        except Exception as e:
+            logger.exception("cleanup_stale_pending_agents tick error: %s", e)
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)
