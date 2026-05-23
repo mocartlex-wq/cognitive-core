@@ -1032,14 +1032,13 @@
     const kindIcon = { video: '🎬', image: '🖼️', audio: '🎵' };
     const fmtSize = (b) => b < 1024*1024 ? (b/1024).toFixed(0)+' KB' : (b/(1024*1024)).toFixed(1)+' MB';
     const ttl = (j.ttl_minutes || 15) * 60 * 1000;
-    // Owner-decision: «хранение 15 мин, для анализа разного типа и повторного
-    // обращения». Список вместо grid, плюс chip «доступен/удалён».
+    // Owner-decision v2 (2026-05-23): «полное удаление» — файлы И метаданные
+    // через 15 мин. Видимый в списке = доступен (запись существует — значит
+    // файл ещё не удалён). Chip «archived» больше не нужен.
     const list = j.items.map(m => {
       const ageMs = Date.now() - new Date(m.timestamp).getTime();
-      const cleaned = m.cleaned_up || ageMs > ttl;
-      const chip = cleaned
-        ? '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim);font-size:10.5px" title="Файл удалён из storage (TTL 15 мин), осталась только метаинформация">archived</span>'
-        : `<span class="chip online" style="font-size:10.5px" title="Файл в storage, доступен для анализа (${Math.round((ttl - ageMs)/60000)} мин до удаления)">доступен</span>`;
+      const minLeft = Math.max(0, Math.round((ttl - ageMs)/60000));
+      const chip = `<span class="chip online" style="font-size:10.5px" title="Файл в storage. Удалится через ${minLeft} мин">${minLeft} мин</span>`;
       return `
         <div class="item" style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:12px;align-items:center;padding:10px 14px">
           <span style="font-size:18px">${kindIcon[m.kind] || '📄'}</span>
