@@ -1,19 +1,24 @@
-"""Background task: удаляет media-файлы из MinIO старше TTL.
+"""Background task: ПОЛНОЕ удаление media — файлы + L1 строка.
 
-Owner-decision (2026-05-22): «хранение 15 мин, для анализа разного типа
-и повторного обращения, вдруг обсуждение по видео будет».
+Owner-decision (2026-05-23 v2 — изменилось!): «B, полное» — и MinIO
+объекты, и L1 строка удаляются через 15 минут после upload. Это
+отличается от v1 (2026-05-22) где L1 метаданные оставались навсегда
+для cognitive_recall'а.
+
+Trade-off (osознанный owner-ом):
+  + Освобождается место в БД (per-tenant quota не растёт)
+  + UI «Мои медиа» сама собой чистится — без archive-chip'а
+  − cognitive_recall(domain='media_analysis') не вернёт старые upload'ы
+  − Транскрипт + описание кадров теряется через 15 мин
 
 Логика:
-- TTL = 15 минут от momentum upload (timestamp в L1 raw_events)
+- TTL = 15 минут от момента upload (timestamp в L1 raw_events)
 - Каждые 5 минут scan: ищем media-events где (now - timestamp) > 15 мин
-  AND raw_payload.cleaned_up != True
 - Удаляем из MinIO bucket media-frames всё под префиксом
   {kind}/{media_id}/ (video — оригинал + frames, image — оригинал,
   audio — оригинал)
-- Marker raw_payload.cleaned_up = True в payload — чтобы не повторять
-
-L1 метаданные (filename, size, duration, transcript) остаются НАВСЕГДА.
-UI показывает «обработан, файл удалён» для cleaned events.
+- DELETE FROM l1_raw_events WHERE id = $1 — полное удаление строки
+- Старые cleaned_up=true строки (из v1) тоже удаляются — they're orphans.
 """
 from __future__ import annotations
 
@@ -35,7 +40,7 @@ SCAN_INTERVAL_SECONDS = 300  # every 5 min
 async def _cleanup_one_media(media_id: str, kind: str) -> tuple[int, list[str]]:
     """Удалить все объекты под префиксом {kind}/{media_id}/ из MinIO.
 
-    Returns (count, errors).
+    Returns (count, errors). count=0 OK если files уже удалены ранее (v1 cleanup).
     """
     s3 = get_s3()
     prefix = f"{kind}/{media_id}/"
@@ -55,24 +60,26 @@ async def _cleanup_one_media(media_id: str, kind: str) -> tuple[int, list[str]]:
 
 
 async def cleanup_expired_media() -> dict:
-    """Одна итерация: найти + удалить expired media.
+    """Одна итерация: найти + удалить expired media (файлы + L1 row).
 
-    Returns stats {scanned, cleaned, files_removed, errors}.
+    v2 (2026-05-23): hard-delete L1 row после удаления MinIO objects.
+    Старые cleaned_up=true строки (из v1) тоже удаляются — orphans.
+
+    Returns stats {scanned, cleaned, files_removed, rows_deleted, errors}.
     """
-    stats = {"scanned": 0, "cleaned": 0, "files_removed": 0, "errors": []}
+    stats = {"scanned": 0, "cleaned": 0, "files_removed": 0, "rows_deleted": 0, "errors": []}
     pool = await get_pool()
     cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=TTL_MINUTES)
 
     async with pool.acquire() as conn:
-        # Find media events older than TTL that aren't yet cleaned
+        # v2: scan ВСЕ media events старше TTL, без cleaned_up фильтра —
+        # старые v1 cleaned-up rows тоже подлежат удалению.
         rows = await conn.fetch(
             """
             SELECT id::text AS id, raw_payload
               FROM l1_raw_events
              WHERE domain = 'media_analysis'
                AND timestamp < $1
-               AND (raw_payload->>'cleaned_up' IS NULL
-                    OR raw_payload->>'cleaned_up' != 'true')
              ORDER BY timestamp ASC
              LIMIT 100
             """,
@@ -87,22 +94,20 @@ async def cleanup_expired_media() -> dict:
                 payload = json.loads(payload)
             media_id = payload.get("media_id")
             kind = payload.get("kind")
-            if not media_id or not kind:
-                continue
 
-            count, errors = await _cleanup_one_media(media_id, kind)
-            stats["files_removed"] += count
-            stats["errors"].extend(errors)
+            # Try cleanup files (no-op if already deleted by v1)
+            if media_id and kind:
+                count, errors = await _cleanup_one_media(media_id, kind)
+                stats["files_removed"] += count
+                stats["errors"].extend(errors)
 
-            # Mark cleaned in raw_payload (idempotent — won't be re-scanned)
-            payload["cleaned_up"] = True
-            payload["cleaned_at"] = datetime.now(tz=timezone.utc).isoformat()
+            # v2: HARD-DELETE L1 row — без него ничего не значит
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE l1_raw_events SET raw_payload = $1::jsonb WHERE id = $2::uuid",
-                    json.dumps(payload, ensure_ascii=False),
+                    "DELETE FROM l1_raw_events WHERE id = $1::uuid",
                     row["id"],
                 )
+            stats["rows_deleted"] += 1
             stats["cleaned"] += 1
         except Exception as e:
             stats["errors"].append(f"{row['id']}: {type(e).__name__}: {e}")
@@ -115,14 +120,16 @@ async def cleanup_loop() -> None:
 
     Запускается из app/main.py lifespan startup. Cancel при shutdown.
     """
-    logger.info("media_cleanup loop started: TTL=%dmin scan=%ds", TTL_MINUTES, SCAN_INTERVAL_SECONDS)
+    logger.info("media_cleanup v2 loop started (HARD-DELETE): TTL=%dmin scan=%ds",
+                TTL_MINUTES, SCAN_INTERVAL_SECONDS)
     while True:
         try:
             stats = await cleanup_expired_media()
             if stats["cleaned"] > 0 or stats["errors"]:
                 logger.info(
-                    "media_cleanup: scanned=%d cleaned=%d files_removed=%d errors=%d",
-                    stats["scanned"], stats["cleaned"], stats["files_removed"], len(stats["errors"]),
+                    "media_cleanup: scanned=%d cleaned=%d files=%d rows_deleted=%d errors=%d",
+                    stats["scanned"], stats["cleaned"], stats["files_removed"],
+                    stats["rows_deleted"], len(stats["errors"]),
                 )
                 if stats["errors"]:
                     logger.warning("media_cleanup errors: %s", stats["errors"][:5])
