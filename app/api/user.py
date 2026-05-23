@@ -371,9 +371,9 @@ async def get_usage(request: Request):
                    max_recall_per_min, events_today, storage_mb_now,
                    agents_count, suspended
               FROM owner_quotas
-             WHERE owner_user_id = $1
+             WHERE owner_user_id = $1::uuid
             """,
-            user.id,
+            user.user_id,
         )
     if not row:
         # Триггер ensure_owner_quota должен был создать строку при регистрации,
