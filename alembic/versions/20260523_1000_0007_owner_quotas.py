@@ -29,7 +29,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE IF NOT EXISTS owner_quotas (
             owner_user_id UUID PRIMARY KEY
-                REFERENCES accounts(id) ON DELETE CASCADE,
+                REFERENCES accounts(user_id) ON DELETE CASCADE,
             -- Лимиты
             max_events_per_day INT NOT NULL DEFAULT 10000,
             max_storage_mb     INT NOT NULL DEFAULT 1024,
@@ -55,10 +55,10 @@ def upgrade() -> None:
         ON owner_quotas (tier, suspended)
     """)
 
-    # Backfill: каждому существующему accounts.id создаём free-tier строку
+    # Backfill: каждому существующему accounts.user_id создаём free-tier строку
     op.execute("""
         INSERT INTO owner_quotas (owner_user_id, tier)
-        SELECT id, 'free' FROM accounts
+        SELECT user_id, 'free' FROM accounts
         ON CONFLICT (owner_user_id) DO NOTHING
     """)
 
@@ -69,7 +69,7 @@ def upgrade() -> None:
         RETURNS TRIGGER AS $$
         BEGIN
             INSERT INTO owner_quotas (owner_user_id, tier)
-            VALUES (NEW.id, 'free')
+            VALUES (NEW.user_id, 'free')
             ON CONFLICT (owner_user_id) DO NOTHING;
             RETURN NEW;
         END;
