@@ -244,10 +244,10 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
             )
             await conn.execute(
                 """
-                INSERT INTO agent_keys (api_key, agent_id, description)
-                VALUES ($1, $2, $3)
+                INSERT INTO agent_keys (api_key, agent_id, description, owner_user_id)
+                VALUES ($1, $2, $3, $4::uuid)
                 """,
-                api_key, body.agent_id, body.description,
+                api_key, body.agent_id, body.description, user.user_id,
             )
 
     # v3+: lifecycle event — owner видит «agent_id зарегистрирован» в списке
