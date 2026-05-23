@@ -70,7 +70,7 @@ def _generate_claim_token() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 class GenerateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    agent_id: str = Field(..., min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
+    agent_id: str = Field(..., min_length=3, max_length=64, pattern=r"^[\w.\-]+$")
     platform: str = Field(..., description="claude_code|claude_pro_connector|chatgpt_custom_gpt|cursor|windows_cli|linux_mac_cli|mobile_qr")
     machine_hint: str | None = Field(None, max_length=128, description="например 'MacBook Pro M2'")
     description: str | None = Field(None, max_length=300)
@@ -553,7 +553,7 @@ class IssueClaimBody(BaseModel):
     # min_length=3 — иначе claim фейлится в _create_agent_core (CreateAgentBody
     # требует min_length=3) после того как Redis GETDEL уже consume'нул токен.
     # Owner мог случайно ввести «8» — теперь rejected на issue-этапе.
-    agent_id: str | None = Field(None, min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
+    agent_id: str | None = Field(None, min_length=3, max_length=64, pattern=r"^[\w.\-]+$")
     machine_hint: str | None = Field(None, max_length=128)
     platform: str = Field("claude_code", description="claude_code|cursor — определяет mcp config target")
     # v3 multi-agent registry: машина-fingerprint, owner может передать

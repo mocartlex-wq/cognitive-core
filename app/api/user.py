@@ -191,7 +191,7 @@ async def my_agents(request: Request):
 
 class CreateAgentBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    agent_id: str = Field(..., min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
+    agent_id: str = Field(..., min_length=3, max_length=64, pattern=r"^[\w.\-]+$")
     description: str | None = Field(None, max_length=300)
     project: str | None = Field(None, max_length=64)
     machine: str | None = Field(None, max_length=128)

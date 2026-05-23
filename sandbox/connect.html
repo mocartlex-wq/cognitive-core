@@ -364,9 +364,9 @@
     <p class="sub">Это «agent_id» — уникальное имя в системе. Можно оставить дефолтное.</p>
     <div class="field">
       <label>agent_id</label>
-      <input type="text" id="agentIdInput" placeholder="claude-code-laptop"
-             pattern="[a-zA-Z0-9._\-]+" minlength="3" maxlength="64">
-      <div class="hint">3-64 символа, латиница + цифры + точки/дефисы/подчёркивания</div>
+      <input type="text" id="agentIdInput" placeholder="claude-laptop / помощник-1"
+             minlength="3" maxlength="64">
+      <div class="hint">3-64 символа: буквы (любые), цифры, дефис, точка, подчёркивание · без пробелов</div>
       <div class="err" id="agentIdErr" style="display:none"></div>
     </div>
     <div class="field">
@@ -627,8 +627,8 @@ $('agentIdInput').addEventListener('input', async () => {
     $('step2Next').disabled = true;
     return;
   }
-  if (!/^[a-zA-Z0-9._\-]+$/.test(v)) {
-    errEl.textContent = 'Только латиница, цифры, точка, дефис, подчёркивание';
+  if (!/^[\p{L}\p{N}.\-_]+$/u.test(v)) {
+    errEl.textContent = 'Буквы (любые), цифры, точка, дефис, подчёркивание · без пробелов';
     errEl.style.display = '';
     $('agentIdInput').classList.add('error');
     $('step2Next').disabled = true;

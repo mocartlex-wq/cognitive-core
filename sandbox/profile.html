@@ -332,9 +332,9 @@
         Идентификатор помощника<span class="opt">необязательно</span>
       </label>
       <input id="claimTokenAgentId" name="agent_id"
-             pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
-             placeholder="claude-laptop / gpt-mobile / пусто = авто">
-      <span class="field-hint">Латиница, цифры, <code>-._</code> · технический ID для URL и API.</span>
+             minlength="3" maxlength="64"
+             placeholder="claude-laptop / помощник-1 / gpt-mobile / пусто = авто">
+      <span class="field-hint">Любые буквы (латиница, кириллица), цифры, <code>-._</code> · без пробелов.</span>
     </div>
 
     <div class="field">
@@ -375,9 +375,9 @@
   <form id="newAgentForm">
     <div class="field">
       <label for="newAgentId">Идентификатор</label>
-      <input id="newAgentId" name="agent_id" required pattern="[a-zA-Z0-9._\-]{3,64}" minlength="3" maxlength="64"
-             placeholder="claude-laptop / cursor-work / gpt-bot">
-      <span class="field-hint">Латиница, цифры, <code>-._</code> · 3-64 символа · технический ID для URL и API.</span>
+      <input id="newAgentId" name="agent_id" required minlength="3" maxlength="64"
+             placeholder="claude-laptop / помощник-1 / cursor-work">
+      <span class="field-hint">Любые буквы (латиница, кириллица), цифры, <code>-._</code> · 3-64 символа · без пробелов.</span>
     </div>
 
     <div class="field">
@@ -832,8 +832,8 @@
       if (!v && !e.target.required) { e.target.setCustomValidity(''); return; }
       if (v.length < 3) {
         e.target.setCustomValidity('Минимум 3 символа.');
-      } else if (!/^[a-zA-Z0-9._\-]+$/.test(v)) {
-        e.target.setCustomValidity('Только латиница (a-z, A-Z), цифры (0-9), дефис, точка и нижнее подчёркивание. Кириллица и пробелы нельзя — это технический ID.');
+      } else if (!/^[\p{L}\p{N}.\-_]+$/u.test(v)) {
+        e.target.setCustomValidity('Любые буквы (латиница / кириллица), цифры, дефис, точка, нижнее подчёркивание. Пробелы и спецсимволы нельзя.');
       } else {
         e.target.setCustomValidity('');
       }
