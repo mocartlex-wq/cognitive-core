@@ -1,10 +1,12 @@
 # Gitea — self-hosted git для cognitive-core (Phase 5A)
 
+> **Primary domain (с 2026-05-23): `git.me-ai.ru`** (ASCII). Legacy aliases: `git.ии-память.рф` и `git.xn----8sbwawqx4fza.xn--p1ai` (punycode). Все три hostname идут на один и тот же Gitea-инстанс через `server_name` в nginx.
+
 ## Что это и зачем
 
-`git.ии-память.рф` — встроенный git-сервер на mcp-инстансе. Каждый владелец аккаунта (включая платных tenants) получает свой organization для хранения кода+configs+LFS на сервере, не на ноутбуке. Это:
+`git.me-ai.ru` — встроенный git-сервер на mcp-инстансе. Каждый владелец аккаунта (включая платных tenants) получает свой organization для хранения кода+configs+LFS на сервере, не на ноутбуке. Это:
 
-- **Backup** — ноутбук сломался / другой ПК → `git clone https://git.ии-память.рф/<твой-org>/<repo>`
+- **Backup** — ноутбук сломался / другой ПК → `git clone https://git.me-ai.ru/<твой-org>/<repo>`
 - **Изоляция** — private repos by default, другой tenant физически не видит
 - **Single sign-on (будущее)** — пока отдельный Gitea-пароль, потом SSO с mcp-аккаунтом
 
@@ -13,20 +15,30 @@
 Шаги выполнить **в порядке**. Если что-то падает — STOP и пингуй разработчика.
 
 ### 1. DNS A-record (вне сервера)
-Зайти в DNS-панель регистратора `ии-память.рф` (Yandex / другой):
-- Добавить A-record: `git.ии-память.рф` → IP сервера (текущий: `94.181.169.239`)
+Зайти в DNS-панель регистратора:
+- `me-ai.ru` (primary, ASCII): добавить A-record `git.me-ai.ru` → IP сервера (текущий: `94.181.169.239`)
+- `ии-память.рф` (legacy): A-record `git.ии-память.рф` → тот же IP (можно оставить уже настроенный)
 - TTL: 300 (5 мин) на старт, потом увеличить до 3600
-- **Проверка**: `dig +short git.xn----8sbwawqx4fza.xn--p1ai` через ~5 мин должно вернуть IP
+- **Проверка**: `dig +short git.me-ai.ru` через ~5 мин должно вернуть IP
 
 ### 2. TLS cert (на сервере)
 ```bash
 ssh salex@server
+# Primary cert — для ASCII-домена me-ai.ru
+sudo certbot certonly --webroot \
+    -w /var/www/certbot \
+    -d git.me-ai.ru \
+    --email admin@ии-память.рф \
+    --agree-tos --no-eff-email
+# Должен сказать "Successfully received certificate"
+# Cert lives in /etc/letsencrypt/live/git.me-ai.ru/
+
+# Опц.: legacy punycode cert (для backward-compat уже работающих клиентов)
 sudo certbot certonly --webroot \
     -w /var/www/certbot \
     -d git.xn----8sbwawqx4fza.xn--p1ai \
     --email admin@ии-память.рф \
     --agree-tos --no-eff-email
-# Должен сказать "Successfully received certificate"
 # Cert lives in /etc/letsencrypt/live/git.xn----8sbwawqx4fza.xn--p1ai/
 ```
 
@@ -75,12 +87,12 @@ sudo docker restart cognitive_nginx
 ### 7. Smoke-test
 ```bash
 curl -sS -o /dev/null -w "git landing: %{http_code}\n" \
-    https://git.xn----8sbwawqx4fza.xn--p1ai
+    https://git.me-ai.ru
 # Expected: HTTP 200 — Gitea login page
 ```
 
 ### 8. Initial admin setup (через UI)
-1. Открыть в браузере `https://git.ии-память.рф`
+1. Открыть в браузере `https://git.me-ai.ru`
 2. Нажать «Register» (первая регистрация = admin)
 3. Username: `admin`, email: `admin@ии-память.рф`, пароль (запомнить!)
 4. После создания — admin-flag присваивается автоматически
@@ -98,7 +110,7 @@ curl -sS -o /dev/null -w "git landing: %{http_code}\n" \
 Локально на ноуте:
 ```bash
 cd ~/cogcore-work/cogcore-repo
-git remote add gitea https://git.ии-память.рф/mocartlex/cogcore-repo.git
+git remote add gitea https://git.me-ai.ru/mocartlex/cogcore-repo.git
 git push gitea main
 # Запросит логин — твой Gitea username + пароль (или token)
 ```
@@ -111,7 +123,7 @@ git push gitea main
 
 Когда клиент регистрируется через `/ui/pricing` → OTP → `/ui/welcome`:
 1. Backend hook автоматически создаёт `gitea-org/<email-local-part>` через Gitea Admin API
-2. Клиент видит в welcome ссылку «Открыть Git» → `https://git.ии-память.рф/<его-org>`
+2. Клиент видит в welcome ссылку «Открыть Git» → `https://git.me-ai.ru/<его-org>`
 3. Первый visit → клиент задаёт пароль для Gitea (отдельный от mcp-аккаунта пока)
 4. Клиент `git remote add gitea ...` локально, push'ит свой проект
 
@@ -127,7 +139,7 @@ git push gitea main
 
 ## Troubleshooting
 
-- **502 Bad Gateway** на git.ии-память.рф: проверить `docker ps | grep gitea` — healthy? Если нет — `docker logs cognitive_gitea --tail 50`.
-- **cert error**: certbot выдал? `ls /etc/letsencrypt/live/git.xn----8sbwawqx4fza.xn--p1ai/`. Если пусто — повторить шаг 2.
+- **502 Bad Gateway** на git.me-ai.ru: проверить `docker ps | grep gitea` — healthy? Если нет — `docker logs cognitive_gitea --tail 50`.
+- **cert error**: certbot выдал? `ls /etc/letsencrypt/live/git.me-ai.ru/`. Если пусто — повторить шаг 2.
 - **DB connection**: gitea_db создана? `docker exec cognitive_postgres psql -U cognitive -l | grep gitea`. Пароль в env совпадает с реальным?
-- **«SSH connection refused»** при `git clone git@git.ии-память.рф:...`: убедиться что порт 22002 открыт в UFW: `sudo ufw allow 22002/tcp comment "Gitea SSH"`.
+- **«SSH connection refused»** при `git clone git@git.me-ai.ru:...`: убедиться что порт 22002 открыт в UFW: `sudo ufw allow 22002/tcp comment "Gitea SSH"`.

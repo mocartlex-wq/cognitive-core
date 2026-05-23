@@ -14,7 +14,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name git.xn----8sbwawqx4fza.xn--p1ai git.ии-память.рф;
+    server_name git.me-ai.ru git.xn----8sbwawqx4fza.xn--p1ai git.ии-память.рф;
 
     # Let's Encrypt webroot — для cert renewal через certbot
     location /.well-known/acme-challenge/ {
@@ -30,7 +30,8 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name git.xn----8sbwawqx4fza.xn--p1ai git.ии-память.рф;
+    # Primary ASCII — git.me-ai.ru. Punycode + IDN — legacy aliases.
+    server_name git.me-ai.ru git.xn----8sbwawqx4fza.xn--p1ai git.ии-память.рф;
 
     # Cert от Let's Encrypt (общий с cognitive-core volume letsencrypt:/etc/letsencrypt)
     ssl_certificate /etc/letsencrypt/live/git.xn----8sbwawqx4fza.xn--p1ai/fullchain.pem;

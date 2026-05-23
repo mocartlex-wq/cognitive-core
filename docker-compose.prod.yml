@@ -204,8 +204,9 @@ services:
   # production — мигрировать на bind /mnt/cold-storage/gitea/ если репо
   # начнут расти выше 50 GB.
   #
-  # Порт 3000 не торчит наружу — только через nginx git.ии-память.рф.
-  # SSH-доступ к repos (git@git.ии-память.рф:22002) — экспозим 22002 на
+  # Порт 3000 не торчит наружу — только через nginx git.me-ai.ru
+  # (legacy alias: git.ии-память.рф).
+  # SSH-доступ к repos (git@git.me-ai.ru:22002) — экспозим 22002 на
   # хосте (22 занят системным sshd, не конфликт).
   gitea:
     image: gitea/gitea:latest-rootless
@@ -221,9 +222,9 @@ services:
       GITEA__database__NAME: gitea_db
       GITEA__database__USER: cognitive
       GITEA__database__PASSWD: ${POSTGRES_PASSWORD:-change_me}
-      GITEA__server__DOMAIN: git.xn----8sbwawqx4fza.xn--p1ai
-      GITEA__server__SSH_DOMAIN: git.xn----8sbwawqx4fza.xn--p1ai
-      GITEA__server__ROOT_URL: https://git.xn----8sbwawqx4fza.xn--p1ai/
+      GITEA__server__DOMAIN: git.me-ai.ru
+      GITEA__server__SSH_DOMAIN: git.me-ai.ru
+      GITEA__server__ROOT_URL: https://git.me-ai.ru/
       GITEA__server__SSH_PORT: "22002"
       GITEA__server__SSH_LISTEN_PORT: "2222"  # internal в контейнере
       GITEA__server__START_SSH_SERVER: "true"
@@ -233,7 +234,7 @@ services:
       GITEA__security__INSTALL_LOCK: "true"  # не показывать setup-wizard
       GITEA__security__SECRET_KEY: ${GITEA_SECRET_KEY:-change_me_to_random_64_chars}
       GITEA__security__INTERNAL_TOKEN: ${GITEA_INTERNAL_TOKEN:-change_me_to_random_token}
-      GITEA__webhook__ALLOWED_HOST_LIST: "*.xn----8sbwawqx4fza.xn--p1ai,private"
+      GITEA__webhook__ALLOWED_HOST_LIST: "*.me-ai.ru,*.xn----8sbwawqx4fza.xn--p1ai,private"
     expose:
       - "3000"
     ports:

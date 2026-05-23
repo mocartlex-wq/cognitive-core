@@ -73,7 +73,7 @@ S3_SECRET_KEY=<generated-40-chars>
 S3_REGION=us-east-1
 
 # Cognitive Core MCP (для inter-agent collaboration)
-COGNITIVE_CORE_URL=https://mcp.ии-память.рф
+COGNITIVE_CORE_URL=https://mcp.me-ai.ru
 COGNITIVE_CORE_API_KEY=<per-agent-key>
 
 # Server topology
@@ -133,7 +133,7 @@ ssh -i ~/.ssh/cogserver_deploy salex@192.168.0.118 \
 
 ```bash
 # одной командой, при старте агента:
-curl -X POST https://mcp.ии-память.рф/agents/register \
+curl -X POST https://mcp.me-ai.ru/agents/register \
   -H "X-API-Key: <per-agent-key>" \
   -H "Content-Type: application/json" \
   -d '{

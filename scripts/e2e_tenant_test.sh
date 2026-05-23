@@ -5,14 +5,14 @@
 # Запуск: bash scripts/e2e_tenant_test.sh
 #
 # Требования:
-#   - mcp.ии-память.рф доступен (или COGCORE_URL override)
+#   - mcp.me-ai.ru доступен (или COGCORE_URL override)
 #   - админский cookie для cleanup (или ручной cleanup в конце)
 #
 # Возвращает exit 0 если все 9 проверок прошли, exit 1 при первом failure.
 
 set -euo pipefail
 
-URL="${COGCORE_URL:-https://mcp.xn----8sbwawqx4fza.xn--p1ai}"
+URL="${COGCORE_URL:-https://mcp.me-ai.ru}"
 TIMESTAMP=$(date +%s)
 EMAIL_A="${TEST_EMAIL_A:-test-a-${TIMESTAMP}@example.com}"
 EMAIL_B="${TEST_EMAIL_B:-test-b-${TIMESTAMP}@example.com}"

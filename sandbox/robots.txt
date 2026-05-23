@@ -12,4 +12,4 @@ Disallow: /memory/
 Disallow: /mcp/
 Disallow: /operative/
 
-Sitemap: https://mcp.xn----8sbwawqx4fza.xn--p1ai/sitemap.xml
+Sitemap: https://mcp.me-ai.ru/sitemap.xml

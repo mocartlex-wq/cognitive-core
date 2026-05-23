@@ -7,7 +7,7 @@
 ## Шаги
 
 ### 1. Зарегистрируйтесь на cognitive-core
-https://mcp.ии-память.рф/ui/pricing → «Начать бесплатно».
+https://mcp.me-ai.ru/ui/pricing → «Начать бесплатно». (legacy alias: https://mcp.ии-память.рф)
 
 ### 2. Сгенерируйте api_key через мастер
 Профиль → «🪄 Передать помощнику»:
@@ -45,7 +45,7 @@ GPT должен вызвать cognitive_remember.
 ## OpenAPI спецификация (для справки)
 
 Полный OpenAPI 3.1 schema публично доступен:
-https://mcp.ии-память.рф/api/openapi/cognitive.yaml
+https://mcp.me-ai.ru/api/openapi/cognitive.yaml
 
 Этот же yaml вшит в артефакт мастера, но если что — берите оттуда.
 

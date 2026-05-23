@@ -109,7 +109,7 @@ async def create_user(email: str, full_name: str | None = None) -> dict:
                 "temp_password": None if user_existed else temp_password,
                 "org": org_name if org_created else None,
                 "reused": user_existed,
-                "url_login": f"{GITEA_URL.replace('http://cognitive_gitea:3000', 'https://git.xn----8sbwawqx4fza.xn--p1ai')}/user/login",
+                "url_login": f"{GITEA_URL.replace('http://cognitive_gitea:3000', 'https://git.me-ai.ru')}/user/login",
             }
     except Exception as e:
         logger.exception("gitea create_user %s exception: %s", username, e)

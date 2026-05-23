@@ -13,7 +13,7 @@ Endpoint:
 
 Использование:
     1. Юзер создаёт Custom GPT в ChatGPT Plus
-    2. Action → Import from URL → https://mcp.ии-память.рф/api/openapi/cognitive.yaml
+    2. Action → Import from URL → https://mcp.me-ai.ru/api/openapi/cognitive.yaml
     3. Authentication → API Key → header `X-API-Key` → ставит ключ агента
     4. ChatGPT теперь может вызывать cognitive_remember / recall / etc.
 """
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/openapi", tags=["openapi"])
 # ─────────────────────────────────────────────────────────────────────────
 # OpenAPI 3.1 template
 # ─────────────────────────────────────────────────────────────────────────
-def _build_openapi_spec(base_url: str = "https://mcp.xn----8sbwawqx4fza.xn--p1ai") -> dict:
+def _build_openapi_spec(base_url: str = "https://mcp.me-ai.ru") -> dict:
     """Собрать OpenAPI 3.1 спецификацию для Custom GPT Actions.
 
     Описывает 10 самых нужных endpoint-ов для агента:
@@ -42,7 +42,7 @@ def _build_openapi_spec(base_url: str = "https://mcp.xn----8sbwawqx4fza.xn--p1ai
       / room_join / image / video. Без admin / system / debug endpoint-ов.
 
     Args:
-        base_url: production base URL (default mcp.ии-память.рф в punycode).
+        base_url: production base URL (default mcp.me-ai.ru ASCII; legacy alias mcp.ии-память.рф/punycode).
 
     Returns:
         dict готовый к dump в JSON/yaml.
@@ -446,7 +446,7 @@ async def get_openapi_yaml():
     return PlainTextResponse(content=yaml_str, media_type="text/yaml; charset=utf-8")
 
 
-def build_custom_gpt_openapi(agent_id: str = "", base_url: str = "https://mcp.xn----8sbwawqx4fza.xn--p1ai") -> str:
+def build_custom_gpt_openapi(agent_id: str = "", base_url: str = "https://mcp.me-ai.ru") -> str:
     """Reusable из connect.py — генерит yaml для конкретного агента.
 
     agent_id сейчас не embed-ится в spec (auth через X-API-Key который

@@ -99,7 +99,8 @@ class Settings(BaseSettings):
     email_reply_to: str = "noreply@aimail.art"
 
     # Корневой URL приложения — используется при формировании magic-link
-    # и редиректа после входа. На сервере: https://mcp.xn----8sbwawqx4fza.xn--p1ai
+    # и редиректа после входа. На сервере: https://mcp.me-ai.ru
+    # (legacy alias https://mcp.xn----8sbwawqx4fza.xn--p1ai всё ещё работает)
     # или https://aimail.art когда DNS заработает.
     app_url: str = "https://aimail.art"
     magic_link_ttl_minutes: int = 15

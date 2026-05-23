@@ -209,7 +209,7 @@ def listen_events():
 
 ```python
 # тот же агент дополнительно пишет в L1:
-requests.post("https://mcp.ии-память.рф/events", headers=auth, json={
+requests.post("https://mcp.me-ai.ru/events", headers=auth, json={
     "domain": "cognitive-core/architecture/decisions",
     "event_type": "decision",
     "payload": {

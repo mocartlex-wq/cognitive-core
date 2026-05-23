@@ -4,7 +4,7 @@
 # Запускать одной командой (от wizard'а /ui/connect):
 #
 #   $env:COGNITIVE_API_KEY = 'your-key-from-wizard'
-#   iwr https://mcp.xn----8sbwawqx4fza.xn--p1ai/static/install-cogcore.ps1 | iex
+#   iwr https://mcp.me-ai.ru/static/install-cogcore.ps1 | iex
 #
 # Что делает:
 #   1. Создаёт ~/.cognitive-core/bin/ и ~/.config/cogcore/
@@ -20,7 +20,7 @@
 $ErrorActionPreference = 'Stop'
 
 # ─── Config ─────────────────────────────────────────────────────────────
-$BaseUrl = 'https://mcp.xn----8sbwawqx4fza.xn--p1ai'
+$BaseUrl = 'https://mcp.me-ai.ru'
 $BinDir = Join-Path $env:USERPROFILE '.cognitive-core\bin'
 $CfgDir = Join-Path $env:USERPROFILE '.config\cogcore'
 
