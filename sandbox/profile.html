@@ -298,8 +298,8 @@
     <h2>
       Мои помощники
       <span style="display:flex;gap:6px">
-        <button id="claimTokenBtn" class="btn secondary btn-sm" title="Сгенерировать одноразовый код — передайте его помощнику, он сам подключится">🪄 Передать помощнику</button>
-        <button id="newAgentBtn" class="btn secondary btn-sm">+ Добавить</button>
+        <button id="claimTokenBtn" class="btn secondary btn-sm" title="ОФФЕР: одноразовый код для передачи в новую Claude Code/Cursor сессию. Помощник появится в списке ПОСЛЕ того как другая сессия выполнит claim по коду.">🪄 Передать помощнику</button>
+        <button id="newAgentBtn" class="btn secondary btn-sm" title="СОЗДАТЬ СРАЗУ: новая запись в БД с api_key. Помощник появится в списке немедленно. Используй если знаешь куда вставить api_key вручную.">+ Добавить</button>
       </span>
     </h2>
     <div id="agentsBlock" class="empty">Загружаем…</div>
@@ -325,6 +325,7 @@
   <h3>Передать ключ помощнику</h3>
   <p class="dlg-sub">
     Одноразовый код для чата с Claude Code / Cursor — помощник сам подключится и попросит вас перезапустить.
+    <br><span style="color:#d29922">⚠ Помощник появится в списке <b>после</b> того как другая сессия примет код. Сейчас просто создаём оффер.</span>
   </p>
   <form id="claimTokenForm">
     <div class="field">
