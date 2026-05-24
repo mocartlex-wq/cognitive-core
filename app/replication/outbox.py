@@ -149,7 +149,11 @@ class OutboxPublisher:
         while not self._stop.is_set():
             try:
                 if not await self._ensure_nats():
-                    await asyncio.wait_for(self._stop.wait(), timeout=min(backoff, 30))
+                    # Wait for stop event OR backoff timeout; both are normal exits.
+                    try:
+                        await asyncio.wait_for(self._stop.wait(), timeout=min(backoff, 30))
+                    except asyncio.TimeoutError:
+                        pass
                     backoff = min(backoff * 2, 30)
                     continue
                 backoff = 1
