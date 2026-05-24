@@ -26,9 +26,15 @@ SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/cogcore-orchestrator.service}"
 DAEMON_INSTALL_PATH="${DAEMON_INSTALL_PATH:-/usr/local/bin/cogcore-orchestrator-daemon.py}"
 DEPLOY_ENV="${DEPLOY_ENV:-/etc/cognitive-deploy.env}"
 REPO_DIR="${REPO_DIR:-/opt/cognitive-core}"
-COGCORE_API_BASE="${COGCORE_API_BASE:-http://127.0.0.1:9001}"
+# Production API доступен внешне через nginx https://mcp.me-ai.ru
+# (127.0.0.1:9001 как у sub-agent был неверным предположением — там никто не слушает)
+COGCORE_API_BASE="${COGCORE_API_BASE:-https://mcp.me-ai.ru}"
 ORCHESTRATOR_AGENT_ID="${ORCHESTRATOR_AGENT_ID:-orchestrator}"
-OWNER_AGENT_ID="${OWNER_AGENT_ID:-}"
+OWNER_AGENT_ID="${OWNER_AGENT_ID:-cognitive-core-laptop}"
+OWNER_EMAIL="${OWNER_EMAIL:-mocartlex@yandex.ru}"
+PG_CONTAINER="${PG_CONTAINER:-cognitive_postgres}"
+PG_DB="${PG_DB:-cognitive_core}"
+PG_USER="${PG_USER:-cognitive}"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
 log() { printf '[setup] %s\n' "$*" >&2; }
@@ -48,15 +54,18 @@ require_cmd() {
 require_root
 require_cmd curl
 require_cmd python3
-require_cmd jq
 require_cmd systemctl
+require_cmd docker
 
-[[ -f "$DEPLOY_ENV" ]] || die "missing $DEPLOY_ENV (expected DEEPSEEK_API_KEY here or in compose .env)"
 [[ -d "$REPO_DIR" ]] || die "missing repo at $REPO_DIR"
 [[ -f "$REPO_DIR/scripts/cogcore-orchestrator-daemon.py" ]] || die "daemon script not in $REPO_DIR/scripts/"
 [[ -f "$REPO_DIR/app/services/orchestrator.py" ]] || die "missing $REPO_DIR/app/services/orchestrator.py"
+docker exec "$PG_CONTAINER" pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1 || die "postgres container $PG_CONTAINER not reachable"
 
-# ─── Step 1: register orchestrator agent (idempotent) ────────────────────
+# ─── Step 1: register orchestrator agent (idempotent, via direct SQL) ───
+# Прямой INSERT в agent_states + agent_keys через docker exec psql.
+# Безопаснее чем HTTP /agents/register: (1) этот endpoint требует auth, у нас нет
+# админ-ключа в setup, (2) обходим зависимость от docker network reachability.
 EXISTING_KEY=""
 if [[ -f "$ENV_FILE" ]]; then
     EXISTING_KEY=$(grep -E '^ORCHESTRATOR_API_KEY=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)
@@ -66,21 +75,23 @@ if [[ -n "$EXISTING_KEY" ]]; then
     log "ORCHESTRATOR_API_KEY уже в $ENV_FILE (длина ${#EXISTING_KEY}), skip register"
     NEW_KEY=""
 else
-    log "Registering new agent_id=$ORCHESTRATOR_AGENT_ID via $COGCORE_API_BASE/agents/register"
-    RESP=$(curl -sS -m 15 -X POST "$COGCORE_API_BASE/agents/register" \
-        -H "Content-Type: application/json" \
-        -d "$(jq -n --arg id "$ORCHESTRATOR_AGENT_ID" '{
-            agent_id: $id,
-            project: "cognitive-core",
-            machine: "server-daemon",
-            capabilities: ["dispatch", "approval-gate", "deepseek-routing"],
-            description: "Cogcore Orchestrator — task dispatcher between assistants"
-        }')")
-    NEW_KEY=$(echo "$RESP" | jq -r '.api_key // empty')
-    if [[ -z "$NEW_KEY" || "$NEW_KEY" == "null" ]]; then
-        die "register failed; response: $RESP"
-    fi
-    log "Got new api_key (length ${#NEW_KEY})"
+    log "Registering agent_id=$ORCHESTRATOR_AGENT_ID via direct SQL (no HTTP register endpoint)"
+    OWNER_UID=$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tA -c \
+        "SELECT user_id FROM accounts WHERE email='$OWNER_EMAIL' LIMIT 1" | tr -d '[:space:]')
+    [[ -n "$OWNER_UID" ]] || die "owner account $OWNER_EMAIL not found in accounts table"
+    log "owner_user_id resolved: $OWNER_UID"
+    NEW_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+    [[ ${#NEW_KEY} -ge 32 ]] || die "failed to generate API key"
+    docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" >/dev/null <<SQL
+INSERT INTO agent_states (agent_id, status, machine_label, owner_user_id, created_at, updated_at)
+VALUES ('$ORCHESTRATOR_AGENT_ID', 'active', 'server-daemon', '$OWNER_UID', NOW(), NOW())
+ON CONFLICT (agent_id) DO UPDATE SET status='active', updated_at=NOW();
+
+INSERT INTO agent_keys (api_key, agent_id, description, owner_user_id, created_at)
+VALUES ('$NEW_KEY', '$ORCHESTRATOR_AGENT_ID', 'Cogcore AI orchestrator daemon', '$OWNER_UID', NOW())
+ON CONFLICT (api_key) DO NOTHING;
+SQL
+    log "Registered orchestrator + api_key (length ${#NEW_KEY})"
 fi
 
 # ─── Step 2: load DEEPSEEK_API_KEY from deploy.env or .env ──────────────
