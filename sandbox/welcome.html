@@ -107,7 +107,7 @@
 <main class="page">
   <section class="welcome-hero">
     <h1>🎉 Добро пожаловать!</h1>
-    <p>3 шага и AI-помощник начнёт помнить вас между сессиями.</p>
+    <p>4 шага и AI-помощник начнёт помнить вас между сессиями и общаться с другими.</p>
   </section>
 
   <!-- Шаг 1: Привязать AI-клиента -->
@@ -140,6 +140,16 @@
     </div>
   </div>
 
+  <!-- Шаг 4: Orchestrator -->
+  <div class="step-card" id="step4">
+    <div class="step-num"><span>4</span></div>
+    <div class="step-body">
+      <h3>Попробуй <code>orchestrator</code> — диспетчер между помощниками</h3>
+      <p>В подключённом Claude Code напиши: <code>cognitive_send to:"orchestrator" text:"статус всех агентов"</code>. Через 5–10 секунд проверь inbox — диспетчер ответит. Можно также передавать задачи: <code>text:"передай rastr задачу подготовить отчёт"</code>. Деструктивные команды (удаление, отзыв ключей) требуют твоего подтверждения.</p>
+      <a href="https://mcp.me-ai.ru/static/docs/orchestrator.md" target="_blank" rel="noopener" class="step-cta" onclick="markDone('step4')">Документация →</a>
+    </div>
+  </div>
+
   <div class="footer-link">
     <a href="/ui/profile">Пропустить → перейти в профиль</a>
   </div>
@@ -162,7 +172,7 @@
     localStorage.setItem('welcome_' + id, '1');
     setTimeout(() => document.getElementById(id).classList.add('done'), 100);
   }
-  ['step1', 'step2', 'step3'].forEach(id => {
+  ['step1', 'step2', 'step3', 'step4'].forEach(id => {
     if (localStorage.getItem('welcome_' + id)) {
       document.getElementById(id).classList.add('done');
     }
