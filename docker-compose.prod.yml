@@ -62,16 +62,23 @@ services:
       # Whisper модель (~150MB для base) — persist между rebuild'ами,
       # иначе при каждой пересборке скачивается с HuggingFace.
       - whisper_cache:/data/whisper
-    # Vision API ключ (Qwen-VL для media mechanics) — owner-managed env file.
-    # required=false: если файл не существует — api всё равно стартует, vision
-    # stage просто пропускается (graceful degradation).
-    env_file:
-      - path: /etc/cogcore-qwen.env
-        required: false
+    # Vision/secrets — passed from systemd-loaded env at the cognitive-deploy.service
+    # level (systemd EnvironmentFile reads /etc/cogcore-qwen.env as root *before*
+    # dropping to user salex, then exports вars; docker compose interpolates here).
+    # Why not env_file: directive directly? — compose tries to read the file as the
+    # invoking user, fails with EACCES on root-owned mode-600 secrets. See:
+    # https://github.com/mocartlex-wq/cognitive-core/pull/57
     environment:
       WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
       WHISPER_CACHE_DIR: /data/whisper
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://mcp.me-ai.ru}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-}
+      QWEN_MODEL: ${QWEN_MODEL:-}
+      QWEN_MAX_FRAMES: ${QWEN_MAX_FRAMES:-}
+      QWEN_MAX_OUTPUT_TOKENS: ${QWEN_MAX_OUTPUT_TOKENS:-}
+      QWEN_TIMEOUT_SECONDS: ${QWEN_TIMEOUT_SECONDS:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     deploy:
       resources:
         # Bumped: ffmpeg + Whisper транскрипция жрут CPU/RAM при анализе видео
