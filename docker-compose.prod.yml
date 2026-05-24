@@ -62,9 +62,16 @@ services:
       # Whisper модель (~150MB для base) — persist между rebuild'ами,
       # иначе при каждой пересборке скачивается с HuggingFace.
       - whisper_cache:/data/whisper
+    # Vision API ключ (Qwen-VL для media mechanics) — owner-managed env file.
+    # required=false: если файл не существует — api всё равно стартует, vision
+    # stage просто пропускается (graceful degradation).
+    env_file:
+      - path: /etc/cogcore-qwen.env
+        required: false
     environment:
       WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
       WHISPER_CACHE_DIR: /data/whisper
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://mcp.me-ai.ru}
     deploy:
       resources:
         # Bumped: ffmpeg + Whisper транскрипция жрут CPU/RAM при анализе видео
