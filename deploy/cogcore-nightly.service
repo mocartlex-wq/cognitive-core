@@ -1,0 +1,13 @@
+[Unit]
+Description=Cognitive Core nightly health suite — runs every 4h
+Documentation=https://github.com/mocartlex-wq/cognitive-core
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/cognitive-core/scripts/nightly-health-suite.sh
+StandardOutput=append:/var/log/cogcore/nightly.log
+StandardError=append:/var/log/cogcore/nightly.log
+TimeoutStartSec=300

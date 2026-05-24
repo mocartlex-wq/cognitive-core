@@ -17,6 +17,12 @@ Environment=COGNITIVE_DEPLOY_BRANCH=main
 # silent (only journalctl).
 EnvironmentFile=-/etc/cognitive-deploy.env
 
+# Vision provider keys — owner-managed. Systemd reads as root *before* dropping
+# to salex, then exports as env vars; docker compose interpolates them into
+# the api container without ever touching the file directly (which would
+# fail EACCES since the file is mode 600 root:root). See PR #57.
+EnvironmentFile=-/etc/cogcore-qwen.env
+
 ExecStart=/opt/cognitive-core/scripts/auto-deploy.sh
 
 # Allow docker exec without password (sudoers configured separately)
