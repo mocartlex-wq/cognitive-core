@@ -310,6 +310,24 @@
     <div id="mediaBlock" class="empty">Загружаем…</div>
   </div>
 
+  <!-- PR #52 (2026-05-24): per-tenant external AI provider keys.
+       Opt-in — без своих ключей платформа использует shared Qwen + DeepSeek
+       fallback. Со своими — vision-analyzer перенаправляется на твой провайдер
+       и оплата идёт на твой счёт у провайдера. -->
+  <div class="card">
+    <h2>
+      🤖 Внешние AI-провайдеры
+      <span style="font-size:12px;font-weight:500;color:var(--glass-text-dim);margin-left:auto">opt-in</span>
+    </h2>
+    <p class="msg-line" style="margin: 0 0 14px; font-size: 13px; line-height: 1.5">
+      Подключи свой ключ — платформа использует его для vision-анализа видео,
+      оплата идёт на твой счёт у провайдера. Без ключей — используется shared Qwen
+      или DeepSeek fallback от платформы. <br>
+      <a href="/docs/external-providers.md" target="_blank" style="color:var(--glass-orb-1)">Где взять ключ →</a>
+    </p>
+    <div id="externalKeysBlock" class="empty">Загружаем…</div>
+  </div>
+
   <div class="card">
     <h2>Мои устройства</h2>
     <div id="sessionsBlock" class="empty">Загружаем…</div>
@@ -1113,7 +1131,216 @@
     }
   }
 
-  loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions(); loadUsage();
+  // ─── External AI providers (PR #52, per-tenant keys) ────────────────
+  // GET список → render row для каждого known provider → input или masked-display.
+  // Test / Save / Remove работают inline без modal'а.
+  const PROVIDER_HINTS = {
+    qwen: {
+      icon: '🐲',
+      desc: 'Qwen-VL (Alibaba) — лучший для русского, дёшево',
+      where: 'https://dashscope.console.aliyun.com/apiKey',
+    },
+    minimax: {
+      icon: '🌀',
+      desc: 'MiniMax (Hailuo) — отличный visual reasoning, дорого',
+      where: 'https://www.minimax.io/platform/keys',
+    },
+    gigachat: {
+      icon: '🇷🇺',
+      desc: 'GigaChat (Sber) — РФ-резидентный, OAuth-flow',
+      where: 'https://developers.sber.ru/portal/products/gigachat-api',
+    },
+    claude: {
+      icon: '🧠',
+      desc: 'Claude (Anthropic) Haiku — быстро и качественно',
+      where: 'https://console.anthropic.com/settings/keys',
+    },
+    openai: {
+      icon: '🔮',
+      desc: 'GPT-4o-mini (OpenAI) — стабильно',
+      where: 'https://platform.openai.com/api-keys',
+    },
+    gemini: {
+      icon: '✨',
+      desc: 'Gemini 2.0 Flash (Google) — самый быстрый',
+      where: 'https://ai.google.dev/',
+    },
+  };
+
+  function statusBadge(status) {
+    if (!status) return '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim)">не проверен</span>';
+    if (status === 'ok') return '<span class="chip online">connected</span>';
+    if (status === 'auth_failed') return '<span class="chip" style="background:rgba(248,81,73,0.18);color:#ff7770">auth failed</span>';
+    if (status === 'rate_limit') return '<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922">rate limit</span>';
+    if (status === 'decrypt_failed') return '<span class="chip" style="background:rgba(248,81,73,0.18);color:#ff7770">ключ повреждён</span>';
+    if (status === 'timeout') return '<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922">timeout</span>';
+    return '<span class="chip" style="background:rgba(248,81,73,0.18);color:#ff7770">error</span>';
+  }
+
+  async function loadExternalKeys() {
+    const block = document.getElementById('externalKeysBlock');
+    if (!block) return;
+    let j;
+    try {
+      const r = await api('/user/settings/external-keys');
+      if (!r) return;
+      if (!r.ok) {
+        block.outerHTML = `<div id="externalKeysBlock" class="empty">Не удалось загрузить (${r.status}).</div>`;
+        return;
+      }
+      j = await r.json();
+    } catch (e) {
+      block.outerHTML = `<div id="externalKeysBlock" class="empty">Ошибка: ${esc(e.message)}</div>`;
+      return;
+    }
+
+    const byProvider = {};
+    (j.items || []).forEach(it => byProvider[it.provider] = it);
+    const all = j.available_providers || [];
+    if (!all.length) {
+      block.outerHTML = '<div id="externalKeysBlock" class="empty">Список providers пуст.</div>';
+      return;
+    }
+
+    const rows = all.map(p => {
+      const hint = PROVIDER_HINTS[p.id] || { icon: '🔌', desc: p.label, where: '' };
+      const configured = byProvider[p.id];
+      const header = `
+        <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;gap:14px;align-items:center">
+          <span style="font-size:20px">${hint.icon}</span>
+          <div style="flex:1;min-width:0">
+            <div class="name">${esc(p.label)} ${configured ? statusBadge(configured.last_test_status) : '<span class="chip" style="background:rgba(100,100,100,0.12);color:var(--glass-text-dim)">не настроен</span>'}</div>
+            <div class="meta" style="font-size:12.5px">${esc(hint.desc)}</div>
+          </div>
+          <span class="meta" style="color:var(--glass-text-dim)">▾</span>
+        </summary>
+      `;
+
+      let body;
+      if (configured) {
+        const used = configured.last_used_at ? fmtDate(configured.last_used_at) : 'никогда';
+        const tested = configured.last_test_at ? fmtDate(configured.last_test_at) : 'не проверялся';
+        body = `
+          <div style="padding:0 16px 14px;border-top:1px solid var(--glass-border)">
+            <div class="row"><span class="k">Ключ</span><span class="v" style="font-family:var(--mono);font-size:12.5px">${esc(configured.masked_key)}</span></div>
+            ${configured.base_url ? `<div class="row"><span class="k">base_url</span><span class="v" style="font-family:var(--mono);font-size:12px">${esc(configured.base_url)}</span></div>` : ''}
+            ${configured.model_name ? `<div class="row"><span class="k">model</span><span class="v">${esc(configured.model_name)}</span></div>` : ''}
+            <div class="row"><span class="k">Использован</span><span class="v">${esc(used)}</span></div>
+            <div class="row"><span class="k">Проверен</span><span class="v">${esc(tested)}</span></div>
+            <div class="toolbar">
+              <button class="btn secondary btn-sm" data-action="test" data-provider="${esc(p.id)}">Проверить</button>
+              <button class="btn danger btn-sm" data-action="remove" data-provider="${esc(p.id)}">Удалить</button>
+            </div>
+            <div id="ext-msg-${esc(p.id)}" class="msg-line" style="margin-top:8px"></div>
+          </div>
+        `;
+      } else {
+        const where = hint.where ? `<a href="${esc(hint.where)}" target="_blank" style="color:var(--glass-orb-1)">Получить ключ →</a>` : '';
+        body = `
+          <div style="padding:0 16px 14px;border-top:1px solid var(--glass-border)">
+            <p class="msg-line" style="margin:10px 0 10px;font-size:12.5px">${where}</p>
+            <form data-provider="${esc(p.id)}" class="ext-save-form" onsubmit="return false">
+              <div class="field" style="margin-bottom:10px">
+                <input type="password" placeholder="api_key" autocomplete="off"
+                       name="api_key" required minlength="4" maxlength="2048"
+                       style="width:100%;padding:10px 13px;font-size:14px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--mono);box-sizing:border-box">
+              </div>
+              <details style="margin-bottom:10px">
+                <summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none">Дополнительно (base_url / model)</summary>
+                <div style="margin-top:10px;display:grid;gap:8px">
+                  <input type="text" placeholder="base_url (опц.)" name="base_url" maxlength="500"
+                         style="width:100%;padding:9px 12px;font-size:13px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--mono);box-sizing:border-box">
+                  <input type="text" placeholder="model_name (опц.)" name="model_name" maxlength="200"
+                         style="width:100%;padding:9px 12px;font-size:13px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--mono);box-sizing:border-box">
+                </div>
+              </details>
+              <div class="toolbar">
+                <button type="submit" class="btn btn-sm" data-action="save" data-provider="${esc(p.id)}">💾 Сохранить</button>
+              </div>
+            </form>
+            <div id="ext-msg-${esc(p.id)}" class="msg-line" style="margin-top:8px"></div>
+          </div>
+        `;
+      }
+      return `<details style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:14px;margin-bottom:8px">${header}${body}</details>`;
+    }).join('');
+
+    block.outerHTML = `<div id="externalKeysBlock">${rows}</div>`;
+    // Wire up handlers
+    document.querySelectorAll('#externalKeysBlock [data-action]').forEach(el => {
+      el.addEventListener('click', handleExternalKeyAction);
+    });
+    document.querySelectorAll('#externalKeysBlock .ext-save-form').forEach(form => {
+      form.addEventListener('submit', handleExternalKeySave);
+    });
+  }
+
+  async function handleExternalKeyAction(ev) {
+    const btn = ev.currentTarget;
+    const action = btn.dataset.action;
+    const provider = btn.dataset.provider;
+    const msg = document.getElementById('ext-msg-' + provider);
+    if (action === 'test') {
+      btn.disabled = true; if (msg) msg.textContent = 'Проверяем…';
+      try {
+        const r = await api(`/user/settings/external-key/${encodeURIComponent(provider)}/test`, { method: 'POST' });
+        if (!r) return;
+        const j = await r.json();
+        if (msg) {
+          if (j.ok) msg.innerHTML = `<span style="color:#4cc960">✓ ${esc(j.message || 'Подключение работает')} · ${j.latency_ms} мс</span>`;
+          else msg.innerHTML = `<span style="color:#ff7770">✗ ${esc(j.message || 'Не получилось')} · status=${esc(j.status || '?')}</span>`;
+        }
+        setTimeout(loadExternalKeys, 1500);
+      } catch (e) {
+        if (msg) msg.innerHTML = `<span style="color:#ff7770">Ошибка: ${esc(e.message)}</span>`;
+      } finally { btn.disabled = false; }
+    } else if (action === 'remove') {
+      if (!confirm(`Удалить ключ для ${provider}?`)) return;
+      btn.disabled = true;
+      try {
+        const r = await api(`/user/settings/external-key/${encodeURIComponent(provider)}`, { method: 'DELETE' });
+        if (!r) return;
+        if (r.ok) loadExternalKeys();
+        else {
+          const j = await r.json();
+          alert(`Ошибка: ${j.detail || r.status}`);
+        }
+      } finally { btn.disabled = false; }
+    }
+  }
+
+  async function handleExternalKeySave(ev) {
+    ev.preventDefault();
+    const form = ev.currentTarget;
+    const provider = form.dataset.provider;
+    const msg = document.getElementById('ext-msg-' + provider);
+    const data = {
+      provider: provider,
+      api_key: form.api_key.value.trim(),
+      base_url: (form.base_url && form.base_url.value.trim()) || null,
+      model_name: (form.model_name && form.model_name.value.trim()) || null,
+    };
+    if (!data.api_key) { if (msg) msg.textContent = 'Введите api_key'; return; }
+    if (msg) msg.textContent = 'Сохраняем…';
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await api('/user/settings/external-key', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!r) return;
+      const j = await r.json();
+      if (r.ok) {
+        if (msg) msg.innerHTML = `<span style="color:#4cc960">✓ Сохранён (${esc(j.masked_key || '')}). Жмите «Проверить» для validate.</span>`;
+        setTimeout(loadExternalKeys, 1200);
+      } else {
+        if (msg) msg.innerHTML = `<span style="color:#ff7770">${esc(j.detail || r.status)}</span>`;
+      }
+    } finally { if (btn) btn.disabled = false; }
+  }
+
+  loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions(); loadUsage(); loadExternalKeys();
 </script>
 </body>
 </html>

@@ -1,92 +1,133 @@
-"""Vision analyzer — Qwen-VL обёртка для извлечения «механики» из video frames.
+"""Vision analyzer — multi-provider mechanics extraction.
 
 Owner-mandate (2026-05-24): «дать возможность механики, а не картинок».
-Текущий media-pipeline даёт 12 статичных frame URL'ов + Whisper-транскрипт.
-Этот модуль добавляет ещё один stage: vision-LLM смотрит на frames + читает
-transcript → возвращает 2-3 предложения «что происходит в видео» (mechanics).
+Media-pipeline даёт 12 статичных frame URL'ов + Whisper-транскрипт.
+Этот модуль — vision-LLM stage: возвращает 2-4 предложения «что происходит».
 
-Provider: Alibaba Cloud Model Studio (DashScope International)
-  - Endpoint: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-  - Модель: qwen-vl-max-latest (multimodal)
-  - API формат: OpenAI-compatible chat/completions
-  - Регион: Frankfurt (eu-central-1) — лучшая latency из РФ
+Provider resolution order (per call):
 
-Config из env (загружается через docker-compose env_file):
-  QWEN_API_KEY    — Alibaba API ключ (sk-ws-... формат)
-  QWEN_BASE_URL   — endpoint (default = dashscope-intl)
-  QWEN_MODEL      — model name (default = qwen-vl-max-latest)
+  1. Если passed owner_user_id → читаем user_external_keys для tenant'а
+     и пробуем в порядке PROVIDER_ORDER (qwen → minimax → gigachat → claude
+     → openai → gemini). Первый успешный wins.
 
-Если QWEN_API_KEY не установлен — vision stage пропускается (graceful degradation):
-базовый pipeline продолжит работать с frame URLs + transcript как раньше.
+  2. Если у tenant'а нет ключей ИЛИ они все failed → fallback на shared
+     platform-key (env QWEN_API_KEY). Это сохраняет существующее поведение
+     для tenants без opt-in.
 
-Cost guard:
-  - Max 12 frames per call (= типичный output из media_analyzer)
-  - Max 800 output tokens
-  - timeout=60s (Qwen может думать долго на 12 frames)
-  - ~ $0.02-0.03 per video на qwen-vl-max-latest
+  3. Если и shared нет / тоже failed → DeepSeek text-only fallback из
+     transcript (env DEEPSEEK_API_KEY).
 
-Returns: dict with keys:
-  - mechanics_summary (str) — 2-3 sentence summary что происходит
-  - error (str) если что-то сломалось — pipeline продолжит без vision stage
+  4. Если ничего нет → graceful skip, базовый pipeline (frames + transcript)
+     продолжает работать без vision stage.
+
+Audit-trail:
+  Каждое успешное использование per-tenant ключа пишется в L1
+  (`domain=external_key_usage`) — для billing transparency.
+
+Security:
+  - Per-tenant keys никогда не логируются (даже в exception).
+  - При 401/403/429 ключа делаем fallback на следующего provider'а,
+    last_test_status обновляется на 'auth_failed'/'rate_limit'.
+
+Backward-compat:
+  - analyze_mechanics(frame_urls, transcript, duration_seconds) — старая сигнатура
+    работает (owner_user_id опц.).
+  - is_enabled() / has_vision() / has_text_fallback() — оставлены.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Optional
 
 import httpx
 
+from app.security.secrets_vault import SecretsVaultError, decrypt
+from app.services.vision_providers import (
+    PROVIDER_LABELS,
+    PROVIDER_ORDER,
+    get_analyzer,
+)
+
 logger = logging.getLogger(__name__)
 
+# ─── Shared platform-key (legacy default — env-based) ─────────────────────
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "").strip()
-QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").rstrip("/")
+QWEN_BASE_URL = os.environ.get(
+    "QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+).rstrip("/")
 QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen-vl-max-latest").strip()
 QWEN_MAX_FRAMES = int(os.environ.get("QWEN_MAX_FRAMES", "12"))
 QWEN_MAX_OUTPUT_TOKENS = int(os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "800"))
 QWEN_TIMEOUT_SECONDS = float(os.environ.get("QWEN_TIMEOUT_SECONDS", "60"))
 
-# DeepSeek (text-only fallback) — если Qwen vision недоступен/403, используем
-# DeepSeek для text-based mechanics из Whisper-transcript. Полезно для видео
-# с аудио (обучающие, разговоры, презентации). Для silent videos — даст
-# базовый mechanics summary на основе длительности + frame count.
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+DEEPSEEK_BASE_URL = os.environ.get(
+    "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
+).rstrip("/")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip()
 
 
+# ─── Public flags (backward-compat) ───────────────────────────────────────
 def is_enabled() -> bool:
-    """True если хотя бы один из providers (Qwen vision или DeepSeek text) доступен."""
+    """True если хотя бы один из shared providers (Qwen или DeepSeek) доступен.
+
+    Per-tenant ключи проверяются отдельно — это shared-only флаг.
+    """
     return bool(QWEN_API_KEY) or bool(DEEPSEEK_API_KEY)
 
 
 def has_vision() -> bool:
-    """True если Qwen vision доступен (полный анализ кадров)."""
+    """True если shared Qwen vision доступен."""
     return bool(QWEN_API_KEY)
 
 
 def has_text_fallback() -> bool:
-    """True если DeepSeek доступен (text-only mechanics fallback)."""
+    """True если shared DeepSeek text fallback доступен."""
     return bool(DEEPSEEK_API_KEY)
 
 
+# ─── Prompts ──────────────────────────────────────────────────────────────
+_SYSTEM_PROMPT = (
+    "Ты анализируешь короткие видео (3-30 секунд). Тебе дают 8-12 кадров "
+    "извлечённых равномерно по длительности + транскрипт аудио (если есть). "
+    "Твоя задача — описать МЕХАНИКУ происходящего: что делает человек, "
+    "какой процесс/действие изображено, как меняется состояние между кадрами. "
+    "НЕ описывай каждый кадр отдельно — собирай в одну последовательность.\n\n"
+    "Ответ — 2-4 предложения на русском, по делу, без воды. Если в кадрах "
+    "интерфейс — назови приложение/сайт и действия. Если человек — что он "
+    "делает, как меняется поза/локация. Если процесс — что начинается/заканчивается."
+)
+
+
+def _build_user_prompt(transcript: Optional[str], duration_seconds: Optional[float],
+                       frame_count: int) -> str:
+    parts = [
+        f"Видео длительностью {duration_seconds:.1f} сек." if duration_seconds else "Видео.",
+        f"Кадров: {frame_count}.",
+    ]
+    if transcript and transcript.strip():
+        t_short = transcript[:2000]
+        parts.append(f"Транскрипт аудио: «{t_short}»")
+    else:
+        parts.append("Аудиодорожки нет или она пустая.")
+    parts.append("Опиши механику происходящего в 2-4 предложениях.")
+    return " ".join(parts)
+
+
+# ─── DeepSeek text-only fallback (existing logic) ────────────────────────
 async def _analyze_text_only_deepseek(
     transcript: Optional[str],
     duration_seconds: Optional[float],
     frame_count: int,
 ) -> dict:
-    """Fallback: text-only mechanics через DeepSeek.
-
-    Используется когда Qwen vision недоступен (нет ключа, 403, 401, и т.д.).
-    Опирается ТОЛЬКО на transcript + metadata (длительность, кол-во кадров).
-    Для видео БЕЗ аудио (silent) — даст минимальный обобщённый summary.
-    """
+    """Fallback: text-only mechanics через DeepSeek."""
     if not DEEPSEEK_API_KEY:
         return {"error": "deepseek_unavailable", "skipped": True}
 
     has_audio = bool(transcript and transcript.strip())
     if not has_audio:
-        # Silent video — нет смысла дёргать LLM, дай простой summary
         return {
             "mechanics_summary": (
                 f"Видео {duration_seconds:.1f}с без аудиодорожки, {frame_count} кадров. "
@@ -123,11 +164,13 @@ async def _analyze_text_only_deepseek(
     }
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(f"{DEEPSEEK_BASE_URL}/chat/completions", json=payload, headers=headers)
+            r = await client.post(
+                f"{DEEPSEEK_BASE_URL}/chat/completions", json=payload, headers=headers
+            )
     except (httpx.TimeoutException, httpx.HTTPError) as e:
-        return {"error": f"deepseek_error: {e}"}
+        return {"error": f"deepseek_error: {type(e).__name__}"}
     if r.status_code != 200:
-        return {"error": f"deepseek_http_{r.status_code}: {r.text[:200]}"}
+        return {"error": f"deepseek_http_{r.status_code}"}
     try:
         data = r.json()
         msg = data["choices"][0]["message"]["content"].strip()
@@ -140,140 +183,276 @@ async def _analyze_text_only_deepseek(
             "fallback": "text_only_deepseek",
         }
     except (KeyError, IndexError, ValueError) as e:
-        return {"error": f"deepseek_parse: {e}"}
+        return {"error": f"deepseek_parse: {type(e).__name__}"}
 
 
-_SYSTEM_PROMPT = (
-    "Ты анализируешь короткие видео (3-30 секунд). Тебе дают 8-12 кадров "
-    "извлечённых равномерно по длительности + транскрипт аудио (если есть). "
-    "Твоя задача — описать МЕХАНИКУ происходящего: что делает человек, "
-    "какой процесс/действие изображено, как меняется состояние между кадрами. "
-    "НЕ описывай каждый кадр отдельно — собирай в одну последовательность.\n\n"
-    "Ответ — 2-4 предложения на русском, по делу, без воды. Если в кадрах "
-    "интерфейс — назови приложение/сайт и действия. Если человек — что он "
-    "делает, как меняется поза/локация. Если процесс — что начинается/заканчивается."
-)
+# ─── Per-tenant key fetch + audit ─────────────────────────────────────────
+async def _load_tenant_keys(owner_user_id: str) -> list[dict]:
+    """Загрузить и расшифровать все per-tenant ключи владельца.
+
+    Возвращает список dict-ов в порядке PROVIDER_ORDER (preferred first):
+        [{"provider": "qwen", "api_key": "<plain>", "base_url": ..., "model_name": ...}, ...]
+
+    Невалидные/нерасшифровывающиеся записи пропускаются с warning'ом.
+    """
+    from app.db.postgres import get_pool
+
+    if not owner_user_id:
+        return []
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT provider, api_key_encrypted, base_url, model_name
+                  FROM user_external_keys
+                 WHERE owner_user_id = $1::uuid
+                """,
+                owner_user_id,
+            )
+    except Exception as e:
+        # Таблица может ещё не быть создана (миграция 0010 не применена)
+        logger.info("tenant keys table not available: %s", type(e).__name__)
+        return []
+
+    keys_by_provider: dict[str, dict] = {}
+    for row in rows:
+        provider = row["provider"]
+        try:
+            plain = decrypt(row["api_key_encrypted"])
+        except SecretsVaultError:
+            logger.warning(
+                "tenant key decrypt failed owner=%s provider=%s — skipped",
+                owner_user_id, provider,
+            )
+            continue
+        keys_by_provider[provider] = {
+            "provider": provider,
+            "api_key": plain,
+            "base_url": row.get("base_url"),
+            "model_name": row.get("model_name"),
+        }
+
+    # Сортируем по PROVIDER_ORDER preference, остальные провайдеры — в конец
+    ordered: list[dict] = []
+    for p in PROVIDER_ORDER:
+        if p in keys_by_provider:
+            ordered.append(keys_by_provider[p])
+    for p, k in keys_by_provider.items():
+        if p not in PROVIDER_ORDER:
+            ordered.append(k)
+    return ordered
 
 
+async def _update_test_status(owner_user_id: str, provider: str, status: str) -> None:
+    """Обновить last_test_status + last_used_at + last_test_at для аудита.
+
+    Используется после real call (НЕ test endpoint) — чтобы UI показывал
+    реальный последний статус ключа.
+    """
+    from app.db.postgres import get_pool
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_external_keys
+                   SET last_used_at = NOW(),
+                       last_test_status = $1,
+                       last_test_at = NOW(),
+                       updated_at = NOW()
+                 WHERE owner_user_id = $2::uuid AND provider = $3
+                """,
+                status, owner_user_id, provider,
+            )
+    except Exception as e:
+        logger.warning("update_test_status failed: %s", type(e).__name__)
+
+
+async def _audit_external_key_usage(
+    owner_user_id: str, provider: str, model: str,
+    tokens_in: int, tokens_out: int, success: bool, error: Optional[str] = None,
+) -> None:
+    """Запись в L1 для billing transparency.
+
+    Tenant сможет увидеть когда и сколько потратил через cognitive_recall
+    domain=external_key_usage.
+    """
+    from app.db.postgres import get_pool
+    payload = {
+        "owner_user_id": owner_user_id,
+        "provider": provider,
+        "model": model,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "success": success,
+    }
+    if error:
+        # НЕ кладём raw error если он может содержать чувствительные данные
+        payload["error_class"] = error[:80]
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO l1_raw_events (source_agent, domain, raw_payload)
+                VALUES ($1, $2, $3::jsonb)
+                """,
+                "vision_analyzer",
+                "external_key_usage",
+                json.dumps(payload, ensure_ascii=False),
+            )
+    except Exception as e:
+        logger.warning("audit external_key_usage failed: %s", type(e).__name__)
+
+
+# ─── Main entry point ─────────────────────────────────────────────────────
 async def analyze_mechanics(
     frame_urls: list[str],
     transcript: Optional[str] = None,
     duration_seconds: Optional[float] = None,
+    owner_user_id: Optional[str] = None,
 ) -> dict:
-    """Главная функция: подаёт кадры + transcript Qwen-VL, возвращает mechanics.
+    """Provider-aware mechanics extraction с fallback chain.
 
     Args:
-        frame_urls: список абсолютных HTTPS URL'ов на JPG frames
-                   (например, https://mcp.me-ai.ru/api/media/frame/video/abc/frame_0001.jpg)
-        transcript: Whisper-транскрипт аудиодорожки (опц.)
-        duration_seconds: длительность видео (опц., для context'а)
+        frame_urls: список абсолютных HTTPS URL'ов на JPG frames.
+        transcript: Whisper-транскрипт аудиодорожки (опц.).
+        duration_seconds: длительность видео (опц.).
+        owner_user_id: UUID-string владельца — для per-tenant ключей. Если
+                       None → сразу shared platform-key.
 
     Returns:
         {
-          "mechanics_summary": "<2-4 предложения>" если success,
-          "error": "<msg>" если ошибка,
-          "model": "qwen-vl-max-latest",
+          "mechanics_summary": "<2-4 предложения>",
+          "model": "<provider:model>",
           "tokens_in": int,
           "tokens_out": int,
+          "provider_source": "tenant:qwen" | "shared:qwen" | "fallback:deepseek",
+          "frames_analyzed": int,
         }
+        или
+        {"error": "...", "skipped": True} если совсем nothing available.
     """
-    # Если нет ни Qwen, ни DeepSeek — vision stage полностью disabled
-    if not is_enabled():
-        return {"error": "no vision provider configured", "skipped": True}
-
     if not frame_urls:
         return {"error": "no frames provided", "skipped": True}
 
-    # Если Qwen ключа нет — сразу fallback на DeepSeek text-only
-    if not QWEN_API_KEY:
-        logger.info("Qwen unavailable, using DeepSeek text-only fallback")
-        return await _analyze_text_only_deepseek(transcript, duration_seconds, len(frame_urls))
+    # Cap frames для cost
+    capped = frame_urls[:QWEN_MAX_FRAMES]
+    frame_count = len(capped)
+    user_prompt = _build_user_prompt(transcript, duration_seconds, frame_count)
 
-    # Cost guard: cap frames
-    capped_frames = frame_urls[:QWEN_MAX_FRAMES]
+    tried: list[str] = []
+    last_error: Optional[str] = None
 
-    # Compose user message
-    user_text_parts = [
-        f"Видео длительностью {duration_seconds:.1f} сек." if duration_seconds else "Видео.",
-        f"Кадров: {len(capped_frames)}.",
-    ]
-    if transcript and transcript.strip():
-        # Cap transcript для cost — иначе много tokens
-        t_short = transcript[:2000]
-        user_text_parts.append(f"Транскрипт аудио: «{t_short}»")
-    else:
-        user_text_parts.append("Аудиодорожки нет или она пустая.")
-    user_text_parts.append("Опиши механику происходящего в 2-4 предложениях.")
-    user_text = " ".join(user_text_parts)
+    # ─── Stage 1: per-tenant keys ─────────────────────────────────────────
+    if owner_user_id:
+        tenant_keys = await _load_tenant_keys(owner_user_id)
+        for entry in tenant_keys:
+            provider = entry["provider"]
+            analyzer = get_analyzer(provider)
+            if not analyzer:
+                continue
+            tried.append(f"tenant:{provider}")
+            try:
+                result = await analyzer(
+                    api_key=entry["api_key"],
+                    frame_urls=capped,
+                    transcript=transcript,
+                    duration_seconds=duration_seconds,
+                    base_url=entry.get("base_url"),
+                    model_name=entry.get("model_name"),
+                    timeout=QWEN_TIMEOUT_SECONDS,
+                    max_output_tokens=QWEN_MAX_OUTPUT_TOKENS,
+                    system_prompt=_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                )
+            except Exception as e:
+                logger.warning(
+                    "tenant provider %s raised: %s", provider, type(e).__name__,
+                )
+                result = {"error": f"exception: {type(e).__name__}",
+                          "fallback_recommended": True}
 
-    # Build OpenAI-compatible multimodal content array
-    content = [{"type": "text", "text": user_text}]
-    for url in capped_frames:
-        content.append({"type": "image_url", "image_url": {"url": url}})
+            if result.get("mechanics_summary"):
+                # SUCCESS — обновить status + audit + return
+                await _update_test_status(owner_user_id, provider, "ok")
+                await _audit_external_key_usage(
+                    owner_user_id, provider,
+                    result.get("model", provider),
+                    result.get("tokens_in", 0),
+                    result.get("tokens_out", 0),
+                    success=True,
+                )
+                return {
+                    **result,
+                    "provider_source": f"tenant:{provider}",
+                    "frames_analyzed": frame_count,
+                }
 
-    payload = {
-        "model": QWEN_MODEL,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": content},
-        ],
-        "max_tokens": QWEN_MAX_OUTPUT_TOKENS,
-        "temperature": 0.2,  # детерминированно — описание факта, не творчество
-    }
+            # FAILURE — update status и попробуем следующий
+            last_error = result.get("error")
+            status_code = result.get("status_code")
+            if status_code in (401, 403):
+                await _update_test_status(owner_user_id, provider, "auth_failed")
+            elif status_code == 429:
+                await _update_test_status(owner_user_id, provider, "rate_limit")
+            else:
+                await _update_test_status(owner_user_id, provider, "error")
 
-    headers = {
-        "Authorization": f"Bearer {QWEN_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=QWEN_TIMEOUT_SECONDS) as client:
-            r = await client.post(
-                f"{QWEN_BASE_URL}/chat/completions",
-                json=payload,
-                headers=headers,
+            # Audit failure тоже — для billing visibility
+            await _audit_external_key_usage(
+                owner_user_id, provider, provider, 0, 0,
+                success=False, error=last_error or "unknown",
             )
-    except httpx.TimeoutException:
-        logger.warning("Qwen vision timeout after %ds", QWEN_TIMEOUT_SECONDS)
-        return {"error": f"timeout >{QWEN_TIMEOUT_SECONDS}s"}
-    except httpx.HTTPError as e:
-        logger.warning("Qwen vision HTTP error: %s", e)
-        return {"error": f"http_error: {e}"}
 
-    if r.status_code != 200:
-        body_preview = r.text[:400]
-        # Auth/permission ошибки → fallback на DeepSeek text-only (если доступен)
-        if r.status_code in (401, 403) and DEEPSEEK_API_KEY:
-            logger.warning(
-                "Qwen vision %d (auth/permission denied) — falling back to DeepSeek text-only. "
-                "body=%s", r.status_code, body_preview[:200]
+            # Если fallback_recommended=False — это hard error (parse/timeout
+            # к нашей платформе), а не auth-issue. Тогда тоже fallthrough.
+
+    # ─── Stage 2: shared platform Qwen ────────────────────────────────────
+    if QWEN_API_KEY:
+        tried.append("shared:qwen")
+        analyzer = get_analyzer("qwen")
+        try:
+            result = await analyzer(
+                api_key=QWEN_API_KEY,
+                frame_urls=capped,
+                transcript=transcript,
+                duration_seconds=duration_seconds,
+                base_url=QWEN_BASE_URL,
+                model_name=QWEN_MODEL,
+                timeout=QWEN_TIMEOUT_SECONDS,
+                max_output_tokens=QWEN_MAX_OUTPUT_TOKENS,
+                system_prompt=_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
             )
-            result = await _analyze_text_only_deepseek(transcript, duration_seconds, len(capped_frames))
-            result.setdefault("qwen_error", f"http_{r.status_code}: {body_preview[:200]}")
-            return result
-        logger.warning("Qwen vision non-200: %d body=%s", r.status_code, body_preview)
-        return {"error": f"http_{r.status_code}: {body_preview}"}
+        except Exception as e:
+            result = {"error": f"exception: {type(e).__name__}",
+                      "fallback_recommended": True}
 
-    try:
-        data = r.json()
-        msg = data["choices"][0]["message"]
-        # qwen-vl message.content может быть строкой ИЛИ массивом [{type:text,text:...}]
-        raw_content = msg.get("content", "")
-        if isinstance(raw_content, list):
-            mechanics = " ".join(
-                p.get("text", "") for p in raw_content if isinstance(p, dict) and p.get("type") == "text"
-            ).strip()
-        else:
-            mechanics = str(raw_content).strip()
+        if result.get("mechanics_summary"):
+            return {
+                **result,
+                "provider_source": "shared:qwen",
+                "frames_analyzed": frame_count,
+            }
+        last_error = result.get("error") or last_error
 
-        usage = data.get("usage", {})
-        return {
-            "mechanics_summary": mechanics,
-            "model": QWEN_MODEL,
-            "tokens_in": usage.get("prompt_tokens", 0),
-            "tokens_out": usage.get("completion_tokens", 0),
-            "frames_analyzed": len(capped_frames),
-        }
-    except (KeyError, IndexError, ValueError) as e:
-        logger.exception("Qwen vision response parse failed: %s", e)
-        return {"error": f"parse_error: {e}", "raw_status": r.status_code}
+    # ─── Stage 3: DeepSeek text-only fallback ─────────────────────────────
+    if DEEPSEEK_API_KEY:
+        tried.append("fallback:deepseek")
+        result = await _analyze_text_only_deepseek(transcript, duration_seconds, frame_count)
+        if result.get("mechanics_summary"):
+            return {
+                **result,
+                "provider_source": "fallback:deepseek",
+                "frames_analyzed": frame_count,
+                "qwen_error": last_error,
+            }
+        last_error = result.get("error") or last_error
+
+    # ─── Stage 4: nothing worked ──────────────────────────────────────────
+    return {
+        "error": f"no provider available; tried={tried}; last_error={last_error}",
+        "skipped": True,
+    }
