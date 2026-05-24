@@ -1134,16 +1134,18 @@
   // ─── External AI providers (PR #52, per-tenant keys) ────────────────
   // GET список → render row для каждого known provider → input или masked-display.
   // Test / Save / Remove работают inline без modal'а.
+  // Provider links — landing pages, не deep links (deep ссылки часто меняются).
+  // Tenant сам найдёт «Get API Key» в их UI после логина.
   const PROVIDER_HINTS = {
     qwen: {
       icon: '🐲',
-      desc: 'Qwen-VL — лучший для русского. ⚠️ Китайский DashScope требует RNV (паспорт КНР). Бери через OpenRouter — оплата USDT, без региональных проблем.',
-      where: 'https://openrouter.ai/qwen/qwen-2.5-vl-72b-instruct',
+      desc: 'Qwen-VL — лучший для русского. ⚠️ Alibaba DashScope требует Real-Name verification (паспорт КНР). Проще через OpenRouter (USDT, без региональных проблем).',
+      where: 'https://openrouter.ai/keys',
     },
     minimax: {
       icon: '🌀',
-      desc: 'MiniMax (Hailuo) — отличный visual reasoning, дорого. International — принимает Mastercard.',
-      where: 'https://www.minimax.io/platform/keys',
+      desc: 'MiniMax — отличный visual reasoning. После логина в User Center → API Keys.',
+      where: 'https://platform.minimax.io/',
     },
     gigachat: {
       icon: '🇷🇺',
@@ -1152,17 +1154,17 @@
     },
     claude: {
       icon: '🧠',
-      desc: 'Claude Haiku 4.5 — лучшее качество. Нужна зарубежная карта или ProxyAPI-посредник.',
-      where: 'https://console.anthropic.com/settings/keys',
+      desc: 'Claude Haiku 4.5 — лучшее качество vision. Нужна зарубежная карта или ProxyAPI-посредник.',
+      where: 'https://platform.claude.com/',
     },
     openai: {
       icon: '🔮',
-      desc: 'GPT-4o-mini — самый дешёвый по цене ($0.90 за 1000 видео). Нужна зарубежная карта.',
+      desc: 'GPT-4o-mini — самый дешёвый ($0.90 за 1000 видео). Нужна зарубежная карта.',
       where: 'https://platform.openai.com/api-keys',
     },
     gemini: {
       icon: '✨',
-      desc: 'Gemini 2.0 Flash — понимает видео нативно, free tier 15 RPM. Из РФ нужен proxy.',
+      desc: 'Gemini 2.0 Flash — понимает видео нативно, есть free tier 15 RPM. Из РФ нужен proxy.',
       where: 'https://aistudio.google.com/apikey',
     },
   };
