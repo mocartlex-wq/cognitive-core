@@ -412,6 +412,37 @@ class Executor:
             return {"ok": False, "message": f"room_post HTTP {r.status_code}: {r.text[:200]}", "data": None}
         return {"ok": True, "message": f"Опубликовано в комнате (key={room_key[:8]}...).", "data": r.json()}
 
+    async def do_room_join(self, args: dict, source: str) -> dict:
+        room_key = args["room_key"]
+        payload = {
+            "jsonrpc": "2.0",
+            "id": int(time.time() * 1000),
+            "method": "tools/call",
+            "params": {"name": "room_join", "arguments": {"room_key": room_key}},
+        }
+        r = await self.client._http.post("/mcp/messages", json=payload)
+        if r.status_code >= 400:
+            return {"ok": False, "message": f"room_join HTTP {r.status_code}: {r.text[:200]}", "data": None}
+        return {"ok": True, "message": f"Вступил в комнату (key={room_key[:8]}...).", "data": r.json()}
+
+    async def do_room_read(self, args: dict, source: str) -> dict:
+        room_key = args["room_key"]
+        limit = min(max(int(args.get("limit", 20)), 1), 50)
+        payload = {
+            "jsonrpc": "2.0",
+            "id": int(time.time() * 1000),
+            "method": "tools/call",
+            "params": {"name": "room_read", "arguments": {"room_key": room_key, "limit": limit}},
+        }
+        r = await self.client._http.post("/mcp/messages", json=payload)
+        if r.status_code >= 400:
+            return {"ok": False, "message": f"room_read HTTP {r.status_code}: {r.text[:200]}", "data": None}
+        data = r.json()
+        msgs = (data.get("result") or {}).get("messages") or data.get("messages") or []
+        lines = [f"- [{m.get('agent_id','?')}]: {(m.get('text') or '')[:150]}" for m in msgs[:limit]]
+        summary = f"Последние {len(lines)} сообщений в комнате:\n" + ("\n".join(lines) if lines else "(пусто)")
+        return {"ok": True, "message": summary, "data": msgs}
+
     # ─ Memory ─
     async def do_remember_fact(self, args: dict, source: str) -> dict:
         domain = args["domain"]
@@ -419,6 +450,87 @@ class Executor:
         result = args.get("result", "")
         await self.client.remember(domain=domain, task=task, result=result, feedback="positive")
         return {"ok": True, "message": f"Записано в domain={domain}.", "data": None}
+
+    async def do_cognitive_recall(self, args: dict, source: str) -> dict:
+        query = args["query"]
+        domain = args.get("domain") or None
+        top_k = min(max(int(args.get("top_k", 5)), 1), 20)
+        mcp_args = {"query": query, "top_k": top_k}
+        if domain:
+            mcp_args["domain"] = domain
+        payload = {
+            "jsonrpc": "2.0",
+            "id": int(time.time() * 1000),
+            "method": "tools/call",
+            "params": {"name": "cognitive_recall", "arguments": mcp_args},
+        }
+        r = await self.client._http.post("/mcp/messages", json=payload)
+        if r.status_code >= 400:
+            return {"ok": False, "message": f"recall HTTP {r.status_code}: {r.text[:200]}", "data": None}
+        data = r.json()
+        result = (data.get("result") or {})
+        items = result.get("items") or result.get("results") or []
+        if not items:
+            return {"ok": True, "message": f"По запросу '{query[:60]}' ничего не найдено (domain={domain or 'any'}).", "data": []}
+        lines = []
+        for item in items[:top_k]:
+            preview = json.dumps(item, ensure_ascii=False)[:250]
+            lines.append(f"- {preview}")
+        return {"ok": True, "message": f"Найдено {len(items)} (top {top_k}):\n" + "\n".join(lines), "data": items}
+
+    async def do_analyze_media(self, args: dict, source: str) -> dict:
+        """Получить результат media-анализа: transcript + URL'ы кадров.
+
+        Делает recall по domain=media_analysis с фильтром по media_id.
+        Возвращает summary человеческим текстом — для последующего room_post.
+        """
+        media_id = args["media_id"]
+        mcp_args = {"query": f"media_id {media_id}", "domain": "media_analysis", "top_k": 5}
+        payload = {
+            "jsonrpc": "2.0",
+            "id": int(time.time() * 1000),
+            "method": "tools/call",
+            "params": {"name": "cognitive_recall", "arguments": mcp_args},
+        }
+        r = await self.client._http.post("/mcp/messages", json=payload)
+        if r.status_code >= 400:
+            return {"ok": False, "message": f"recall HTTP {r.status_code}: {r.text[:200]}", "data": None}
+        data = r.json()
+        result = data.get("result") or {}
+        items = result.get("items") or result.get("results") or []
+        # Find exact media_id match if possible
+        matched = None
+        for it in items:
+            payload_str = json.dumps(it, ensure_ascii=False)
+            if media_id in payload_str:
+                matched = it
+                break
+        if not matched and items:
+            matched = items[0]
+        if not matched:
+            return {"ok": False, "message": f"Media {media_id} не найден в L1 (возможно TTL 15 мин истёк или upload не прошёл).", "data": None}
+        # Extract transcript + frames from payload
+        p = matched.get("payload") or matched.get("raw_payload") or matched
+        if isinstance(p, str):
+            try:
+                p = json.loads(p)
+            except Exception:
+                pass
+        transcript = p.get("transcript") or p.get("text") or ""
+        frames = p.get("frames") or p.get("frame_urls") or []
+        kind = p.get("kind") or "media"
+        duration = p.get("duration_seconds") or p.get("duration") or "?"
+        summary = f"Media {media_id} ({kind}, длительность {duration}s):\n\n"
+        if transcript:
+            summary += f"Транскрипт:\n{transcript[:1500]}\n\n"
+        if frames:
+            summary += f"Ключевых кадров: {len(frames)}\n"
+            for i, f in enumerate(frames[:6]):
+                url = f if isinstance(f, str) else f.get("url", "?")
+                summary += f"  {i+1}. {url}\n"
+        if not transcript and not frames:
+            summary += "(анализ найден, но transcript/frames пустые)"
+        return {"ok": True, "message": summary[:2500], "data": matched}
 
     # ─ Destructive ─
     async def do_delete_agent(self, args: dict, source: str) -> dict:

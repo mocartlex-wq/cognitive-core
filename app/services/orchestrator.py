@@ -111,12 +111,32 @@ ACTIONS: dict[str, dict[str, Any]] = {
         "description": "Опубликовать сообщение в room через room_key.",
         "args": {"room_key": "str", "text": "str"},
     },
+    "room_join": {
+        "destructive": False,
+        "description": "Вступить в room по room_key (нужно до room_post в новой комнате).",
+        "args": {"room_key": "str"},
+    },
+    "room_read": {
+        "destructive": False,
+        "description": "Прочитать последние N сообщений из комнаты (для контекста перед ответом).",
+        "args": {"room_key": "str", "limit": "int 1..50 (default 20)"},
+    },
 
     # ─── Knowledge / memory (safe) ───
     "remember_fact": {
         "destructive": False,
         "description": "Записать факт в долгосрочную память L1 (domain указывается).",
         "args": {"domain": "str", "task": "str", "result": "str (optional)"},
+    },
+    "cognitive_recall": {
+        "destructive": False,
+        "description": "Семантический KNN-поиск по долговременной памяти L3 (по domain).",
+        "args": {"query": "str — natural language query", "domain": "str (optional)", "top_k": "int 1..20 (default 5)"},
+    },
+    "analyze_media": {
+        "destructive": False,
+        "description": "Получить результат анализа media-файла (видео/аудио/фото) — transcript + URL ключевых кадров. Используй когда owner упомянул media_id или 'опиши видео/аудио/фото X'.",
+        "args": {"media_id": "str — media_id из cogmedia upload (UUID или filename)"},
     },
 
     # ─── Destructive (require approval) ───
