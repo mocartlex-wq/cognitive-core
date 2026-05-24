@@ -464,7 +464,12 @@ class Executor:
             "method": "tools/call",
             "params": {"name": "cognitive_recall", "arguments": mcp_args},
         }
-        r = await self.client._http.post("/mcp/messages", json=payload)
+        # Semantic KNN дороже остальных tool calls — даём ему 60s (default httpx timeout
+        # ~5-10s слишком мал для cold L3 search). Если совсем нет ответа — explicit error.
+        try:
+            r = await self.client._http.post("/mcp/messages", json=payload, timeout=60.0)
+        except httpx.ReadTimeout:
+            return {"ok": False, "message": f"recall timeout (>60s) для query '{query[:60]}' — попробуй сократить query или уменьшить top_k.", "data": None}
         if r.status_code >= 400:
             return {"ok": False, "message": f"recall HTTP {r.status_code}: {r.text[:200]}", "data": None}
         data = r.json()
@@ -492,7 +497,10 @@ class Executor:
             "method": "tools/call",
             "params": {"name": "cognitive_recall", "arguments": mcp_args},
         }
-        r = await self.client._http.post("/mcp/messages", json=payload)
+        try:
+            r = await self.client._http.post("/mcp/messages", json=payload, timeout=60.0)
+        except httpx.ReadTimeout:
+            return {"ok": False, "message": f"recall timeout (>60s) для media {media_id}", "data": None}
         if r.status_code >= 400:
             return {"ok": False, "message": f"recall HTTP {r.status_code}: {r.text[:200]}", "data": None}
         data = r.json()
