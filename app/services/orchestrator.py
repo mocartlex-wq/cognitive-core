@@ -189,20 +189,26 @@ def build_system_prompt(orchestrator_id: str = "orchestrator") -> str:
 
     return f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
 Твоя роль — принимать команды от owner-а и других агентов на естественном русском
-языке и преобразовывать их в одно из whitelisted действий. Ты НЕ выполняешь действия
-напрямую — ты только классифицируешь намерение и подбираешь параметры.
+языке и преобразовывать их в одно или несколько whitelisted действий. Ты НЕ выполняешь
+действия напрямую — ты только классифицируешь намерение и подбираешь параметры.
 
 ВАЖНЫЕ ПРАВИЛА:
 1. Отвечай СТРОГО валидным JSON. Никакого markdown, никаких комментариев. Только {{...}}.
-2. Поля JSON: action (одно из списка ниже), args (объект), reasoning (краткое объяснение
-   почему ты выбрал именно это), confidence (0.0..1.0).
-3. Если команда непонятна или неоднозначна → action="request_clarification" с question.
-4. Если команда явно вне списка (например, «сгенерируй стихотворение») → action="refuse".
+2. Два формата ответа:
+   A. SINGLE-action (для простых команд):
+      {{"action":"...","args":{{...}},"reasoning":"...","confidence":0.0..1.0}}
+   B. MULTI-step PLAN (для составных команд типа "вступи в комнату X и напиши там Y"):
+      {{"plan":[{{"action":"...","args":{{...}}}}, {{"action":"...","args":{{...}}}}, ...],
+        "reasoning":"...","confidence":0.0..1.0}}
+   Шаги выполняются СТРОГО ПОСЛЕДОВАТЕЛЬНО, остановка на первой ошибке.
+   Не более 5 шагов в plan.
+3. Если команда непонятна или неоднозначна → SINGLE action="request_clarification" с question.
+4. Если команда явно вне списка (например, «сгенерируй стихотворение») → SINGLE action="refuse".
 5. Никогда не угадывай agent_id — если в сообщении не указано чёткое имя, используй
    request_clarification и спроси у owner-а.
 6. Для destructive actions (delete_agent, revoke_key, mass_dm, purge_data) — ты ВСЁ
-   РАВНО возвращаешь это action в JSON. Approval gate срабатывает на стороне runtime,
-   не на стороне твоей классификации.
+   РАВНО возвращаешь это action. Approval gate срабатывает на стороне runtime.
+   Если в plan есть destructive — owner подтвердит ВСЮ chain одним YES.
 
 ДОСТУПНЫЕ ДЕЙСТВИЯ:
 {actions_block}
@@ -213,22 +219,42 @@ Owner: «статус всех агентов»
 → {{"action":"query_status","args":{{}},"reasoning":"запрос на список и состояние агентов","confidence":0.95}}
 
 Owner: «передай растру задачу подготовить отчёт»
-→ {{"action":"send_dm","args":{{"to":"rastr","text":"Подготовь отчёт"}},"reasoning":"forward задачи агенту rastr","confidence":0.85}}
+→ {{"action":"send_dm","args":{{"to":"rastr","text":"Подготовь отчёт"}},"reasoning":"forward","confidence":0.9}}
 
 Owner: «удали тестового агента test-bot»
-→ {{"action":"delete_agent","args":{{"agent_id":"test-bot"}},"reasoning":"запрос на удаление; destructive","confidence":0.9}}
+→ {{"action":"delete_agent","args":{{"agent_id":"test-bot"}},"reasoning":"destructive","confidence":0.9}}
 
 Owner: «кто онлайн?»
-→ {{"action":"query_status","args":{{}},"reasoning":"запрос на список онлайн агентов","confidence":0.95}}
+→ {{"action":"query_status","args":{{}},"reasoning":"список онлайн","confidence":0.95}}
 
 Owner: «передай ему задачу»
-→ {{"action":"request_clarification","args":{{"question":"Кому именно передать задачу? Укажи agent_id."}},"reasoning":"нет указания получателя","confidence":0.95}}
+→ {{"action":"request_clarification","args":{{"question":"Кому именно? Укажи agent_id."}},"reasoning":"нет получателя","confidence":0.95}}
 
 Owner: «напиши стих про осень»
-→ {{"action":"refuse","args":{{"reason":"Я диспетчер задач между агентами, не могу генерировать художественный контент. Попроси у другого помощника."}},"reasoning":"вне моей роли","confidence":0.9}}
+→ {{"action":"refuse","args":{{"reason":"Я диспетчер задач между агентами, не могу генерировать художественный контент."}},"reasoning":"вне роли","confidence":0.9}}
 
-Owner: «отзови ключ abc123def456...»
-→ {{"action":"revoke_key","args":{{"api_key":"abc123def456..."}},"reasoning":"запрос на revoke; destructive","confidence":0.9}}
+ПРИМЕРЫ MULTI-STEP PLAN:
+
+Owner: «вступи в комнату с ключом rk_ABC и напиши там Привет команда»
+→ {{"plan":[
+     {{"action":"room_join","args":{{"room_key":"rk_ABC"}}}},
+     {{"action":"room_post","args":{{"room_key":"rk_ABC","text":"Привет команда"}}}}
+   ],"reasoning":"join + post в комнату","confidence":0.9}}
+
+Owner: «опиши видео media_id=vid-123 в комнате rk_XYZ»
+→ {{"plan":[
+     {{"action":"analyze_media","args":{{"media_id":"vid-123"}}}},
+     {{"action":"room_post","args":{{"room_key":"rk_XYZ","text":"<вставь сюда результат analyze_media — orchestrator сам подставит, ты пиши placeholder STEP1_RESULT>"}}}}
+   ],"reasoning":"analyze_media + post в комнату","confidence":0.85}}
+
+Owner: «найди в памяти упоминания deploy и перешли результаты растру»
+→ {{"plan":[
+     {{"action":"cognitive_recall","args":{{"query":"deploy","top_k":5}}}},
+     {{"action":"send_dm","args":{{"to":"rastr","text":"STEP1_RESULT"}}}}
+   ],"reasoning":"recall + forward","confidence":0.85}}
+
+В multi-step plan можно ссылаться на результат предыдущего шага через placeholder
+"STEP1_RESULT", "STEP2_RESULT" — runtime автоматически подставит текст результата.
 
 ОТВЕЧАЙ ТОЛЬКО JSON, БЕЗ ПОЯСНЕНИЙ."""
 
@@ -305,6 +331,56 @@ def validate_action(parsed: dict) -> dict:
 
 def is_destructive(action: str) -> bool:
     return action in DESTRUCTIVE_ACTIONS
+
+
+def extract_plan(parsed: dict) -> list[dict]:
+    """Возвращает list of validated steps из LLM-ответа.
+
+    Поддерживает 2 формата:
+    1. Single-action: {"action": "...", "args": {...}, ...}
+       → возвращает [validate_action(parsed)]
+    2. Multi-step: {"plan": [{"action": "...", "args": {...}}, ...], ...}
+       → возвращает [validate_action(step) for step in plan][:5] (cap)
+
+    Каждый step содержит {action, args, reasoning, confidence, valid, error}.
+    Если valid=False — step заменён на refuse/request_clarification.
+    """
+    if "plan" in parsed and isinstance(parsed["plan"], list):
+        plan = parsed["plan"][:5]  # safety cap — макс 5 шагов
+        reasoning = parsed.get("reasoning") or ""
+        confidence = float(parsed.get("confidence") or 0.0)
+        steps = []
+        for step_idx, raw_step in enumerate(plan):
+            step_with_meta = dict(raw_step)
+            step_with_meta.setdefault("reasoning", f"step {step_idx+1} of plan: {reasoning}")
+            step_with_meta.setdefault("confidence", confidence)
+            steps.append(validate_action(step_with_meta))
+        if not steps:
+            return [validate_action({"action": "refuse", "args": {"reason": "Empty plan"}})]
+        return steps
+    # Backward compat: single action wrapped in list
+    return [validate_action(parsed)]
+
+
+def plan_has_destructive(steps: list[dict]) -> list[str]:
+    """Возвращает имена destructive actions в plan (для approval summary)."""
+    return [s["action"] for s in steps if is_destructive(s["action"])]
+
+
+def substitute_step_placeholders(args: dict, prev_results: list[str]) -> dict:
+    """Подставляет STEP1_RESULT, STEP2_RESULT, ... в args значения.
+
+    Например: args={"text": "STEP1_RESULT"} + prev_results=["hello"] → args={"text": "hello"}.
+    """
+    if not prev_results:
+        return args
+    out = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            for i, result in enumerate(prev_results, 1):
+                v = v.replace(f"STEP{i}_RESULT", result[:2000])
+        out[k] = v
+    return out
 
 
 def expand_mass_dm_threshold(action: str, args: dict) -> str:

@@ -52,6 +52,9 @@ try:
         decision_payload,
         expand_mass_dm_threshold,
         is_destructive,
+        extract_plan,
+        plan_has_destructive,
+        substitute_step_placeholders,
         is_owner_message,
         parse_llm_json,
         sanitize_for_remember,
@@ -259,7 +262,19 @@ class DeepSeekParser:
         await self._http.aclose()
 
     async def parse(self, source_agent: str, text: str) -> dict:
-        """Возвращает validated action dict."""
+        """Возвращает validated single-action dict (backward compat)."""
+        raw = await self.parse_raw(source_agent, text)
+        # Если raw уже refuse от error path — не валидируем повторно
+        if raw.get("error") and not raw.get("valid", True):
+            return raw
+        return validate_action(raw)
+
+    async def parse_raw(self, source_agent: str, text: str) -> dict:
+        """Возвращает RAW LLM dict — может содержать 'action' (single) или 'plan' (multi).
+
+        Для multi-step planning. Используется в process_message → extract_plan().
+        При ошибке парсинга возвращает {action:'refuse', _parse_error:...}.
+        """
         prompt = build_system_prompt(self.cfg.orchestrator_id)
         user_msg = f"От {source_agent}: {text}"
         try:
@@ -272,15 +287,14 @@ class DeepSeekParser:
                         {"role": "user", "content": user_msg},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 600,
+                    "max_tokens": 800,
                 },
             )
             r.raise_for_status()
             data = r.json()
             content = (data["choices"][0]["message"].get("content") or "").strip()
             log.debug("DeepSeek raw: %s", content[:300])
-            parsed = parse_llm_json(content)
-            return validate_action(parsed)
+            return parse_llm_json(content)
         except json.JSONDecodeError as e:
             log.warning("LLM JSON parse failed: %s; raw=%r", e, content if 'content' in locals() else None)
             return {
@@ -747,71 +761,101 @@ class OrchestratorDaemon:
 
         log.info("processing DM from %s: %s", source, text[:100])
 
-        # Parse
-        parsed = await self.parser.parse(source, text)
-        action_name = parsed["action"]
-        args = parsed["args"]
+        # Parse → either single action or multi-step plan
+        parsed_raw = await self.parser.parse_raw(source, text)
+        steps = extract_plan(parsed_raw)
+        is_multi_step = len(steps) > 1
+        log.info("plan has %d step(s): %s", len(steps), [s["action"] for s in steps])
 
-        # broadcast → mass_dm escalation if too many recipients
-        upgraded = expand_mass_dm_threshold(action_name, args)
-        if upgraded != action_name:
-            log.info("upgraded action %s → %s (large broadcast)", action_name, upgraded)
-            parsed["action"] = upgraded
-            action_name = upgraded
+        # Escalate broadcast→mass_dm в каждом step
+        for s in steps:
+            upgraded = expand_mass_dm_threshold(s["action"], s["args"])
+            if upgraded != s["action"]:
+                log.info("upgraded step action %s → %s", s["action"], upgraded)
+                s["action"] = upgraded
 
-        # Approval gate
-        requires_approval = is_destructive(action_name)
+        # Approval gate — для ВСЕЙ chain если есть destructive
+        destructive_steps = plan_has_destructive(steps)
+        requires_approval = bool(destructive_steps)
         approval_status = "not_required"
+
         if requires_approval:
             if source != self.cfg.owner_agent_id:
-                # Только owner может инициировать destructive
                 refusal = (
-                    f"Команда {action_name} помечена как destructive — "
-                    f"только owner может её инициировать. Твой запрос отклонён."
+                    f"План содержит destructive actions ({', '.join(destructive_steps)}) — "
+                    f"только owner может их инициировать. Запрос отклонён."
                 )
                 await self._reply(source, refusal)
                 await self.log_decision(decision_payload(
                     source_agent=source,
                     source_text=text,
-                    parsed=parsed,
+                    parsed={"plan": steps, "destructive": destructive_steps},
                     requires_approval=True,
                     approval_status="declined_non_owner",
                     execution_result={"ok": False, "message": refusal},
                 ))
                 return
-            # Owner запросил destructive → request approval from owner (self-approval flow)
-            approved, status = await self.request_approval(source, parsed, text)
+            # Single approval covers entire chain — show all destructive actions
+            approval_summary = {
+                "action": f"chain[{','.join(destructive_steps)}]" if is_multi_step else steps[0]["action"],
+                "args": {"steps": [{"a": s["action"], "args": s["args"]} for s in steps]},
+            }
+            approved, status = await self.request_approval(source, approval_summary, text)
             approval_status = status
             if not approved:
-                msg_txt = f"Действие {action_name} НЕ выполнено (approval status: {status})."
+                msg_txt = f"План НЕ выполнен (approval status: {status})."
                 await self._reply(source, msg_txt)
                 await self.log_decision(decision_payload(
                     source_agent=source,
                     source_text=text,
-                    parsed=parsed,
+                    parsed={"plan": steps},
                     requires_approval=True,
                     approval_status=status,
                     execution_result={"ok": False, "message": msg_txt},
                 ))
                 return
 
-        # Execute
-        result = await self.executor.execute(action_name, args, source)
+        # Execute steps sequentially, stop on first failure
+        step_results = []
+        step_messages = []
+        final_ok = True
+        for idx, step in enumerate(steps):
+            # Подставить STEP{N}_RESULT placeholders в args из предыдущих результатов
+            substituted_args = substitute_step_placeholders(step["args"], step_messages)
+            result = await self.executor.execute(step["action"], substituted_args, source)
+            step_results.append(result)
+            step_messages.append(result.get("message") or "")
+            if not result.get("ok", False):
+                log.warning("step %d (%s) failed: %s — stopping chain", idx+1, step["action"], result.get("message"))
+                final_ok = False
+                break
 
-        # Reply
-        reply_text = result.get("message", "(executed; no message)")
-        # Prefix с meta info чтобы человек видел orchestrator-ответ vs обычный DM
+        # Compose reply — single result for 1-step, multi-block for chain
+        if is_multi_step:
+            reply_lines = []
+            for i, (s, r) in enumerate(zip(steps[:len(step_results)], step_results), 1):
+                mark = "✓" if r.get("ok") else "✗"
+                msg = (r.get("message") or "(no message)")[:800]
+                reply_lines.append(f"{mark} step {i} ({s['action']}): {msg}")
+            if final_ok:
+                reply_lines.insert(0, f"План из {len(step_results)} шагов выполнен:")
+            else:
+                reply_lines.insert(0, f"План прерван после {len(step_results)} из {len(steps)} шагов:")
+            reply_text = "\n".join(reply_lines)
+        else:
+            reply_text = step_results[0].get("message", "(executed; no message)")
+
         prefix = "[orchestrator] "
         await self._reply(source, prefix + reply_text[:3500])
 
-        # Log
+        # Log entire plan
         await self.log_decision(decision_payload(
             source_agent=source,
             source_text=text,
-            parsed=parsed,
+            parsed={"plan": steps, "multi_step": is_multi_step},
             requires_approval=requires_approval,
             approval_status=approval_status,
-            execution_result=result,
+            execution_result={"ok": final_ok, "step_results": [{"action": s["action"], "ok": r.get("ok"), "message": (r.get("message") or "")[:200]} for s, r in zip(steps, step_results)]},
         ))
 
     async def _reply(self, to: str, text: str) -> None:
