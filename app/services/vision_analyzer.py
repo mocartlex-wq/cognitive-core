@@ -46,10 +46,101 @@ QWEN_MAX_FRAMES = int(os.environ.get("QWEN_MAX_FRAMES", "12"))
 QWEN_MAX_OUTPUT_TOKENS = int(os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "800"))
 QWEN_TIMEOUT_SECONDS = float(os.environ.get("QWEN_TIMEOUT_SECONDS", "60"))
 
+# DeepSeek (text-only fallback) — если Qwen vision недоступен/403, используем
+# DeepSeek для text-based mechanics из Whisper-transcript. Полезно для видео
+# с аудио (обучающие, разговоры, презентации). Для silent videos — даст
+# базовый mechanics summary на основе длительности + frame count.
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip()
+
 
 def is_enabled() -> bool:
-    """True если QWEN_API_KEY есть в env — vision stage активен."""
+    """True если хотя бы один из providers (Qwen vision или DeepSeek text) доступен."""
+    return bool(QWEN_API_KEY) or bool(DEEPSEEK_API_KEY)
+
+
+def has_vision() -> bool:
+    """True если Qwen vision доступен (полный анализ кадров)."""
     return bool(QWEN_API_KEY)
+
+
+def has_text_fallback() -> bool:
+    """True если DeepSeek доступен (text-only mechanics fallback)."""
+    return bool(DEEPSEEK_API_KEY)
+
+
+async def _analyze_text_only_deepseek(
+    transcript: Optional[str],
+    duration_seconds: Optional[float],
+    frame_count: int,
+) -> dict:
+    """Fallback: text-only mechanics через DeepSeek.
+
+    Используется когда Qwen vision недоступен (нет ключа, 403, 401, и т.д.).
+    Опирается ТОЛЬКО на transcript + metadata (длительность, кол-во кадров).
+    Для видео БЕЗ аудио (silent) — даст минимальный обобщённый summary.
+    """
+    if not DEEPSEEK_API_KEY:
+        return {"error": "deepseek_unavailable", "skipped": True}
+
+    has_audio = bool(transcript and transcript.strip())
+    if not has_audio:
+        # Silent video — нет смысла дёргать LLM, дай простой summary
+        return {
+            "mechanics_summary": (
+                f"Видео {duration_seconds:.1f}с без аудиодорожки, {frame_count} кадров. "
+                f"Для описания визуального содержимого нужен vision-провайдер."
+            ) if duration_seconds else f"Silent video, {frame_count} frames.",
+            "model": "n/a (silent, no LLM call)",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "fallback": "text_only_silent",
+        }
+
+    system_prompt = (
+        "Ты анализируешь короткие видео по их транскрипту аудио. "
+        "Опиши МЕХАНИКУ происходящего (что делается, какой процесс) "
+        "в 2-4 предложениях на русском. По делу, без воды."
+    )
+    user_msg = (
+        f"Видео длительностью {duration_seconds:.1f} сек ({frame_count} кадров). "
+        f"Транскрипт аудио:\n«{transcript[:3000]}»\n\n"
+        f"Опиши механику в 2-4 предложениях."
+    )
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 500,
+        "temperature": 0.2,
+    }
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(f"{DEEPSEEK_BASE_URL}/chat/completions", json=payload, headers=headers)
+    except (httpx.TimeoutException, httpx.HTTPError) as e:
+        return {"error": f"deepseek_error: {e}"}
+    if r.status_code != 200:
+        return {"error": f"deepseek_http_{r.status_code}: {r.text[:200]}"}
+    try:
+        data = r.json()
+        msg = data["choices"][0]["message"]["content"].strip()
+        usage = data.get("usage", {})
+        return {
+            "mechanics_summary": msg,
+            "model": DEEPSEEK_MODEL,
+            "tokens_in": usage.get("prompt_tokens", 0),
+            "tokens_out": usage.get("completion_tokens", 0),
+            "fallback": "text_only_deepseek",
+        }
+    except (KeyError, IndexError, ValueError) as e:
+        return {"error": f"deepseek_parse: {e}"}
 
 
 _SYSTEM_PROMPT = (
@@ -86,11 +177,17 @@ async def analyze_mechanics(
           "tokens_out": int,
         }
     """
+    # Если нет ни Qwen, ни DeepSeek — vision stage полностью disabled
     if not is_enabled():
-        return {"error": "QWEN_API_KEY not configured", "skipped": True}
+        return {"error": "no vision provider configured", "skipped": True}
 
     if not frame_urls:
         return {"error": "no frames provided", "skipped": True}
+
+    # Если Qwen ключа нет — сразу fallback на DeepSeek text-only
+    if not QWEN_API_KEY:
+        logger.info("Qwen unavailable, using DeepSeek text-only fallback")
+        return await _analyze_text_only_deepseek(transcript, duration_seconds, len(frame_urls))
 
     # Cost guard: cap frames
     capped_frames = frame_urls[:QWEN_MAX_FRAMES]
@@ -145,6 +242,15 @@ async def analyze_mechanics(
 
     if r.status_code != 200:
         body_preview = r.text[:400]
+        # Auth/permission ошибки → fallback на DeepSeek text-only (если доступен)
+        if r.status_code in (401, 403) and DEEPSEEK_API_KEY:
+            logger.warning(
+                "Qwen vision %d (auth/permission denied) — falling back to DeepSeek text-only. "
+                "body=%s", r.status_code, body_preview[:200]
+            )
+            result = await _analyze_text_only_deepseek(transcript, duration_seconds, len(capped_frames))
+            result.setdefault("qwen_error", f"http_{r.status_code}: {body_preview[:200]}")
+            return result
         logger.warning("Qwen vision non-200: %d body=%s", r.status_code, body_preview)
         return {"error": f"http_{r.status_code}: {body_preview}"}
 
