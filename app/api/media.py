@@ -244,29 +244,41 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
             except Exception as e:
                 logger.warning("frame upload failed key=%s err=%s", key, e)
 
-        # Vision stage — Qwen-VL анализ «механики» видео (опц., если QWEN_API_KEY есть).
-        # Owner-mandate 2026-05-24: «дать возможность механики, а не картинок».
-        # Qwen смотрит на 12 frames + transcript → возвращает 2-4 предложения
-        # что происходит. Если ключа нет — stage пропускается, базовый pipeline OK.
+        # Vision stage — multi-provider анализ «механики» видео.
+        # Owner-mandate 2026-05-24: «дать возможность механики, а не картинок» +
+        # per-tenant external keys (PR #52): сначала пытаемся ключами owner'а
+        # (qwen → minimax → gigachat → claude → openai → gemini), потом fallback
+        # на shared platform Qwen, потом DeepSeek text-only. owner_user_id берём
+        # из auth-context — у _OwnerCtx это marker «owner-key@cognitive-core»,
+        # для него tenant keys не применимы (resolve fails — fallthrough на shared).
         vision_result: dict = {}
         try:
-            from app.services.vision_analyzer import analyze_mechanics, is_enabled as _vision_enabled
-            if _vision_enabled() and frame_records:
-                # Build absolute frame URLs (Qwen скачивает по public HTTPS)
+            from app.services.vision_analyzer import analyze_mechanics
+            if frame_records:
+                # Build absolute frame URLs — вне зависимости provider, public HTTPS.
                 base_url = os.environ.get("PUBLIC_BASE_URL", "https://mcp.me-ai.ru").rstrip("/")
                 abs_urls = [
                     f"{base_url}{fr['url']}" if fr["url"].startswith("/") else fr["url"]
                     for fr in frame_records
                 ]
+                # owner_user_id — UUID-string или None. Для _OwnerCtx user_id =
+                # "owner-key" (не UUID) — analyze_mechanics поймает ошибку UUID
+                # cast в _load_tenant_keys и пропустит tenant-stage.
+                resolved_owner = None
+                uid = getattr(user, "user_id", None)
+                if uid and uid != "owner-key":
+                    resolved_owner = uid
                 vision_result = await analyze_mechanics(
                     frame_urls=abs_urls,
                     transcript=analysis.get("transcript"),
                     duration_seconds=analysis.get("duration"),
+                    owner_user_id=resolved_owner,
                 )
                 if vision_result.get("mechanics_summary"):
                     logger.info(
-                        "vision mechanics for media_id=%s tokens=%d/%d: %s",
+                        "vision mechanics for media_id=%s source=%s tokens=%d/%d: %s",
                         media_id,
+                        vision_result.get("provider_source", "?"),
                         vision_result.get("tokens_in", 0),
                         vision_result.get("tokens_out", 0),
                         vision_result["mechanics_summary"][:120],
@@ -295,6 +307,7 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
             "frames_count": len(frame_records),
             "mechanics_summary": vision_result.get("mechanics_summary") or None,
             "vision_provider": vision_result.get("model") if vision_result.get("mechanics_summary") else None,
+            "vision_provider_source": vision_result.get("provider_source") if vision_result.get("mechanics_summary") else None,
             "vision_tokens": (
                 {"in": vision_result.get("tokens_in"), "out": vision_result.get("tokens_out")}
                 if vision_result.get("mechanics_summary") else None

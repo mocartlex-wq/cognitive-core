@@ -30,3 +30,7 @@ faster-whisper==1.0.*
 Pillow>=10.3.0,<11.0.0
 # QR-кодов для mobile onboarding wizard (2026-05-21). PIL-backend, без extra deps.
 qrcode==7.4.*
+# Fernet symmetric encryption для per-tenant external AI keys (2026-05-24).
+# Master key из env COGCORE_SECRETS_MASTER_KEY (32-byte base64); если не задан,
+# vault поднимет warning + сгенерирует ephemeral key (dev only).
+cryptography>=42.0,<46.0

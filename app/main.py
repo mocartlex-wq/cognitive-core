@@ -287,6 +287,12 @@ app.include_router(openapi_router)
 from app.api.admin import router as admin_router
 app.include_router(admin_router)
 
+# Per-tenant external AI provider keys (2026-05-24): /user/settings/external-key*
+# Owner-mandate: opt-in tenant keys для Qwen / MiniMax / GigaChat / Claude / OpenAI / Gemini,
+# чтобы каждый платил со своего api_key, а не со shared платформенного.
+from app.api.user_settings import router as user_settings_router
+app.include_router(user_settings_router)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # UI страницы
