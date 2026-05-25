@@ -31,6 +31,10 @@ COPY requirements.txt .
 COPY requirements-gpu.txt .
 
 # Сначала ставим основные deps, затем подменяем onnxruntime на onnxruntime-gpu
+# Upgrade pip first — nvidia/cuda:12.9.2-cudnn-runtime image ships pip 22.x
+# which doesn't support --break-system-packages flag (added in pip 23.0.1+).
+RUN pip install --upgrade pip
+
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt \
     && pip install --no-cache-dir --break-system-packages -r requirements-gpu.txt
 
