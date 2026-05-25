@@ -33,6 +33,9 @@ log() {
 pass() { PASS=$((PASS+1)); log "PASS  $1: $2"; }
 warn() { WARN=$((WARN+1)); WARN_DETAILS="$WARN_DETAILS\n$1: $2"; log "WARN  $1: $2"; }
 fail() { FAIL=$((FAIL+1)); FAIL_DETAILS="$FAIL_DETAILS\n$1: $2"; log "FAIL  $1: $2"; }
+# info() — informational, not counted as pass/warn/fail. Используется для
+# may-blocked провайдеров (РФ VPS не доходит, но tenants outside РФ работают).
+info() { log "INFO  $1: $2"; }
 
 log "════════ nightly-health-suite start ════════"
 
@@ -55,27 +58,41 @@ else
 fi
 
 # ─── T3: provider URLs reachable (WARN not FAIL — vendors throttle HEAD) ────
-declare -A PROVIDERS=(
+# Категоризируем: MUST-pass (доступны из РФ напрямую) vs MAY-BLOCKED (часто
+# таймаутят с РФ VPS egress из-за региональных блокировок или CloudFlare).
+# MAY-BLOCKED → log как INFO, не WARN — иначе nightly постоянно alerts впустую.
+declare -A PROVIDERS_DIRECT=(
   ["openrouter"]="https://openrouter.ai/"
-  ["minimax"]="https://platform.minimax.io/"
-  ["sber"]="https://developers.sber.ru/studio"
-  ["claude"]="https://platform.claude.com/"
   ["openai"]="https://platform.openai.com/"
   ["gemini"]="https://aistudio.google.com/"
 )
-T3_DOWN=0
-for name in "${!PROVIDERS[@]}"; do
-  url="${PROVIDERS[$name]}"
+declare -A PROVIDERS_MAY_BLOCKED=(
+  ["minimax"]="https://platform.minimax.io/"
+  ["sber"]="https://developers.sber.ru/studio"
+  ["claude"]="https://platform.claude.com/"
+)
+T3_DIRECT_DOWN=0
+T3_BLOCKED_DOWN=0
+for name in "${!PROVIDERS_DIRECT[@]}"; do
+  url="${PROVIDERS_DIRECT[$name]}"
   code=$(curl -s -L -o /dev/null --max-time 8 -A "Mozilla/5.0 (cogcore-nightly)" \
     -w "%{http_code}" "$url" 2>/dev/null)
-  # 200/301/302/403 (Cloudflare) all = endpoint alive
   case "$code" in
     200|301|302|307|308|403) ;;
-    *) T3_DOWN=$((T3_DOWN+1)); warn T3 "$name unreachable (HTTP $code at $url)" ;;
+    *) T3_DIRECT_DOWN=$((T3_DIRECT_DOWN+1)); warn T3 "$name (must-pass) unreachable (HTTP $code at $url)" ;;
   esac
 done
-if [ "$T3_DOWN" -eq 0 ]; then
-  pass T3 "all 6 provider URLs reachable"
+for name in "${!PROVIDERS_MAY_BLOCKED[@]}"; do
+  url="${PROVIDERS_MAY_BLOCKED[$name]}"
+  code=$(curl -s -L -o /dev/null --max-time 8 -A "Mozilla/5.0 (cogcore-nightly)" \
+    -w "%{http_code}" "$url" 2>/dev/null)
+  case "$code" in
+    200|301|302|307|308|403) ;;
+    *) T3_BLOCKED_DOWN=$((T3_BLOCKED_DOWN+1)); info T3 "$name unreachable from RU VPS (HTTP $code) — provider may still work for tenants outside RU" ;;
+  esac
+done
+if [ "$T3_DIRECT_DOWN" -eq 0 ]; then
+  pass T3 "all direct provider URLs reachable ($T3_BLOCKED_DOWN may-blocked info-only)"
 fi
 
 # ─── T4: MinIO media-frames bucket alive ───────────────────────

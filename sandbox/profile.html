@@ -1137,9 +1137,14 @@
   // Provider links — landing pages, не deep links (deep ссылки часто меняются).
   // Tenant сам найдёт «Get API Key» в их UI после логина.
   const PROVIDER_HINTS = {
+    openrouter: {
+      icon: '🌐',
+      desc: 'OpenRouter — мульти-провайдер. Один ключ → Qwen-VL, Claude, GPT, Gemini. Оплата USDT/крипта (без зарубежной карты). Рекомендую для РФ-tenants.',
+      where: 'https://openrouter.ai/keys',
+    },
     qwen: {
       icon: '🐲',
-      desc: 'Qwen-VL — лучший для русского. ⚠️ Alibaba DashScope требует Real-Name verification (паспорт КНР). Проще через OpenRouter (USDT, без региональных проблем).',
+      desc: 'Qwen-VL прямо у Alibaba. ⚠️ DashScope требует Real-Name verification. Проще через OpenRouter (см. выше).',
       where: 'https://openrouter.ai/keys',
     },
     minimax: {
