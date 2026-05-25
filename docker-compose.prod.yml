@@ -102,6 +102,13 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
       - nginx_logs:/var/log/nginx
+    # Multi-network: default + ai-crm_aicrm (shared, for resolving ai-crm-backend
+    # upstream in nginx/conf.d/ai-crm.conf). Without this, docker daemon restart
+    # breaks network sandbox and upstream resolution fails → nginx restart-loop.
+    # Incident 2026-05-25 (latent since 2026-05-23).
+    networks:
+      - default
+      - ai-crm_aicrm
     deploy:
       resources:
         limits: { cpus: '0.5', memory: 256M }
@@ -280,3 +287,12 @@ volumes:
     name: cognitive_whisper_cache
   gitea_data:
     name: cognitive_gitea_data
+
+# External network references (managed by other stacks). Cognitive nginx joins
+# ai-crm_aicrm so it can resolve ai-crm-backend upstream in nginx/conf.d/ai-crm.conf
+# without depending on docker DNS being re-bootstrapped after daemon restart.
+networks:
+  default:
+    name: cognitive-core_default
+  ai-crm_aicrm:
+    external: true
