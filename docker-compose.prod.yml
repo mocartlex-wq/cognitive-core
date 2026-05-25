@@ -113,9 +113,12 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     deploy:
       resources:
-        # Bumped: ffmpeg + Whisper транскрипция жрут CPU/RAM при анализе видео
-        limits: { cpus: '2.0', memory: 3G }
-        reservations: { cpus: '0.5', memory: 1G }
+        # Bumped 2026-05-25: uvicorn --workers 4 + Whisper pre-cache per worker
+        # (~150MB × 4) + ffmpeg + sklearn caches = upper bound ~5GB. 3GB was
+        # crushing api into OOM-pressure (200% CPU stalls). 8GB gives headroom.
+        # Host has 31GB total, плюс postgres 6G + остальное < 4G — запас ~13GB.
+        limits: { cpus: '3.0', memory: 8G }
+        reservations: { cpus: '1.0', memory: 2G }
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
