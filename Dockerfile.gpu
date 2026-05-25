@@ -9,8 +9,9 @@
 #   - nvidia-container-toolkit (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
 #   - Docker Compose v2
 
-# Базовый образ с CUDA 12.4 runtime + Python 3.11
-FROM nvidia/cuda:12.2.0-cudnn8-runtime-ubuntu22.04
+# Базовый образ с CUDA 12.9 + cuDNN 9 runtime + Python 3.11
+# (driver 535+ supports CUDA 12.9 forward-compat)
+FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu22.04
 
 WORKDIR /app
 
