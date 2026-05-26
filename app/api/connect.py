@@ -906,17 +906,28 @@ async def claim_token(token: str, request: Request):
         )
         if pending:
             api_key = secrets.token_urlsafe(32)
-            await conn.execute(
-                "INSERT INTO agent_keys (api_key, agent_id, description, owner_user_id) "
-                "VALUES ($1, $2, $3, $4::uuid) ON CONFLICT (agent_id) DO UPDATE SET api_key=EXCLUDED.api_key, revoked_at=NULL",
-                api_key, requested_agent_id,
-                f"Claim-onboarded at {datetime.utcnow().isoformat()}",
-                entry["user_id"],
-            )
-            await conn.execute(
-                "UPDATE agent_states SET status='active', machine=COALESCE($2, machine) WHERE agent_id=$1",
-                requested_agent_id, entry.get("machine_hint"),
-            )
+            # FIX 2026-05-26: agent_keys PRIMARY KEY = (api_key) only — нет UNIQUE
+            # на agent_id, поэтому ON CONFLICT (agent_id) падает с
+            # InvalidColumnReferenceError → HTTP 500. Делаем atomic revoke-old +
+            # insert-new в транзакции. Старые keys остаются в таблице с
+            # revoked_at для audit-trail.
+            async with conn.transaction():
+                await conn.execute(
+                    "UPDATE agent_keys SET revoked_at = NOW() "
+                    "WHERE agent_id = $1 AND revoked_at IS NULL",
+                    requested_agent_id,
+                )
+                await conn.execute(
+                    "INSERT INTO agent_keys (api_key, agent_id, description, owner_user_id) "
+                    "VALUES ($1, $2, $3, $4::uuid)",
+                    api_key, requested_agent_id,
+                    f"Claim-onboarded at {datetime.utcnow().isoformat()}",
+                    entry["user_id"],
+                )
+                await conn.execute(
+                    "UPDATE agent_states SET status='active', machine=COALESCE($2, machine) WHERE agent_id=$1",
+                    requested_agent_id, entry.get("machine_hint"),
+                )
             agent = {"api_key": api_key, "agent_id": requested_agent_id}
 
     if api_key is None:

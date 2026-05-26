@@ -34,3 +34,7 @@ qrcode==7.4.*
 # Master key из env COGCORE_SECRETS_MASTER_KEY (32-byte base64); если не задан,
 # vault поднимет warning + сгенерирует ephemeral key (dev only).
 cryptography>=42.0,<46.0
+# NATS client для replication outbox (app/replication/outbox.py).
+# Пакет на PyPI — `nats-py`, импорт — `import nats`. Без него log flooded
+# с `module 'nats' has no attribute 'connect'` каждые 100мс. 2026-05-26.
+nats-py==2.9.*
