@@ -331,6 +331,12 @@ async def admin_media_page():
     return _html("admin-media.html")
 
 
+@app.get("/ui/admin/rule-proposals")
+async def admin_rule_proposals_page():
+    """Admin: review pending rule proposals from tenants."""
+    return _html("admin-rule-proposals.html")
+
+
 @app.get("/ui/connect")
 async def connect_page():
     """Wizard «Подключить помощника» — 5-step flow для любой платформы."""
