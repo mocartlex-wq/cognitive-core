@@ -89,8 +89,10 @@ def _sanitize_dict(obj, warnings, parent_key=""):
 
 
 def _clean_string(value: str, warnings: list, key_path: str) -> str:
-    if SQL_PATTERN.search(value):
-        raise ValueError(f"SQL injection detected in field '{key_path}'")
+    # SQL_PATTERN check removed 2026-05-26 per ewewew feedback:
+    # все queries в app/ параметризованные (asyncpg $1/$2) — injection невозможна.
+    # Прошлый filter блокировал валидные em-dash, double-hyphens, shell args
+    # (e.g. "pytest -- -k", lessons про SQL injection).
     if JS_PATTERN.search(value):
         raise ValueError(f"JavaScript injection detected in field '{key_path}'")
     if SHELL_PATTERN.search(value):

@@ -327,6 +327,102 @@
     </p>
     <div id="externalKeysBlock" class="empty">Загружаем…</div>
   </div>
+  <!-- Agent Operating Rules — Phase 6 -->
+  <div class="card">
+    <h2>🎯 Правила для агентов</h2>
+    <div id="platformRulesBanner" class="msg-line"
+         style="background:rgba(88,166,255,0.08);border-left:3px solid var(--glass-orb-1);padding:10px 14px;border-radius:4px;margin-bottom:14px">
+      Загружаем платформенные правила…
+    </div>
+
+    <h3 style="font-size:15px;margin:14px 0 8px;color:var(--glass-text)">Мои правила</h3>
+    <div id="userRulesBlock" class="empty">Загружаем…</div>
+    <button class="btn btn-sm" id="addRuleBtn" style="margin-top:10px">➕ Добавить правило</button>
+
+    <h3 style="font-size:15px;margin:22px 0 8px;color:var(--glass-text)">Предложить новое правило для платформы</h3>
+    <p class="msg-line" style="font-size:12.5px">
+      Если 3+ tenants проголосуют ↑ за ваше предложение — оно попадёт на review
+      AI-куратора + админа платформы. При approve правило станет официальным.
+    </p>
+    <button class="btn btn-sm" id="proposeRuleBtn" style="margin-top:6px">➕ Предложить правило</button>
+
+    <details style="margin-top:18px">
+      <summary style="cursor:pointer;font-size:15px;color:var(--glass-text);font-weight:600;padding:6px 0;user-select:none">
+        Мои предложения <span id="ownProposalsCount" class="meta" style="margin-left:6px;font-weight:400;font-size:12.5px">(0)</span>
+      </summary>
+      <div id="ownProposalsBlock" class="empty" style="font-size:13px;margin-top:8px">Загружаем…</div>
+    </details>
+
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:15px;color:var(--glass-text);font-weight:600;padding:6px 0;user-select:none">
+        Голосование за предложения от других <span id="publicProposalsCount" class="meta" style="margin-left:6px;font-weight:400;font-size:12.5px">(0)</span>
+      </summary>
+      <p class="msg-line" style="font-size:12.5px;margin:6px 0">
+        Чужие proposals — для тех кто хочет помочь развивать платформу. Открывайте по желанию.
+      </p>
+      <div id="publicProposalsBlock" class="empty" style="font-size:13px;margin-top:8px">Загружаем…</div>
+    </details>
+  </div>
+
+  <dialog id="addRuleDialog" style="background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:12px;padding:24px;color:var(--glass-text);max-width:520px;width:90%">
+    <h3 style="margin:0 0 14px">Добавить своё правило</h3>
+    <form id="addRuleForm">
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Rule ID (короткий идентификатор)</label>
+      <input name="rule_id" pattern="^[\w.\-]+$" minlength="3" maxlength="128" placeholder="my-commit-russian" required style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;font-family:var(--mono);font-size:13px;box-sizing:border-box">
+
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Scope</label>
+      <select name="scope" required style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;box-sizing:border-box">
+        <option value="general">general (общее правило)</option>
+        <option value="pre-answer">pre-answer (перед ответом)</option>
+        <option value="post-task">post-task (после задачи)</option>
+        <option value="per-task">per-task (на каждую задачу)</option>
+        <option value="mid-task">mid-task (во время выполнения)</option>
+      </select>
+
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Severity</label>
+      <select name="severity" style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;box-sizing:border-box">
+        <option value="user">user (моё личное правило)</option>
+        <option value="recommended">recommended (override платформенного, если применимо)</option>
+      </select>
+
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Текст правила</label>
+      <textarea name="body" required minlength="5" maxlength="2000" rows="4" placeholder="Например: всегда писать commit-сообщения на русском языке" style="width:100%;padding:10px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box;margin-bottom:14px"></textarea>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" class="btn secondary btn-sm" data-close="addRuleDialog">Отмена</button>
+        <button type="submit" class="btn btn-sm">Добавить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="proposeRuleDialog" style="background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:12px;padding:24px;color:var(--glass-text);max-width:520px;width:90%">
+    <h3 style="margin:0 0 14px">Предложить новое правило для платформы</h3>
+    <p class="msg-line" style="font-size:12.5px;margin-bottom:14px">
+      Опишите правило которое полезно ВСЕМ агентам на платформе, не только вашим. Если другие tenants поддержат (3+ ↑) — попадёт к админу на review.
+    </p>
+    <form id="proposeRuleForm">
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Scope</label>
+      <select name="proposed_scope" required style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;box-sizing:border-box">
+        <option value="general">general</option>
+        <option value="pre-answer">pre-answer</option>
+        <option value="post-task">post-task</option>
+        <option value="per-task">per-task</option>
+        <option value="mid-task">mid-task</option>
+      </select>
+
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Текст предлагаемого правила</label>
+      <textarea name="proposed_body" required minlength="10" maxlength="2000" rows="4" placeholder="Например: перед deploy ВСЕГДА запускать smoke-test всех публичных endpoints" style="width:100%;padding:10px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box;margin-bottom:10px"></textarea>
+
+      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Обоснование (опц.)</label>
+      <textarea name="rationale" maxlength="1000" rows="3" placeholder="Какую проблему это решает? Какие риски без этого правила?" style="width:100%;padding:10px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box;margin-bottom:14px"></textarea>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" class="btn secondary btn-sm" data-close="proposeRuleDialog">Отмена</button>
+        <button type="submit" class="btn btn-sm">Отправить предложение</button>
+      </div>
+    </form>
+  </dialog>
+
 
   <div class="card">
     <h2>Мои устройства</h2>
@@ -431,6 +527,7 @@
 <script src="/static/theme.js?v=20260520"></script>
 <script src="/static/error-reporter.js?v=20260521" defer></script>
 <script src="/static/auth-widget.js?v=20260522" defer></script>
+<script src="/static/machine-fp.js?v=20260526" defer></script>
 <script>
   async function api(path, opts = {}) {
     const r = await fetch(path, { credentials: 'same-origin', ...opts });
@@ -1005,6 +1102,13 @@
       project: form.project.value.trim() || null,
       machine: form.machine.value.trim() || null,
     };
+    // Browser-stable fingerprint — группирует агентов одного браузера в одну machine card
+    try {
+      data.machine_fingerprint = await window.getMachineFingerprint();
+      data.machine_label = window.getMachineLabel();
+    } catch (e) {
+      console.warn('machine fingerprint failed:', e);
+    }
     const r = await api('/user/agents/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1353,6 +1457,178 @@
   }
 
   loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions(); loadUsage(); loadExternalKeys();
+</script>
+<script>
+
+  // ─── Agent Operating Rules (Phase 6) ─────────────────────────────────
+  async function loadAgentRules() {
+    try {
+      const r = await api('/user/rules');
+      if (!r || !r.ok) return;
+      const j = await r.json();
+      const banner = document.getElementById('platformRulesBanner');
+      if (banner) banner.innerHTML = 'ℹ️ ' + esc(j.platform_notice || ('Платформа применяет ' + (j.platform_count || 0) + ' базовых правил.'));
+      const ub = document.getElementById('userRulesBlock');
+      const items = j.items || [];
+      if (!items.length) {
+        ub.innerHTML = '<div style="color:var(--glass-text-dim);padding:14px;font-size:13px">У вас пока нет своих правил. Используйте кнопку выше чтобы добавить первое.</div>';
+      } else {
+        ub.innerHTML = items.map(rule => {
+          const sevColor = rule.severity === 'recommended' ? '#d29922' : 'var(--glass-orb-1)';
+          return `<div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:8px;padding:12px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px">
+              <div>
+                <code style="font-size:12px;color:${sevColor}">[${esc(rule.severity)}]</code>
+                <span style="font-size:12px;color:var(--glass-text-dim)">scope:${esc(rule.scope)}</span>
+                <span class="chip ${rule.active ? '' : 'offline'}" style="margin-left:8px;font-size:11px">${rule.active ? 'active' : 'paused'}</span>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn secondary btn-sm" data-rule-toggle="${esc(rule.id)}" data-active="${rule.active}" title="${rule.active ? 'pause' : 'resume'}">${rule.active ? '⏸' : '▶'}</button>
+                <button class="btn danger btn-sm" data-rule-delete="${esc(rule.id)}" title="delete">🗑</button>
+              </div>
+            </div>
+            <div style="font-size:13.5px;line-height:1.45">${esc(rule.body)}</div>
+            <div class="meta" style="font-size:11px;margin-top:6px;font-family:var(--mono)">${esc(rule.rule_id)}</div>
+          </div>`;
+        }).join('');
+        // Attach handlers
+        document.querySelectorAll('[data-rule-toggle]').forEach(b => b.addEventListener('click', async () => {
+          const id = b.dataset.ruleToggle;
+          const newActive = b.dataset.active !== 'true';
+          const r = await api('/user/rules/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: newActive }) });
+          if (r && r.ok) loadAgentRules();
+        }));
+        document.querySelectorAll('[data-rule-delete]').forEach(b => b.addEventListener('click', async () => {
+          if (!confirm('Удалить правило?')) return;
+          const id = b.dataset.ruleDelete;
+          const r = await api('/user/rules/' + id, { method: 'DELETE' });
+          if (r && r.ok) loadAgentRules();
+        }));
+      }
+    } catch (e) { console.warn('loadAgentRules', e); }
+    loadProposals();
+  }
+
+  async function loadProposals() {
+    try {
+      const r = await api('/user/rules/proposals');
+      if (!r || !r.ok) return;
+      const j = await r.json();
+      const ob = document.getElementById('ownProposalsBlock');
+      const pb = document.getElementById('publicProposalsBlock');
+      const obc = document.getElementById('ownProposalsCount');
+      const pbc = document.getElementById('publicProposalsCount');
+
+      const own = j.own || [];
+      if (obc) obc.textContent = '(' + own.length + ')';
+      if (!own.length) {
+        ob.innerHTML = '<div style="color:var(--glass-text-dim);padding:8px">Вы пока не делали предложений.</div>';
+      } else {
+        ob.innerHTML = own.map(p => renderOwnProposal(p)).join('');
+      }
+
+      const pub = j.public || [];
+      if (pbc) pbc.textContent = '(' + pub.length + ')';
+      if (!pub.length) {
+        pb.innerHTML = '<div style="color:var(--glass-text-dim);padding:8px">Нет публичных предложений для голосования.</div>';
+      } else {
+        pb.innerHTML = pub.map(p => renderPublicProposal(p)).join('');
+        document.querySelectorAll('[data-vote-up], [data-vote-down]').forEach(b => b.addEventListener('click', async () => {
+          const id = b.dataset.voteUp || b.dataset.voteDown;
+          const vote = b.dataset.voteUp ? 1 : -1;
+          const r = await api('/user/rules/proposals/' + id + '/vote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vote }) });
+          if (r && r.ok) loadProposals();
+        }));
+      }
+    } catch (e) { console.warn('loadProposals', e); }
+  }
+
+  function renderOwnProposal(p) {
+    const statusBadge = {
+      'pending': '<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922">⏳ pending</span>',
+      'reviewing': '<span class="chip" style="background:rgba(88,166,255,0.18);color:var(--glass-orb-1)">🔍 reviewing</span>',
+      'approved': '<span class="chip online">✅ approved</span>',
+      'rejected': '<span class="chip offline">❌ rejected</span>',
+      'duplicate': '<span class="chip" style="background:rgba(100,100,100,0.2);color:var(--glass-text-dim)">duplicate</span>',
+    }[p.status] || '';
+    return `<div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">${statusBadge}<span style="font-size:12px;color:var(--glass-text-dim)">scope:${esc(p.proposed_scope)}</span><span style="margin-left:auto;font-size:12px">↑${p.votes_up || 0} ↓${p.votes_down || 0}</span></div>
+      <div style="font-size:13px;line-height:1.45">${esc(p.proposed_body)}</div>
+      ${p.review_notes ? `<div class="meta" style="font-size:11px;margin-top:6px;font-style:italic">Review: ${esc(p.review_notes)}</div>` : ''}
+    </div>`;
+  }
+
+  function renderPublicProposal(p) {
+    const userVoted = p.my_vote != null;
+    return `<div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:var(--glass-text-dim)">scope:${esc(p.proposed_scope)}</span>
+        <span style="margin-left:auto;font-size:12px">↑${p.votes_up || 0} ↓${p.votes_down || 0} / порог: ${p.vote_threshold || 3}</span>
+      </div>
+      <div style="font-size:13px;line-height:1.45">${esc(p.proposed_body)}</div>
+      ${p.rationale ? `<div class="meta" style="font-size:11.5px;margin-top:6px;font-style:italic">${esc(p.rationale)}</div>` : ''}
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button class="btn btn-sm" data-vote-up="${esc(p.id)}" ${userVoted && p.my_vote === 1 ? 'disabled style="opacity:0.5"' : ''}>↑ ${p.my_vote === 1 ? 'голос за' : 'за'}</button>
+        <button class="btn btn-sm secondary" data-vote-down="${esc(p.id)}" ${userVoted && p.my_vote === -1 ? 'disabled style="opacity:0.5"' : ''}>↓ ${p.my_vote === -1 ? 'голос против' : 'против'}</button>
+      </div>
+    </div>`;
+  }
+
+  // Modal handlers
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
+    document.getElementById(b.dataset.close).close();
+  }));
+  document.getElementById('addRuleBtn')?.addEventListener('click', () => {
+    document.getElementById('addRuleDialog').showModal();
+  });
+  document.getElementById('proposeRuleBtn')?.addEventListener('click', () => {
+    document.getElementById('proposeRuleDialog').showModal();
+  });
+  document.getElementById('addRuleForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = {
+      rule_id: form.rule_id.value.trim(),
+      severity: form.severity.value,
+      scope: form.scope.value,
+      body: form.body.value.trim(),
+    };
+    const r = await api('/user/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r && r.ok) {
+      document.getElementById('addRuleDialog').close();
+      form.reset();
+      loadAgentRules();
+    } else {
+      const j = r ? await r.json() : { detail: 'no response' };
+      alert('Ошибка: ' + (j.detail || r.status));
+    }
+  });
+  document.getElementById('proposeRuleForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = {
+      proposed_scope: form.proposed_scope.value,
+      proposed_body: form.proposed_body.value.trim(),
+      rationale: form.rationale.value.trim() || null,
+    };
+    const r = await api('/user/rules/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r && r.ok) {
+      document.getElementById('proposeRuleDialog').close();
+      form.reset();
+      loadProposals();
+    } else {
+      const j = r ? await r.json() : { detail: 'no response' };
+      alert('Ошибка: ' + (j.detail || r.status));
+    }
+  });
+
+  // Initial load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadAgentRules);
+  } else {
+    loadAgentRules();
+  }
+
 </script>
 </body>
 </html>

@@ -178,8 +178,13 @@ ACTIONS: dict[str, dict[str, Any]] = {
 DESTRUCTIVE_ACTIONS = frozenset(name for name, spec in ACTIONS.items() if spec["destructive"])
 
 
-def build_system_prompt(orchestrator_id: str = "orchestrator") -> str:
-    """System prompt для DeepSeek — описание роли + whitelisted actions."""
+def build_system_prompt(orchestrator_id: str = "orchestrator", rules_section: str = "") -> str:
+    """System prompt для DeepSeek — описание роли + whitelisted actions.
+
+    Если передан непустой rules_section (Markdown text from build_rules_section),
+    он препендится к base prompt с разделителем. Это для inject per-owner
+    Agent Operating Rules (Phase 6).
+    """
     actions_doc = []
     for name, spec in ACTIONS.items():
         flag = " (DESTRUCTIVE → требует approval owner-а)" if spec["destructive"] else ""
@@ -187,7 +192,7 @@ def build_system_prompt(orchestrator_id: str = "orchestrator") -> str:
         actions_doc.append(f"  - {name}{flag}: {spec['description']} args: {{{args_doc}}}")
     actions_block = "\n".join(actions_doc)
 
-    return f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
+    base_prompt = f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
 Твоя роль — принимать команды от owner-а и других агентов на естественном русском
 языке и преобразовывать их в одно или несколько whitelisted действий. Ты НЕ выполняешь
 действия напрямую — ты только классифицируешь намерение и подбираешь параметры.
@@ -257,6 +262,9 @@ Owner: «найди в памяти упоминания deploy и перешл�
 "STEP1_RESULT", "STEP2_RESULT" — runtime автоматически подставит текст результата.
 
 ОТВЕЧАЙ ТОЛЬКО JSON, БЕЗ ПОЯСНЕНИЙ."""
+    if rules_section:
+        return rules_section + "\n\n---\n\n" + base_prompt
+    return base_prompt
 
 
 def parse_llm_json(raw: str) -> dict:

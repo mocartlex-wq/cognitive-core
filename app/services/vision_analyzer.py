@@ -53,20 +53,28 @@ from app.services.vision_providers import (
 logger = logging.getLogger(__name__)
 
 # ─── Shared platform-key (legacy default — env-based) ─────────────────────
-QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "").strip()
-QWEN_BASE_URL = os.environ.get(
+# NB: os.environ.get(NAME, DEFAULT) применяет DEFAULT только если ключа НЕТ.
+# docker-compose.prod.yml использует ${VAR:-} → переменная всегда есть, но
+# пустая. Поэтому везде паттерн `os.environ.get(...) or DEFAULT` — пустая
+# строка falsy, default срабатывает.
+def _env(name: str, default: str = "") -> str:
+    val = os.environ.get(name)
+    return val.strip() if val and val.strip() else default
+
+QWEN_API_KEY = _env("QWEN_API_KEY")
+QWEN_BASE_URL = _env(
     "QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 ).rstrip("/")
-QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen-vl-max-latest").strip()
-QWEN_MAX_FRAMES = int(os.environ.get("QWEN_MAX_FRAMES", "12"))
-QWEN_MAX_OUTPUT_TOKENS = int(os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "800"))
-QWEN_TIMEOUT_SECONDS = float(os.environ.get("QWEN_TIMEOUT_SECONDS", "60"))
+QWEN_MODEL = _env("QWEN_MODEL", "qwen-vl-max-latest")
+QWEN_MAX_FRAMES = int(_env("QWEN_MAX_FRAMES", "12"))
+QWEN_MAX_OUTPUT_TOKENS = int(_env("QWEN_MAX_OUTPUT_TOKENS", "800"))
+QWEN_TIMEOUT_SECONDS = float(_env("QWEN_TIMEOUT_SECONDS", "60"))
 
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-DEEPSEEK_BASE_URL = os.environ.get(
+DEEPSEEK_API_KEY = _env("DEEPSEEK_API_KEY")
+DEEPSEEK_BASE_URL = _env(
     "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
 ).rstrip("/")
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip()
+DEEPSEEK_MODEL = _env("DEEPSEEK_MODEL", "deepseek-chat")
 
 
 # ─── Public flags (backward-compat) ───────────────────────────────────────

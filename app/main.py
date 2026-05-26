@@ -245,6 +245,7 @@ from app.api.demo import router as demo_router
 from app.api.agents import router as agents_router
 from app.api.agents_collab import router as agents_collab_router
 from app.api.onboard import router as onboard_router
+from app.api.rules import router as rules_router
 
 app.include_router(events_router)
 app.include_router(operative_router)
@@ -255,6 +256,7 @@ app.include_router(demo_router)
 app.include_router(agents_router)
 app.include_router(agents_collab_router)
 app.include_router(onboard_router)
+app.include_router(rules_router)
 from app.api.replication import router as replication_router
 app.include_router(replication_router)
 from app.api.mcp_protocol import router as mcp_router
@@ -327,6 +329,12 @@ async def admin_errors_page():
 async def admin_media_page():
     """Админ-панель: загрузка видео/картинок с авто-анализом."""
     return _html("admin-media.html")
+
+
+@app.get("/ui/admin/rule-proposals")
+async def admin_rule_proposals_page():
+    """Admin: review pending rule proposals from tenants."""
+    return _html("admin-rule-proposals.html")
 
 
 @app.get("/ui/connect")

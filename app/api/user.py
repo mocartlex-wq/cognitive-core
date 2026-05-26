@@ -200,6 +200,8 @@ class CreateAgentBody(BaseModel):
     project: str | None = Field(None, max_length=64)
     machine: str | None = Field(None, max_length=128)
     capabilities: list[str] | None = None
+    machine_fingerprint: str | None = Field(None, min_length=8, max_length=32, pattern=r"^[a-f0-9]+$")
+    machine_label: str | None = Field(None, max_length=128)
 
 
 async def _create_agent_core(user, body: CreateAgentBody) -> dict:
@@ -236,8 +238,9 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
             await conn.execute(
                 """
                 INSERT INTO agent_states
-                    (agent_id, owner_user_id, project, machine, capabilities, notes)
-                VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6)
+                    (agent_id, owner_user_id, project, machine, capabilities, notes,
+                     machine_fingerprint, machine_label)
+                VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8)
                 """,
                 body.agent_id,
                 user.user_id,
@@ -245,6 +248,8 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
                 body.machine,
                 _json.dumps(body.capabilities or [], ensure_ascii=False),
                 body.description,
+                body.machine_fingerprint,
+                body.machine_label,
             )
             await conn.execute(
                 """

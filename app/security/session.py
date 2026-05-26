@@ -268,7 +268,21 @@ async def list_active_sessions(user_id: str) -> list[dict[str, Any]]:
             """,
             user_id,
         )
-    return [dict(r) for r in rows]
+    # asyncpg возвращает jsonb как str (JSON) — парсим в dict для удобства фронта
+    # (без этого s.device_info.user_agent = undefined и parseUA даёт "Браузер · OS")
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        di = d.get("device_info")
+        if isinstance(di, str):
+            try:
+                d["device_info"] = json.loads(di)
+            except (json.JSONDecodeError, TypeError):
+                d["device_info"] = {}
+        elif di is None:
+            d["device_info"] = {}
+        out.append(d)
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────

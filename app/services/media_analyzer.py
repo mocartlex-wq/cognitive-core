@@ -51,10 +51,21 @@ def _get_whisper_model():
         os.makedirs(WHISPER_CACHE_DIR, exist_ok=True)
         logger.info("loading faster-whisper model=%s cache=%s",
                     WHISPER_MODEL_SIZE, WHISPER_CACHE_DIR)
+        # Env-driven device: WHISPER_DEVICE=cuda + WHISPER_COMPUTE_TYPE=float16
+        # на GPU-хостах (см. docker-compose.gpu.yml). Дефолт cpu/int8 безопасен
+        # для CPU-only хостов — даже если CUDA libs отсутствуют, faster-whisper
+        # не пытается их загрузить.
+        _whisper_device = os.getenv("WHISPER_DEVICE", "cpu")
+        _whisper_compute_type = os.getenv(
+            "WHISPER_COMPUTE_TYPE",
+            "float16" if _whisper_device == "cuda" else "int8",
+        )
+        logger.info("faster-whisper device=%s compute_type=%s",
+                    _whisper_device, _whisper_compute_type)
         _whisper_model = WhisperModel(
             WHISPER_MODEL_SIZE,
-            device="cpu",
-            compute_type="int8",         # int8 — ~4× быстрее, минимальная потеря качества
+            device=_whisper_device,
+            compute_type=_whisper_compute_type,
             download_root=WHISPER_CACHE_DIR,
         )
         logger.info("faster-whisper loaded")

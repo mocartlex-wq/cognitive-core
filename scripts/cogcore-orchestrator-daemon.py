@@ -61,6 +61,8 @@ try:
         should_ignore_message,
         validate_action,
     )
+    # Phase 6: per-owner Agent Operating Rules injection
+    from app.services.rules import fetch_rules_for_owner, build_rules_section
 except ImportError as e:
     sys.stderr.write(f"Cannot import app.services.orchestrator from {_repo_root}: {e}\n")
     sys.stderr.write("Make sure script lives in <repo>/scripts/ and app/services/orchestrator.py exists.\n")
@@ -269,13 +271,44 @@ class DeepSeekParser:
             return raw
         return validate_action(raw)
 
+    async def _resolve_owner_user_id(self, agent_id: str) -> str | None:
+        """Phase 6: fetch owner_user_id для агента (для inject per-owner Operating Rules).
+
+        Best-effort: при любой ошибке возвращает None — agent_runtime использует
+        prompt без rules section (graceful degradation).
+        """
+        try:
+            from app.db.postgres import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT owner_user_id::text AS uid FROM agent_states WHERE agent_id = $1",
+                    agent_id,
+                )
+            return row["uid"] if row and row["uid"] else None
+        except Exception:
+            return None
+
     async def parse_raw(self, source_agent: str, text: str) -> dict:
         """Возвращает RAW LLM dict — может содержать 'action' (single) или 'plan' (multi).
 
         Для multi-step planning. Используется в process_message → extract_plan().
         При ошибке парсинга возвращает {action:'refuse', _parse_error:...}.
+
+        Phase 6: инжектирует Operating Rules для owner'a source_agent в system_prompt.
+        Если rules fetch fails (DB issue) — prompt всё равно строится без секции.
         """
-        prompt = build_system_prompt(self.cfg.orchestrator_id)
+        # Phase 6: inject per-owner Operating Rules
+        rules_text = ""
+        try:
+            owner_uid = await self._resolve_owner_user_id(source_agent)
+            if owner_uid:
+                rules = await fetch_rules_for_owner(owner_uid)
+                rules_text = build_rules_section(rules)
+        except Exception:
+            pass  # rules не блокируют LLM call — graceful degradation
+
+        prompt = build_system_prompt(self.cfg.orchestrator_id, rules_text)
         user_msg = f"От {source_agent}: {text}"
         try:
             r = await self._http.post(
