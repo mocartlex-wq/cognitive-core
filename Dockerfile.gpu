@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install cuDNN 8 from NVIDIA apt repo (включён в base image).
 # faster-whisper/ctranslate2 на CUDA требует libcudnn_ops_infer.so.8.
-RUN apt-get update && apt-get install -y --no-install-recommends \n    libcudnn8 \n    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends     libcudnn8     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 COPY requirements-gpu.txt .
