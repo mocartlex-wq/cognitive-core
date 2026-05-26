@@ -178,7 +178,7 @@ ACTIONS: dict[str, dict[str, Any]] = {
 DESTRUCTIVE_ACTIONS = frozenset(name for name, spec in ACTIONS.items() if spec["destructive"])
 
 
-def build_system_prompt(orchestrator_id: str = "orchestrator", rules_section: str = "") -> str:
+def build_system_prompt(orchestrator_id: str = "orchestrator") -> str:
     """System prompt для DeepSeek — описание роли + whitelisted actions."""
     actions_doc = []
     for name, spec in ACTIONS.items():
@@ -187,7 +187,7 @@ def build_system_prompt(orchestrator_id: str = "orchestrator", rules_section: st
         actions_doc.append(f"  - {name}{flag}: {spec['description']} args: {{{args_doc}}}")
     actions_block = "\n".join(actions_doc)
 
-    base_prompt = f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
+    return f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
 Твоя роль — принимать команды от owner-а и других агентов на естественном русском
 языке и преобразовывать их в одно или несколько whitelisted действий. Ты НЕ выполняешь
 действия напрямую — ты только классифицируешь намерение и подбираешь параметры.
@@ -257,13 +257,8 @@ Owner: «найди в памяти упоминания deploy и перешл�
 "STEP1_RESULT", "STEP2_RESULT" — runtime автоматически подставит текст результата.
 
 ОТВЕЧАЙ ТОЛЬКО JSON, БЕЗ ПОЯСНЕНИЙ."""
-    if rules_section:
-        return rules_section + "
 
----
 
-" + base_prompt
-    return base_prompt
 def parse_llm_json(raw: str) -> dict:
     """Извлекает JSON из ответа LLM (с защитой от markdown-обёртки)."""
     text = raw.strip()
