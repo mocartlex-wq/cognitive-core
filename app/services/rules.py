@@ -14,7 +14,6 @@ from uuid import UUID
 
 from app.db.postgres import get_pool
 
-
 SEVERITY_LABEL = {
     "core": "MUST follow (платформенное обязательное)",
     "recommended": "Should follow (рекомендация платформы)",

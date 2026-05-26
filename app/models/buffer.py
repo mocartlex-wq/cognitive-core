@@ -1,6 +1,7 @@
-from pydantic import BaseModel
-from uuid import UUID
 from datetime import date, datetime
+from uuid import UUID
+
+from pydantic import BaseModel
 
 
 class DailyBufferOutput(BaseModel):

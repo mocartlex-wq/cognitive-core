@@ -1,8 +1,14 @@
-from fastapi import APIRouter, Request, Query
-from app.models.operative import OperativeQuery, OperativeClose, OperativeFeedback
+from fastapi import APIRouter, Query, Request
+
+from app.models.operative import OperativeClose, OperativeFeedback, OperativeQuery
 from app.security.auth import verify_api_key
 from app.security.owner import resolve_owner_user_id
-from app.services.operative import build_operative, create_session, close_session, feedback_record
+from app.services.operative import (
+    build_operative,
+    close_session,
+    create_session,
+    feedback_record,
+)
 
 router = APIRouter(prefix="/operative", tags=["operative"])
 

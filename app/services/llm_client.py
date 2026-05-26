@@ -1,7 +1,9 @@
 import json
 import random
 import time as _time
+
 from openai import AsyncOpenAI
+
 from app.config import settings
 
 _response_cache: dict[str, dict[str, str]] = {}

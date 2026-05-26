@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Request, HTTPException
+from uuid import UUID
+
+from fastapi import APIRouter, Request
+
 from app.models.tools import ToolRegistryInput
 from app.security.auth import verify_api_key
-from app.services.tools import register_tool, get_active_tools, deprecate_tool
-from uuid import UUID
+from app.services.tools import deprecate_tool, get_active_tools, register_tool
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 

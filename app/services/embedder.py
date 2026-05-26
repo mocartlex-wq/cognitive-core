@@ -21,8 +21,6 @@ import hashlib
 import logging
 import os
 import struct
-from openai import AsyncOpenAI
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 

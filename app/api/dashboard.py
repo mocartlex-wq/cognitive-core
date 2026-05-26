@@ -1,5 +1,6 @@
 """Read-only dashboard endpoints (для встроенной web UI)."""
 from fastapi import APIRouter, Query
+
 from app.db.postgres import get_pool
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])

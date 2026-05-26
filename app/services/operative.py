@@ -1,13 +1,15 @@
 import json
 import struct
-from uuid import UUID, uuid4
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
 import numpy as np
+
 from app.db.postgres import get_pool
 from app.db.redis import get_redis, get_redis_raw
-from app.services.embedder import embed_text, EMBEDDING_DIM, get_model_version
-from app.services.ingestor import save_raw_event
 from app.security.audit import log_audit
+from app.services.embedder import embed_text, get_model_version
+from app.services.ingestor import save_raw_event
 
 SESSION_TTL = 86400  # 24 часа
 

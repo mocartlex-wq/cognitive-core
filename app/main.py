@@ -13,17 +13,19 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+
 from app.config import settings
-from app.db.postgres import init_db, close_db
-from app.db.redis import init_redis, close_redis
+from app.db.postgres import close_db, init_db
+from app.db.redis import close_redis, init_redis
 from app.db.s3 import init_s3
-from app.services.metrics import track_http, log_event
+from app.services.metrics import log_event, track_http
 
 __version__ = "0.6.0"  # bumped 2026-05-17 (accounts + email)
 
@@ -48,8 +50,8 @@ async def lifespan(app: FastAPI):
     # Outbox Publisher для NATS-replication. Если nats-py не установлен или
     # NATS недоступен — publisher тихо retry'ит, основная система не страдает.
     try:
-        from app.replication import OutboxPublisher
         from app.db.postgres import get_pool
+        from app.replication import OutboxPublisher
         pool = await get_pool()
         if pool is not None:
             _outbox_publisher = OutboxPublisher(pool)
@@ -236,16 +238,16 @@ async def value_error_handler(request: Request, exc: ValueError):
 # ─────────────────────────────────────────────────────────────────────────
 # Регистрация роутеров
 # ─────────────────────────────────────────────────────────────────────────
-from app.api.events import router as events_router
-from app.api.operative import router as operative_router
-from app.api.memory import router as memory_router
-from app.api.tools import router as tools_router
-from app.api.dashboard import router as dashboard_router
-from app.api.demo import router as demo_router
 from app.api.agents import router as agents_router
 from app.api.agents_collab import router as agents_collab_router
+from app.api.dashboard import router as dashboard_router
+from app.api.demo import router as demo_router
+from app.api.events import router as events_router
+from app.api.memory import router as memory_router
 from app.api.onboard import router as onboard_router
+from app.api.operative import router as operative_router
 from app.api.rules import router as rules_router
+from app.api.tools import router as tools_router
 
 app.include_router(events_router)
 app.include_router(operative_router)
@@ -258,41 +260,51 @@ app.include_router(agents_collab_router)
 app.include_router(onboard_router)
 app.include_router(rules_router)
 from app.api.replication import router as replication_router
+
 app.include_router(replication_router)
 from app.api.mcp_protocol import router as mcp_router
+
 app.include_router(mcp_router)
 
 # Новые роутеры (2026-05-17): аккаунты + magic-link авторизация
 from app.api.auth import router as auth_router
 from app.api.user import router as user_router
+
 app.include_router(auth_router)
 app.include_router(user_router)
 
 # Frontend error reporter (2026-05-20): /api/errors POST/GET
 from app.api.errors import router as errors_router
+
 app.include_router(errors_router)
 
 # Media upload + analyze (2026-05-20): /api/media/{video,image,list,frame/...}
 from app.api.media import router as media_router
+
 app.include_router(media_router)
 
 # Unified Agent Onboarding wizard (2026-05-21): /user/connect/* + /user/agents/{id}/verify
-from app.api.connect import router as connect_router, verify_router as agents_verify_router
+from app.api.connect import router as connect_router
+from app.api.connect import verify_router as agents_verify_router
+
 app.include_router(connect_router)
 app.include_router(agents_verify_router)
 
 # OpenAPI generator для ChatGPT Custom GPT (2026-05-21): /api/openapi/cognitive.{json,yaml}
 from app.api.openapi_gen import router as openapi_router
+
 app.include_router(openapi_router)
 
 # Admin tenants management (Phase 5B 2026-05-22): /admin/tenants + tier change/suspend
 from app.api.admin import router as admin_router
+
 app.include_router(admin_router)
 
 # Per-tenant external AI provider keys (2026-05-24): /user/settings/external-key*
 # Owner-mandate: opt-in tenant keys для Qwen / MiniMax / GigaChat / Claude / OpenAI / Gemini,
 # чтобы каждый платил со своего api_key, а не со shared платформенного.
 from app.api.user_settings import router as user_settings_router
+
 app.include_router(user_settings_router)
 
 
@@ -405,9 +417,9 @@ async def health():
     from app.db.postgres import get_pool
     from app.db.redis import get_redis
     from app.db.s3 import get_s3
-    from app.services.metrics import update_layer_size, get_llm_stats
-    from app.services.embedder import get_embedding_provider, EMBEDDING_MODEL_NAME
+    from app.services.embedder import EMBEDDING_MODEL_NAME, get_embedding_provider
     from app.services.llm_client import get_circuit_states
+    from app.services.metrics import get_llm_stats, update_layer_size
 
     status = {"postgres": "ok", "redis": "ok", "minio": "ok"}
     layers = {}

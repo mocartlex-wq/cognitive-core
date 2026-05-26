@@ -1,5 +1,6 @@
 import json
 import re
+
 from app.config import settings
 
 # Паттерны для обнаружения атак

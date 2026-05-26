@@ -5,9 +5,10 @@
 - /memory/snapshots/restore/{id} с strict=true отклоняет битые снапшоты
 - _verify_snapshot_integrity ловит hash mismatch / count mismatch / invalid JSON
 """
-import json
-import pytest
 import hashlib
+import json
+
+import pytest
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,8 @@
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
+
 from app.config import settings
-from app.db.redis import get_redis
 from app.db.postgres import get_pool
+from app.db.redis import get_redis
 
 
 async def verify_api_key(request: Request) -> str:

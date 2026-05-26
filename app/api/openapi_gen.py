@@ -19,11 +19,10 @@ Endpoint:
 """
 from __future__ import annotations
 
-import json
 import logging
 
 from fastapi import APIRouter
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.api.mcp_protocol import TOOLS
 

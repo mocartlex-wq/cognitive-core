@@ -1,14 +1,16 @@
 import logging
-from fastapi import APIRouter, Request, Depends
-from app.models.event import RawEventInput, EventResponse
-from app.security.auth import verify_api_key, check_rate_limit
-from app.security.sanitizer import sanitize_payload
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Request
+
+from app.db.postgres import get_pool
+from app.models.event import EventResponse, RawEventInput
+from app.security.audit import log_audit
+from app.security.auth import check_rate_limit, verify_api_key
 from app.security.owner import resolve_owner_user_id
+from app.security.sanitizer import sanitize_payload
 from app.services.ingestor import save_raw_event
 from app.services.quota_enforcer import enforce_event_quota
-from app.security.audit import log_audit
-from app.db.postgres import get_pool
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/events", tags=["events"])

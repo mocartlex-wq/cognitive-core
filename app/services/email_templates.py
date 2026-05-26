@@ -214,7 +214,7 @@ def welcome(
             "под служебным кодом, теперь привязаны к вам. Административная панель — по адресу\n"
             f"{profile_url.rsplit('/', 1)[0]}/admin\n"
         )
-        owner_block_html = f"""
+        owner_block_html = """
           <div style="margin:22px 0;padding:14px 16px;background:#fff7e6;border-left:3px solid #f5a623;border-radius:8px;font-size:14px;color:#5a4400;">
             <strong>Владельческий доступ.</strong> Все существующие комнаты и помощники привязаны к этому аккаунту. Административная панель доступна сразу.
           </div>

@@ -3,8 +3,9 @@
 Расширение 2026-05-17: добавлены параметры email + аккаунты для Фазы 1A/2.
 Все новые поля имеют дефолты — старые .env-файлы продолжают работать без изменений.
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):

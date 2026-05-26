@@ -27,7 +27,6 @@ from app.security.secrets_vault import SecretsVaultError, decrypt, encrypt, mask
 from app.services.vision_providers import (
     PROVIDER_LABELS,
     PROVIDER_ORDER,
-    PROVIDER_REGISTRY,
     is_valid_provider,
 )
 

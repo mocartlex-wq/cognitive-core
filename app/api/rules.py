@@ -23,7 +23,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator

@@ -3,13 +3,18 @@
 Per-agent persistence — recovery после срыва сессии / окончания токенов.
 """
 import logging
-from fastapi import APIRouter, Request, HTTPException, Query
+
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.db.postgres import get_pool
 from app.security.auth import verify_api_key
 from app.services.agent_state_service import (
-    save_checkpoint, restore_state, get_history, list_all_agents,
+    get_history,
+    list_all_agents,
+    restore_state,
+    save_checkpoint,
 )
-from app.db.postgres import get_pool
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -81,9 +86,10 @@ async def _enforce_owns_agent(request: Request, agent_id: str) -> None:
     Если owner_user_id из request не совпадает с agent_states.owner_user_id —
     выбрасывает HTTP 403. Legacy env-keys (owner=None) видят всё (admin mode).
     """
-    from app.security.owner import resolve_owner_user_id
     from fastapi import HTTPException
+
     from app.db.postgres import get_pool
+    from app.security.owner import resolve_owner_user_id
 
     caller_owner = await resolve_owner_user_id(request)
     if caller_owner is None:

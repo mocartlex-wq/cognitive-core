@@ -8,17 +8,17 @@
 
 Это то же что seed_demo.py --full, но запускается из UI без терминала.
 """
-import asyncio
 import json
 import time
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from app.services.ingestor import save_raw_event
-from app.services.tools import register_tool
-from app.services.consolidator import daily_consolidate, weekly_consolidate
-from app.services.operative import build_operative
 from app.models.tools import ToolRegistryInput
+from app.services.consolidator import daily_consolidate, weekly_consolidate
+from app.services.ingestor import save_raw_event
+from app.services.operative import build_operative
+from app.services.tools import register_tool
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 

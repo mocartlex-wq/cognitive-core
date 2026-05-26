@@ -1,9 +1,11 @@
-import pytest
 from uuid import UUID
+
+import pytest
 from pydantic import ValidationError
+
 from app.models.event import RawEventInput
+from app.models.operative import OperativeClose, OperativeFeedback, OperativeQuery
 from app.models.tools import ToolRegistryInput
-from app.models.operative import OperativeQuery, OperativeClose, OperativeFeedback
 
 
 class TestRawEventInput:

@@ -1,7 +1,7 @@
 import json
 import re
-from app.security.sanitizer import _clean_string
 
+from app.security.sanitizer import _clean_string
 
 REQUIRED_DAILY_FIELDS = {"patterns", "mistakes", "lessons"}
 REQUIRED_ITEM_FIELDS = {"description", "confidence"}

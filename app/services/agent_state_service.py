@@ -12,10 +12,9 @@
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+
 from app.db.postgres import get_pool
 from app.security.sanitizer import sanitize_payload
-
 
 # Лимит state_data — как у L1 payload, для consistency
 MAX_STATE_SIZE_BYTES = 256 * 1024

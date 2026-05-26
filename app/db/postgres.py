@@ -1,4 +1,5 @@
 import asyncpg
+
 from app.config import settings
 
 # Глобальный пул соединений

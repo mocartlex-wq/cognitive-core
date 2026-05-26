@@ -1,5 +1,11 @@
 import pytest
-from app.security.sanitizer import sanitize_payload, _get_depth, _count_keys, _clean_string
+
+from app.security.sanitizer import (
+    _clean_string,
+    _count_keys,
+    _get_depth,
+    sanitize_payload,
+)
 
 
 class TestDepth:

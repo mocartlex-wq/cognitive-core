@@ -1,8 +1,14 @@
 import json
-from app.services.llm_client import get_llm_client
-from app.security.validator import validate_llm_response
+
 from app.config import settings
-from app.services.prompts import get_filter_prompt, get_quality_prompt, get_audit_prompt, lang
+from app.security.validator import validate_llm_response
+from app.services.llm_client import get_llm_client
+from app.services.prompts import (
+    get_audit_prompt,
+    get_filter_prompt,
+    get_quality_prompt,
+    lang,
+)
 
 
 async def pre_daily_filter(events: list[dict], domain: str) -> dict:
@@ -63,7 +69,8 @@ async def pre_weekly_check(
 
 async def monthly_audit(domain: str, l3_knowledge: list[dict], l3_tools: list[dict]) -> dict:
     """Ежемесячная ревизия L3."""
-    from datetime import datetime as dt, timezone as tz
+    from datetime import datetime as dt
+    from datetime import timezone as tz
     now_iso = dt.now(tz.utc).strftime("%Y-%m-%d")
     system = get_audit_prompt(lang()).format(
         domain=domain,

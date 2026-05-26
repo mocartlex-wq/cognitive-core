@@ -5,8 +5,9 @@
 - второй параллельный возвращает {status: "lock_held"}
 """
 import asyncio
-import pytest
+
 import httpx
+import pytest
 
 
 @pytest.mark.asyncio
@@ -70,8 +71,8 @@ async def test_weekly_lock_held_on_same_domain(client, headers):
 async def test_different_domains_no_lock_collision(client, headers):
     """Daily на РАЗНЫЕ домены параллельно → оба проходят без lock_held."""
     results = await asyncio.gather(
-        client.post(f"/memory/consolidate/daily?domain=lock_a", headers=headers, timeout=60),
-        client.post(f"/memory/consolidate/daily?domain=lock_b", headers=headers, timeout=60),
+        client.post("/memory/consolidate/daily?domain=lock_a", headers=headers, timeout=60),
+        client.post("/memory/consolidate/daily?domain=lock_b", headers=headers, timeout=60),
         return_exceptions=True,
     )
 

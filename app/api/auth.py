@@ -43,17 +43,15 @@ from app.security.middleware import (
 from app.security.session import (
     SESSION_COOKIE_NAME,
     SESSION_TTL_DAYS,
-    Session,
     consume_magic_link_token,
     consume_otp_code,
     create_session,
-    issue_magic_link_token,
     issue_otp_code,
     list_active_sessions,
     revoke_all_for_user,
     revoke_session,
 )
-from app.services.email_client import send_magic_link, send_otp_code, send_welcome
+from app.services.email_client import send_otp_code, send_welcome
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])

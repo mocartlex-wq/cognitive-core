@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, ConfigDict
-from uuid import UUID, uuid4
 from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RawEventInput(BaseModel):
