@@ -190,6 +190,36 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "cognitive_media_upload",
+        "description": (
+            "Загрузить медиа-файл (video/image/audio/document) на сервер для анализа. "
+            "Возвращает media_id + frames URLs + Whisper transcript + готовое vision-описание "
+            "(mechanics_summary) для НЕ-multimodal LLM. "
+            "Размер ≤ 200MB. file_b64 = base64-encoded content файла. "
+            "Это серверная alternative для bash CLI cogmedia."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_b64": {
+                    "type": "string",
+                    "description": "base64-encoded content файла",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "original filename с расширением (e.g. 'video.mp4')",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["auto", "video", "image", "audio"],
+                    "default": "auto",
+                    "description": "auto = определить по расширению",
+                },
+            },
+            "required": ["file_b64", "filename"],
+        },
+    },
+    {
         "name": "cognitive_send",
         "description": "Direct message другому агенту.",
         "inputSchema": {
@@ -694,6 +724,19 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         if connection_advisory:
             response["connection_advisory"] = connection_advisory
         return response
+
+    if name == "cognitive_media_upload":
+        # P0 (2026-05-26 per ewewew feedback): MCP tool вместо bash CLI cogmedia.
+        # Forwards к /api/media/upload_b64 который сам определяет kind и
+        # dispatch'ит к /video|image|audio analyzer'ам.
+        file_b64 = a.get("file_b64")
+        filename = a.get("filename")
+        kind = a.get("kind", "auto")
+        if not file_b64 or not filename:
+            raise ValueError("file_b64 + filename required")
+        body = {"file_b64": file_b64, "filename": filename, "kind": kind}
+        # timeout 180s — vision providers могут долго отвечать на 12 кадров
+        return await _call_self(request, "POST", "/api/media/upload_b64", json_body=body, timeout_s=180.0)
 
     if name == "cognitive_send":
         body = {
