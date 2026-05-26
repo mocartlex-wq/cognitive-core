@@ -1,9 +1,14 @@
 import asyncio
 from datetime import datetime, timezone
-from app.services.consolidator import daily_consolidate, weekly_consolidate, run_monthly_audit
+
+from app.config import settings
 from app.db.postgres import get_pool
 from app.security.audit import log_audit
-from app.config import settings
+from app.services.consolidator import (
+    daily_consolidate,
+    run_monthly_audit,
+    weekly_consolidate,
+)
 
 
 async def run_daily_cycle():

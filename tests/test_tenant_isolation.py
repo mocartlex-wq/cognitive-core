@@ -10,10 +10,10 @@
 тест skip'ается.
 """
 import os
-import pytest
-import httpx
 import uuid
 
+import httpx
+import pytest
 
 pytestmark = pytest.mark.anyio
 

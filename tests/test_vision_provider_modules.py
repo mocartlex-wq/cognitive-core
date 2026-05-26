@@ -20,7 +20,6 @@ from app.services.vision_providers import (
     is_valid_provider,
 )
 
-
 EXPECTED_PROVIDERS = {"qwen", "minimax", "gigachat", "claude", "openai", "gemini"}
 
 

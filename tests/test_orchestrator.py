@@ -1,7 +1,6 @@
 """Unit tests для app.services.orchestrator — pure functions без сети."""
 from __future__ import annotations
 
-import json
 import pytest
 
 from app.services.orchestrator import (
@@ -18,7 +17,6 @@ from app.services.orchestrator import (
     should_ignore_message,
     validate_action,
 )
-
 
 # ─── parse_llm_json ───────────────────────────────────────────────────────
 

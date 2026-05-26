@@ -1,7 +1,15 @@
 import json
-from app.services.llm_client import get_llm_client
+
 from app.security.validator import validate_llm_response
-from app.services.prompts import get_daily_prompt, get_weekly_prompt, lang, get_user_daily, get_user_weekly, get_user_retry
+from app.services.llm_client import get_llm_client
+from app.services.prompts import (
+    get_daily_prompt,
+    get_user_daily,
+    get_user_retry,
+    get_user_weekly,
+    get_weekly_prompt,
+    lang,
+)
 
 
 async def analyze_daily_events(events: list[dict], domain: str) -> dict:
@@ -28,7 +36,6 @@ async def analyze_daily_events(events: list[dict], domain: str) -> dict:
         if raw is None:
             continue
         try:
-            text = json.dumps(raw) if isinstance(raw, dict) else str(raw)
             return validate_llm_response(json.dumps(raw), schema="daily")
         except ValueError:
             if attempt < max_attempts - 1:

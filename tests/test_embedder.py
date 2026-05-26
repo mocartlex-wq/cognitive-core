@@ -1,5 +1,6 @@
 import pytest
-from app.services.embedder import embed_text, _hash_embed, EMBEDDING_DIM
+
+from app.services.embedder import EMBEDDING_DIM, _hash_embed, embed_text
 
 
 class TestHashEmbed:

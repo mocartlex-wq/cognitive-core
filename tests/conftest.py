@@ -1,7 +1,5 @@
-import pytest
-import pytest_asyncio
 import httpx
-from app.config import settings
+import pytest
 
 
 @pytest.fixture(scope="session")

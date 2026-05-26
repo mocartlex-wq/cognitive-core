@@ -32,10 +32,10 @@ import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 log = logging.getLogger("mcp_protocol")
@@ -988,6 +988,7 @@ async def _mark_mcp_connected(request: Request) -> None:
 # Single-process — для multi-worker нужен Redis pubsub, но для нашего
 # single-uvicorn-worker config достаточно.
 import uuid as _uuid
+
 _MCP_SSE_SESSIONS: dict[str, asyncio.Queue] = {}
 
 

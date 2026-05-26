@@ -1,10 +1,16 @@
 """Prometheus метрики + структурированное логирование."""
 
 import json
-import time
 import uuid
 from datetime import datetime, timezone
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CollectorRegistry, REGISTRY
+
+from prometheus_client import (
+    REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 registry = REGISTRY
 

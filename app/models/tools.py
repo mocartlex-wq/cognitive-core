@@ -1,5 +1,5 @@
-from pydantic import BaseModel, field_validator, ConfigDict
-from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 VALID_TOOL_TYPES = {"api", "script", "prompt", "library", "service"}
 

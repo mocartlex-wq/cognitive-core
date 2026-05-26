@@ -123,7 +123,7 @@ class OutboxPublisher:
     async def _ensure_stream(self) -> None:
         if self._stream_ensured:
             return
-        from nats.js.api import StreamConfig, RetentionPolicy, StorageType
+        from nats.js.api import RetentionPolicy, StorageType, StreamConfig
         cfg = StreamConfig(
             name=STREAM_NAME,
             subjects=[f"{SUBJECT_PREFIX}.>"],

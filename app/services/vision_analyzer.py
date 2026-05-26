@@ -45,7 +45,6 @@ import httpx
 
 from app.security.secrets_vault import SecretsVaultError, decrypt
 from app.services.vision_providers import (
-    PROVIDER_LABELS,
     PROVIDER_ORDER,
     get_analyzer,
 )

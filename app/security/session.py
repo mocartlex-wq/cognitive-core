@@ -466,22 +466,10 @@ async def consume_otp_code(email: str, code: str) -> str | None:
             logger.info("otp_code_consumed email=%s", email_norm)
             return row["email"]
 
-        # Не нашли — это неудачная попытка. Считаем сколько уже было.
-        recent_failed = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM email_verification_tokens
-             WHERE email = $1
-               AND used_at IS NOT NULL
-               AND used_at > NOW() - INTERVAL '1 hour'
-               AND NOT EXISTS (
-                 -- считаем только те, где used_at пришёл от FAILED попытки,
-                 -- т.е. row не вернул email при UPDATE (но он всё равно
-                 -- помечен — здесь мы НЕ помечаем failed, только успешные)
-                 SELECT 1 WHERE FALSE
-               )
-            """,
-            email_norm,
-        )
+        # FIX 2026-05-26: тут был dead query (NOT EXISTS (SELECT 1 WHERE FALSE)
+        # — всегда true → COUNT всегда 0). Результат не использовался. Удалено.
+        # TODO: если нужен реальный per-email failed-attempts counter — отдельная
+        # таблица с failed_at column или Redis-counter.
 
     logger.info("otp_code_invalid email=%s prefix=%s", email_norm, code_hash[:8])
     return None

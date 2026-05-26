@@ -1,5 +1,5 @@
-import uuid
 from minio import Minio
+
 from app.config import settings
 
 _client: Minio | None = None

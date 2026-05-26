@@ -23,9 +23,11 @@ TTL, scratchpad, pub/sub, locks) lands in v0.5.5. Polling /inbox every
 """
 import json
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+
 from app.db.postgres import get_pool
 from app.security.auth import verify_api_key
 

@@ -16,7 +16,6 @@ Wizard вызывает _create_agent_core() из user.py напрямую (бе
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import secrets
@@ -506,8 +505,9 @@ async def render_qr(token: str):
     # Попробуем qrcode lib (PIL backend — Pillow уже в requirements);
     # если нет — fallback на SVG прямо вписанный.
     try:
-        import qrcode
         import io
+
+        import qrcode
         # qrcode по умолчанию использует PIL — Pillow уже в requirements.txt
         img = qrcode.make(deep_link, box_size=8, border=2)
         buf = io.BytesIO()
@@ -828,6 +828,11 @@ async def claim_token(token: str, request: Request):
     # v3 multi-agent registry: REUSE если у owner-а уже есть agent с тем же
     # machine_fingerprint — возвращаем existing api_key, не создаём нового.
     # Это предотвращает дубликаты при повторном wizard на той же машине.
+    # FIX 2026-05-26: pool + platform были undefined (F821) — функция использовала
+    # pool_db ниже, но reuse-блок выше ссылался на pool. Унифицировано: pool +
+    # platform поднимаются здесь, чтобы оба блока (REUSE и normal-claim) использовали.
+    pool = await get_pool()
+    platform = entry.get("platform", "claude_code")
     fp = entry.get("machine_fingerprint")
     if fp:
         async with pool.acquire() as conn:
@@ -896,9 +901,9 @@ async def claim_token(token: str, request: Request):
     # PR #35: проверить pending row (создан при issue-claim). Если есть —
     # просто convert to active + создать api_key, не зовём _create_agent_core
     # (он бы упал с 409 на UNIQUE agent_id).
+    # FIX 2026-05-26: pool_db → pool (унификация с REUSE-блоком выше).
     api_key = None
-    pool_db = await get_pool()
-    async with pool_db.acquire() as conn:
+    async with pool.acquire() as conn:
         pending = await conn.fetchrow(
             "SELECT agent_id FROM agent_states WHERE agent_id = $1 "
             "AND owner_user_id = $2::uuid AND status = 'pending_claim'",
@@ -951,7 +956,7 @@ async def claim_token(token: str, request: Request):
                 )
             raise
         api_key = agent["api_key"]
-    platform = entry.get("platform", "claude_code")
+    # NOTE: platform определён ранее (line ~835) — единая переменная для REUSE и normal-claim путей.
 
     # v3: bind machine_fingerprint к новому агенту (для idempotent re-onboard)
     if fp:
@@ -988,16 +993,16 @@ async def claim_token(token: str, request: Request):
         "base_url": BASE_URL,
         "mcp_config": mcp_config,
         "instructions": (
-            f"Установка для агента:\n"
-            f"1. Откройте config-файл (приоритет):\n"
-            f"   • Claude Code: ~/.claude.json\n"
-            f"   • Claude Desktop macOS: ~/Library/Application Support/Claude/claude_desktop_config.json\n"
-            f"   • Claude Desktop Windows: %APPDATA%\\Claude\\claude_desktop_config.json\n"
-            f"   • Cursor: ~/.cursor/mcp.json или .cursor/mcp.json\n"
-            f"2. Под ключом mcpServers добавьте новую запись cognitive-core (НЕ перезаписывайте existing).\n"
-            f"3. Используйте Edit/jq для surgical edit, не overwrite.\n"
-            f"4. После — попросите user'а перезапустить приложение.\n"
-            f"5. После рестарта у вас появятся 24 MCP-инструмента."
+            "Установка для агента:\n"
+            "1. Откройте config-файл (приоритет):\n"
+            "   • Claude Code: ~/.claude.json\n"
+            "   • Claude Desktop macOS: ~/Library/Application Support/Claude/claude_desktop_config.json\n"
+            "   • Claude Desktop Windows: %APPDATA%\\Claude\\claude_desktop_config.json\n"
+            "   • Cursor: ~/.cursor/mcp.json или .cursor/mcp.json\n"
+            "2. Под ключом mcpServers добавьте новую запись cognitive-core (НЕ перезаписывайте existing).\n"
+            "3. Используйте Edit/jq для surgical edit, не overwrite.\n"
+            "4. После — попросите user'а перезапустить приложение.\n"
+            "5. После рестарта у вас появятся 24 MCP-инструмента."
         ),
     }
 

@@ -1,5 +1,6 @@
 """Тесты streaming /demo/run эндпоинта."""
 import json
+
 import pytest
 
 

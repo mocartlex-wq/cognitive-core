@@ -13,6 +13,6 @@ Failure modes покрыты:
   - Consumer down: durable consumer пересохраняет cursor в JetStream
   - Network split: при восстановлении NATS replay'ит messages с last-ack
 """
-from .outbox import write_outbox_event, OutboxPublisher
+from .outbox import OutboxPublisher, write_outbox_event
 
 __all__ = ["write_outbox_event", "OutboxPublisher"]

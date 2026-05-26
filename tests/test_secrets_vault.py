@@ -30,7 +30,7 @@ def reset_vault_singleton(monkeypatch):
 
 
 def test_encrypt_decrypt_ascii():
-    from app.security.secrets_vault import encrypt, decrypt
+    from app.security.secrets_vault import decrypt, encrypt
     plain = "sk-abcdef1234567890XYZ"
     ct = encrypt(plain)
     assert isinstance(ct, bytes)
@@ -39,27 +39,27 @@ def test_encrypt_decrypt_ascii():
 
 
 def test_encrypt_decrypt_cyrillic():
-    from app.security.secrets_vault import encrypt, decrypt
+    from app.security.secrets_vault import decrypt, encrypt
     plain = "ключ-кириллица-абв-эфир"
     ct = encrypt(plain)
     assert decrypt(ct) == plain
 
 
 def test_encrypt_decrypt_emoji():
-    from app.security.secrets_vault import encrypt, decrypt
+    from app.security.secrets_vault import decrypt, encrypt
     plain = "key 🐲 with 🔑 emoji"
     ct = encrypt(plain)
     assert decrypt(ct) == plain
 
 
 def test_encrypt_empty_string_raises():
-    from app.security.secrets_vault import encrypt, SecretsVaultError
+    from app.security.secrets_vault import SecretsVaultError, encrypt
     with pytest.raises(SecretsVaultError):
         encrypt("")
 
 
 def test_encrypt_non_string_raises():
-    from app.security.secrets_vault import encrypt, SecretsVaultError
+    from app.security.secrets_vault import SecretsVaultError, encrypt
     with pytest.raises(SecretsVaultError):
         encrypt(None)  # type: ignore
     with pytest.raises(SecretsVaultError):
@@ -67,7 +67,7 @@ def test_encrypt_non_string_raises():
 
 
 def test_decrypt_corrupted_raises():
-    from app.security.secrets_vault import decrypt, SecretsVaultError
+    from app.security.secrets_vault import SecretsVaultError, decrypt
     with pytest.raises(SecretsVaultError):
         decrypt(b"not-a-real-fernet-token-corrupted")
 
@@ -75,7 +75,7 @@ def test_decrypt_corrupted_raises():
 def test_decrypt_wrong_key(monkeypatch):
     """Encrypt одним ключом → reset singleton → decrypt с другим ключом → fail."""
     from app.security import secrets_vault as v
-    from app.security.secrets_vault import encrypt, decrypt, SecretsVaultError
+    from app.security.secrets_vault import SecretsVaultError, decrypt, encrypt
     # Encrypt с первым ключом
     plain = "sensitive-data"
     ct = encrypt(plain)
@@ -89,7 +89,7 @@ def test_decrypt_wrong_key(monkeypatch):
 
 
 def test_decrypt_non_bytes_raises():
-    from app.security.secrets_vault import decrypt, SecretsVaultError
+    from app.security.secrets_vault import SecretsVaultError, decrypt
     with pytest.raises(SecretsVaultError):
         decrypt("not-bytes")  # type: ignore
 
@@ -118,7 +118,7 @@ def test_mask_empty_string():
 
 
 def test_key_source_env():
-    from app.security.secrets_vault import key_source, is_production_ready
+    from app.security.secrets_vault import is_production_ready, key_source
     # autouse fixture устанавливает env-key
     assert key_source() == "env"
     assert is_production_ready() is True
@@ -131,7 +131,12 @@ def test_key_source_generated_when_no_env(monkeypatch):
     v._FERNET = None
     v._KEY_SOURCE = "unset"
     # Trigger lazy init
-    from app.security.secrets_vault import key_source, is_production_ready, encrypt, decrypt
+    from app.security.secrets_vault import (
+        decrypt,
+        encrypt,
+        is_production_ready,
+        key_source,
+    )
     assert key_source() == "generated"
     assert is_production_ready() is False
     # Even with generated key, round-trip works в рамках одного процесса
@@ -152,8 +157,9 @@ def test_key_source_invalid_env_raises(monkeypatch):
 
 def test_decrypt_invalid_utf8(monkeypatch):
     """Если cipher-result не UTF-8 (намеренно corruption через manual Fernet) → SecretsVaultError."""
-    from app.security.secrets_vault import SecretsVaultError, decrypt
     from cryptography.fernet import Fernet
+
+    from app.security.secrets_vault import SecretsVaultError, decrypt
     # Encrypt invalid UTF-8 напрямую через Fernet используя текущий ключ
     key = os.environ["COGCORE_SECRETS_MASTER_KEY"].encode()
     f = Fernet(key)

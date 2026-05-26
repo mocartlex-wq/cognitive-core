@@ -1,13 +1,23 @@
-from fastapi import APIRouter, Request, Query
-from app.security.auth import verify_api_key
-from app.services.consolidator import daily_consolidate, weekly_consolidate, run_monthly_audit
-from app.services.operative import cleanup_stale_vectors, index_domain_vectors, restore_redis_from_pg
+import json
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Request
+
+from app.config import settings
 from app.db.postgres import get_pool
 from app.db.s3 import get_s3
-from app.config import settings
-from uuid import UUID
-from datetime import datetime, timezone
-import json
+from app.security.auth import verify_api_key
+from app.services.consolidator import (
+    daily_consolidate,
+    run_monthly_audit,
+    weekly_consolidate,
+)
+from app.services.operative import (
+    cleanup_stale_vectors,
+    index_domain_vectors,
+    restore_redis_from_pg,
+)
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 

@@ -6,10 +6,10 @@
 - HNSW индексы созданы
 - KNN-поиск через pgvector работает
 """
-import pytest
-import asyncpg
 import os
 
+import asyncpg
+import pytest
 
 DB_URL = os.environ.get(
     "DATABASE_URL",

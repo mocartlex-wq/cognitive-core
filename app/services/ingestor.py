@@ -1,8 +1,8 @@
 import json
-from uuid import UUID, uuid4
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
 from app.db.postgres import get_pool
-from app.models.event import RawEventInput
 
 
 async def save_raw_event(
