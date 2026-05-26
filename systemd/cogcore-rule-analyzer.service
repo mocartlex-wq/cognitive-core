@@ -1,0 +1,17 @@
+[Unit]
+Description=Cogcore Weekly Rule Proposal Analyzer (DeepSeek scoring)
+After=network-online.target cognitive-core.service postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/cognitive-deploy.env
+EnvironmentFile=-/etc/cogcore-qwen.env
+ExecStart=/usr/bin/python3 /opt/cognitive-core/scripts/weekly-rule-analyzer.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600
+User=salex
+
+[Install]
+WantedBy=multi-user.target
