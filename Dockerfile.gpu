@@ -9,9 +9,9 @@
 #   - nvidia-container-toolkit (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
 #   - Docker Compose v2
 
-# Базовый образ с CUDA 12.9 + cuDNN 9 runtime + Python 3.11
-# (driver 535+ supports CUDA 12.9 forward-compat)
-FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu22.04
+# Базовый образ с CUDA 12.2 runtime (max compat для driver 535) + Python 3.11
+# cuDNN 8 ставится отдельно apt install ниже — нет ready cudnn-runtime тэга для 12.2.x
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
 WORKDIR /app
 
@@ -27,11 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && ln -sf /usr/bin/python3.11 /usr/bin/python3
 
+# Install cuDNN 8 from NVIDIA apt repo (включён в base image).
+# faster-whisper/ctranslate2 на CUDA требует libcudnn_ops_infer.so.8.
+RUN apt-get update && apt-get install -y --no-install-recommends \n    libcudnn8 \n    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 COPY requirements-gpu.txt .
 
 # Сначала ставим основные deps, затем подменяем onnxruntime на onnxruntime-gpu
-# Upgrade pip first — nvidia/cuda:12.9.2-cudnn-runtime image ships pip 22.x
+# Upgrade pip first — nvidia/cuda:12.2.0-runtime image ships pip 22.x
 # which doesn't support --break-system-packages flag (added in pip 23.0.1+).
 RUN pip install --upgrade pip
 
