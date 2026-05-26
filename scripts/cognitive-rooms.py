@@ -1353,12 +1353,37 @@ def _ui_top_nav(active=""):
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def _read_json(self):
+        # FIX 2026-05-26: раньше silent except возвращал {} при любой ошибке —
+        # это приводило к "from_agent=anonymous" + "text=empty" в /rooms/X/post
+        # без понятной диагностики. Теперь логируем причину для traceability +
+        # сохраняем backward-compat (возврат {} чтобы handler-ы не падали).
         length = int(self.headers.get("Content-Length", "0"))
         if length == 0:
             return {}
+        raw = b""
         try:
-            return json.loads(self.rfile.read(length).decode())
-        except Exception:
+            raw = self.rfile.read(length)
+            return json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as e:
+            try:
+                sys.stderr.write(f"[rooms] _read_json JSON error path={self.path} "
+                                 f"len={length} err={e} prefix={raw[:120]!r}\n")
+            except Exception:
+                pass
+            return {}
+        except UnicodeDecodeError as e:
+            try:
+                sys.stderr.write(f"[rooms] _read_json UTF-8 error path={self.path} "
+                                 f"len={length} err={e}\n")
+            except Exception:
+                pass
+            return {}
+        except Exception as e:
+            try:
+                sys.stderr.write(f"[rooms] _read_json {type(e).__name__} path={self.path} "
+                                 f"err={e}\n")
+            except Exception:
+                pass
             return {}
 
     def _send(self, code, body):
@@ -1608,12 +1633,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 from_agent = body.get("from_agent") or self.headers.get("X-Agent-Id", "anonymous")
                 text = body.get("text", "")
+                # FIX 2026-05-26: раньше silent accept пустого text → 200 OK + пустой row в БД.
+                # Теперь явная валидация: text обязателен. Это help tenants заметить
+                # bug в их payload (например wrong field name) сразу, а не молча "succeed".
+                if not text or not text.strip():
+                    self._send(400, {"error": "field 'text' required and non-empty",
+                                     "received_keys": list(body.keys()) if body else [],
+                                     "hint": "POST body {from_agent, text, parent_id?} as JSON"})
+                    return
                 parent_id = body.get("parent_id")
                 msg_id, err = post_message(room_id, from_agent, text, parent_id=parent_id)
                 if err:
                     self._send(500, {"error": err})
                 else:
-                    self._send(200, {"ok": True, "message_id": msg_id})
+                    self._send(200, {"ok": True, "message_id": msg_id, "from_agent": from_agent})
             elif path.startswith("/rooms/") and path.endswith("/ask"):
                 room_id = path.split("/")[2]
                 room = self._auth_room(room_id)
