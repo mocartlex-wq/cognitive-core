@@ -19,13 +19,17 @@ import logging
 import os
 import shutil
 import tempfile
+import base64
 import uuid
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db.postgres import get_pool
@@ -244,6 +248,51 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
             except Exception as e:
                 logger.warning("frame upload failed key=%s err=%s", key, e)
 
+        # Vision stage — multi-provider анализ «механики» видео.
+        # Owner-mandate 2026-05-24: «дать возможность механики, а не картинок» +
+        # per-tenant external keys (PR #52): сначала пытаемся ключами owner'а
+        # (qwen → minimax → gigachat → claude → openai → gemini), потом fallback
+        # на shared platform Qwen, потом DeepSeek text-only. owner_user_id берём
+        # из auth-context — у _OwnerCtx это marker «owner-key@cognitive-core»,
+        # для него tenant keys не применимы (resolve fails — fallthrough на shared).
+        vision_result: dict = {}
+        try:
+            from app.services.vision_analyzer import analyze_mechanics
+            if frame_records:
+                # Build absolute frame URLs — вне зависимости provider, public HTTPS.
+                base_url = os.environ.get("PUBLIC_BASE_URL", "https://mcp.me-ai.ru").rstrip("/")
+                abs_urls = [
+                    f"{base_url}{fr['url']}" if fr["url"].startswith("/") else fr["url"]
+                    for fr in frame_records
+                ]
+                # owner_user_id — UUID-string или None. Для _OwnerCtx user_id =
+                # "owner-key" (не UUID) — analyze_mechanics поймает ошибку UUID
+                # cast в _load_tenant_keys и пропустит tenant-stage.
+                resolved_owner = None
+                uid = getattr(user, "user_id", None)
+                if uid and uid != "owner-key":
+                    resolved_owner = uid
+                vision_result = await analyze_mechanics(
+                    frame_urls=abs_urls,
+                    transcript=analysis.get("transcript"),
+                    duration_seconds=analysis.get("duration"),
+                    owner_user_id=resolved_owner,
+                )
+                if vision_result.get("mechanics_summary"):
+                    logger.info(
+                        "vision mechanics for media_id=%s source=%s tokens=%d/%d: %s",
+                        media_id,
+                        vision_result.get("provider_source", "?"),
+                        vision_result.get("tokens_in", 0),
+                        vision_result.get("tokens_out", 0),
+                        vision_result["mechanics_summary"][:120],
+                    )
+                elif vision_result.get("error"):
+                    logger.warning("vision stage error for media_id=%s: %s", media_id, vision_result["error"])
+        except Exception as e:
+            logger.warning("vision stage exception for media_id=%s: %s", media_id, e)
+            vision_result = {"error": f"exception: {e}"}
+
         # Payload для L1 и ответа
         result = {
             "media_id": media_id,
@@ -260,6 +309,13 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
             "transcript_duration_ms": analysis.get("transcript_duration_ms"),
             "frames": frame_records,
             "frames_count": len(frame_records),
+            "mechanics_summary": vision_result.get("mechanics_summary") or None,
+            "vision_provider": vision_result.get("model") if vision_result.get("mechanics_summary") else None,
+            "vision_provider_source": vision_result.get("provider_source") if vision_result.get("mechanics_summary") else None,
+            "vision_tokens": (
+                {"in": vision_result.get("tokens_in"), "out": vision_result.get("tokens_out")}
+                if vision_result.get("mechanics_summary") else None
+            ),
         }
 
         # Запись в L1 — атрибутируем к agent_id если auth через X-API-Key
@@ -552,3 +608,91 @@ async def list_media(request: Request, limit: int = 50):
             d["timestamp"] = d["timestamp"].isoformat()
         items.append(d)
     return {"count": len(items), "items": items}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# POST /api/media/upload_b64 — universal base64 entry (для MCP tool)
+# ─────────────────────────────────────────────────────────────────────────
+class UploadB64Body(BaseModel):
+    file_b64: str = Field(..., description="base64-encoded file content")
+    filename: str = Field(..., min_length=1, max_length=255, description="original filename с extension")
+    kind: str = Field("auto", pattern=r"^(auto|video|image|audio)$", description="auto = detect from extension")
+
+
+@router.post("/upload_b64")
+async def upload_b64(request: Request, body: UploadB64Body) -> dict:
+    """Universal media upload через base64 JSON — для MCP tools (cognitive_media_upload).
+
+    Не требует multipart. Принимает file_b64 + filename, dispatches к существующему
+    /api/media/{video|image|audio} endpoint через internal HTTP loopback.
+
+    Авторизация: тот же что и у video/image/audio endpoints (admin cookie ИЛИ
+    X-Owner-Key ИЛИ per-agent X-API-Key). Авторизационный header/cookie
+    проксируется на loopback вызов.
+    """
+    user = await _check_admin_or_owner(request)
+
+    # Decode + size limit BEFORE bytes hit memory limits
+    try:
+        file_bytes = base64.b64decode(body.file_b64, validate=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid base64: {e}")
+
+    size_mb = len(file_bytes) / 1024 / 1024
+    if size_mb > MAX_UPLOAD_SIZE_MB:
+        raise HTTPException(
+            status_code=413,
+            detail=f"размер {size_mb:.1f}MB > лимита {MAX_UPLOAD_SIZE_MB}MB",
+        )
+
+    # Determine kind
+    ext = Path(body.filename).suffix.lower()
+    kind = body.kind
+    if kind == "auto":
+        if ext in ALLOWED_VIDEO_EXT:
+            kind = "video"
+        elif ext in ALLOWED_IMAGE_EXT:
+            kind = "image"
+        elif ext in ALLOWED_AUDIO_EXT:
+            kind = "audio"
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"неизвестное расширение {ext!r}. Поддерживается: "
+                    f"video={sorted(ALLOWED_VIDEO_EXT)}, "
+                    f"image={sorted(ALLOWED_IMAGE_EXT)}, "
+                    f"audio={sorted(ALLOWED_AUDIO_EXT)}"
+                ),
+            )
+
+    endpoint = f"/api/media/{kind}"
+    logger.info(
+        "upload_b64: user=%s file=%s kind=%s size=%.1fMB → forwarding к %s",
+        user.email, body.filename, kind, size_mb, endpoint,
+    )
+
+    # Forward как multipart к internal endpoint (через loopback nginx → api)
+    # Проксируем auth header/cookie чтобы _check_admin_or_owner на той стороне сработал
+    headers: dict = {}
+    if api_key := request.headers.get("X-API-Key"):
+        headers["X-API-Key"] = api_key
+    elif owner_key := request.headers.get("X-Owner-Key"):
+        headers["X-Owner-Key"] = owner_key
+    if cookies := request.cookies:
+        headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+
+    try:
+        async with httpx.AsyncClient(base_url="http://localhost:8000", timeout=180) as client:
+            files = {"file": (body.filename, BytesIO(file_bytes), "application/octet-stream")}
+            r = await client.post(endpoint, files=files, headers=headers)
+        if r.status_code >= 400:
+            # Pass through detail from downstream
+            try:
+                detail = r.json().get("detail", r.text[:500])
+            except Exception:
+                detail = r.text[:500]
+            raise HTTPException(status_code=r.status_code, detail=detail)
+        return r.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"loopback to {endpoint} failed: {e}")

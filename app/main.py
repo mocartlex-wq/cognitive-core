@@ -245,6 +245,7 @@ from app.api.demo import router as demo_router
 from app.api.agents import router as agents_router
 from app.api.agents_collab import router as agents_collab_router
 from app.api.onboard import router as onboard_router
+from app.api.rules import router as rules_router
 
 app.include_router(events_router)
 app.include_router(operative_router)
@@ -255,6 +256,7 @@ app.include_router(demo_router)
 app.include_router(agents_router)
 app.include_router(agents_collab_router)
 app.include_router(onboard_router)
+app.include_router(rules_router)
 from app.api.replication import router as replication_router
 app.include_router(replication_router)
 from app.api.mcp_protocol import router as mcp_router
@@ -286,6 +288,12 @@ app.include_router(openapi_router)
 # Admin tenants management (Phase 5B 2026-05-22): /admin/tenants + tier change/suspend
 from app.api.admin import router as admin_router
 app.include_router(admin_router)
+
+# Per-tenant external AI provider keys (2026-05-24): /user/settings/external-key*
+# Owner-mandate: opt-in tenant keys для Qwen / MiniMax / GigaChat / Claude / OpenAI / Gemini,
+# чтобы каждый платил со своего api_key, а не со shared платформенного.
+from app.api.user_settings import router as user_settings_router
+app.include_router(user_settings_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -321,6 +329,12 @@ async def admin_errors_page():
 async def admin_media_page():
     """Админ-панель: загрузка видео/картинок с авто-анализом."""
     return _html("admin-media.html")
+
+
+@app.get("/ui/admin/rule-proposals")
+async def admin_rule_proposals_page():
+    """Admin: review pending rule proposals from tenants."""
+    return _html("admin-rule-proposals.html")
 
 
 @app.get("/ui/connect")

@@ -25,6 +25,13 @@ services:
       EMBEDDING_USE_GPU: "true"
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+      # Whisper на GPU — ускорение ~5-10x на GTX 1050 Ti для base модели.
+      # ВНИМАНИЕ: faster-whisper (ctranslate2) на CUDA требует libcudnn8.
+      # Если контейнер падает с "libcudnn_ops_infer.so.8: cannot open" — нужно
+      # переключить base image Dockerfile.gpu на `nvidia/cuda:12.2.0-cudnn8-runtime-ubuntu22.04`
+      # или install: `apt-get install -y libcudnn8`.
+      WHISPER_DEVICE: "cuda"
+      WHISPER_COMPUTE_TYPE: "int8"  # Pascal (compute 6.1) only supports int8 efficiently on GPU
     deploy:
       resources:
         reservations:

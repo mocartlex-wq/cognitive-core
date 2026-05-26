@@ -190,6 +190,36 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "cognitive_media_upload",
+        "description": (
+            "Загрузить медиа-файл (video/image/audio/document) на сервер для анализа. "
+            "Возвращает media_id + frames URLs + Whisper transcript + готовое vision-описание "
+            "(mechanics_summary) для НЕ-multimodal LLM. "
+            "Размер ≤ 200MB. file_b64 = base64-encoded content файла. "
+            "Это серверная alternative для bash CLI cogmedia."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_b64": {
+                    "type": "string",
+                    "description": "base64-encoded content файла",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "original filename с расширением (e.g. 'video.mp4')",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["auto", "video", "image", "audio"],
+                    "default": "auto",
+                    "description": "auto = определить по расширению",
+                },
+            },
+            "required": ["file_b64", "filename"],
+        },
+    },
+    {
         "name": "cognitive_send",
         "description": "Direct message другому агенту.",
         "inputSchema": {
@@ -610,6 +640,32 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             _call_self(request, "GET", f"/agents/{agent_id}/history", params={"limit": 5}, timeout_s=5.0),
             return_exceptions=False,
         )
+        # Detect legacy connection URL — informational advisory только.
+        # Раньше требовали "тихо без вопросов" — но это выглядело как prompt-injection
+        # и хорошие агенты справедливо отказывались. Теперь — just FYI: пусть агент
+        # сам решает, обсудить с owner или прямо предложить замену. Legacy продолжает
+        # работать неограниченно, миграция не срочная.
+        connection_host = (request.headers.get("host") or "").lower().split(":")[0]
+        _LEGACY_HOSTS = {
+            "mcp.xn----8sbwawqx4fza.xn--p1ai",
+            "mcp.ии-память.рф",
+        }
+        _PRIMARY_URL = "https://mcp.me-ai.ru"
+        connection_advisory = None
+        if connection_host in _LEGACY_HOSTS:
+            connection_advisory = {
+                "severity": "info",
+                "type": "url_aliased",
+                "current_host": connection_host,
+                "primary_url": _PRIMARY_URL,
+                "note": (
+                    "FYI: ты сейчас подключён через legacy alias '" + connection_host + "'. "
+                    "Primary canonical URL — '" + _PRIMARY_URL + "'. Старый alias продолжит "
+                    "работать неограниченно, миграция НЕ срочная. Если хочешь — предложи "
+                    "owner-у обновить ~/.claude.json (это human-readable URL, ASCII, его "
+                    "проще набирать). Решение оставляю на тебя и owner-а."
+                ),
+            }
         # PR #22: добавлен usage_guide — категории tools + best practices.
         # Owner: «дай в нем информацию и на память, на все функции, что бы ИИ
         # их использовала». Claim-промпт инструктирует агента вызвать этот
@@ -659,12 +715,28 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             },
             "more_info": "https://mcp.me-ai.ru/sandbox — все endpoints с примерами",
         }
-        return {
+        response = {
             "agent_id": agent_id,
             "state": state,
             "recent_history": history.get("items", []) if isinstance(history, dict) else [],
             "usage_guide": usage_guide,
         }
+        if connection_advisory:
+            response["connection_advisory"] = connection_advisory
+        return response
+
+    if name == "cognitive_media_upload":
+        # P0 (2026-05-26 per ewewew feedback): MCP tool вместо bash CLI cogmedia.
+        # Forwards к /api/media/upload_b64 который сам определяет kind и
+        # dispatch'ит к /video|image|audio analyzer'ам.
+        file_b64 = a.get("file_b64")
+        filename = a.get("filename")
+        kind = a.get("kind", "auto")
+        if not file_b64 or not filename:
+            raise ValueError("file_b64 + filename required")
+        body = {"file_b64": file_b64, "filename": filename, "kind": kind}
+        # timeout 180s — vision providers могут долго отвечать на 12 кадров
+        return await _call_self(request, "POST", "/api/media/upload_b64", json_body=body, timeout_s=180.0)
 
     if name == "cognitive_send":
         body = {

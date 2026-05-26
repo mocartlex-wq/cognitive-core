@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Admin · Предложения правил — Cognitive Core</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="/static/head-bootstrap.js?v=20260526"></script>
+  <link rel="stylesheet" href="/static/shared.css?v=20260520j">
+  <script src="/static/theme.js?v=20260520"></script>
+  <script src="/static/error-reporter.js?v=20260521" defer></script>
+  <script src="/static/auth-widget.js?v=20260522" defer></script>
+  <style>
+    .glass-bg { background: var(--bg-page); min-height: 100vh; }
+    main { max-width: 980px; margin: 30px auto; padding: 0 20px; }
+    .card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: var(--glass-shadow);
+      backdrop-filter: blur(20px);
+    }
+    h1 { font-size: 24px; margin: 0 0 18px; color: var(--glass-text); }
+    h2 { font-size: 18px; margin: 0 0 14px; color: var(--glass-text); }
+    .meta { font-size: 13px; color: var(--glass-text-dim); }
+    .filter-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .filter-tabs button {
+      background: var(--glass-bg-light);
+      border: 1px solid var(--glass-border);
+      color: var(--glass-text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .filter-tabs button.active {
+      background: var(--glass-orb-1);
+      color: white;
+      border-color: var(--glass-orb-1);
+    }
+    .proposal {
+      background: var(--glass-bg-light);
+      border: 1px solid var(--glass-border);
+      border-radius: 9px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .proposal-header {
+      display: flex; justify-content: space-between; align-items: start;
+      gap: 14px; margin-bottom: 10px;
+    }
+    .proposal-meta {
+      font-size: 12px; color: var(--glass-text-dim);
+      display: flex; gap: 12px;
+    }
+    .badge-vote {
+      background: rgba(88,166,255,0.15);
+      color: var(--glass-orb-1);
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .proposal-body {
+      padding: 12px;
+      background: rgba(0,0,0,0.15);
+      border-radius: 6px;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 10px 0;
+    }
+    .proposal-rationale {
+      font-size: 13px;
+      color: var(--glass-text-dim);
+      margin: 8px 0;
+      font-style: italic;
+    }
+    .ds-analysis {
+      padding: 10px 14px;
+      background: rgba(88,166,255,0.08);
+      border-left: 3px solid var(--glass-orb-1);
+      border-radius: 4px;
+      font-size: 13px;
+      margin: 10px 0;
+    }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg-light);
+      color: var(--glass-text);
+      cursor: pointer;
+      font-size: 14px;
+      transition: 0.15s;
+    }
+    .btn:hover { background: rgba(88,166,255,0.1); }
+    .btn-approve {
+      background: rgba(76,201,96,0.15);
+      color: #4cc960;
+      border-color: rgba(76,201,96,0.3);
+    }
+    .btn-reject {
+      background: rgba(248,81,73,0.15);
+      color: #ff7770;
+      border-color: rgba(248,81,73,0.3);
+    }
+    .btn-approve:hover { background: rgba(76,201,96,0.25); }
+    .btn-reject:hover { background: rgba(248,81,73,0.25); }
+    select, textarea, input {
+      background: var(--glass-bg-light);
+      border: 1px solid var(--glass-border);
+      border-radius: 7px;
+      padding: 8px 12px;
+      color: var(--glass-text);
+      font-size: 14px;
+      width: 100%;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    label { display: block; font-size: 12px; color: var(--glass-text-dim); margin: 8px 0 4px; }
+    .empty { color: var(--glass-text-dim); padding: 30px; text-align: center; font-size: 14px; }
+    .approve-form { display: none; padding-top: 12px; border-top: 1px solid var(--glass-border); margin-top: 12px; }
+    .approve-form.open { display: block; }
+  </style>
+</head>
+<body class="glass-bg">
+
+<main>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+    <h1>📋 Предложения новых правил</h1>
+    <a href="/ui/profile" style="color:var(--glass-orb-1);font-size:14px">← к профилю</a>
+  </div>
+
+  <div class="card">
+    <p class="meta">
+      Сюда попадают предложения новых правил от tenants.
+      Если ↑ голосов ≥ 3 — DeepSeek-куратор анализирует proposal и предлагает severity (<code>core</code> или <code>recommended</code>).
+      Approve → правило становится платформенным (применяется ко всем агентам).
+      Reject → tenant получит уведомление с причиной.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="filter-tabs">
+      <button data-status="pending" class="active">⏳ Pending</button>
+      <button data-status="reviewing">🔍 DeepSeek review</button>
+      <button data-status="approved">✅ Approved</button>
+      <button data-status="rejected">❌ Rejected</button>
+    </div>
+    <div id="proposalsList" class="empty">Загружаем…</div>
+  </div>
+</main>
+
+<script>
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+
+  async function api(path, options = {}) {
+    options.credentials = 'include';
+    options.headers = Object.assign({ 'Accept': 'application/json' }, options.headers || {});
+    try {
+      const r = await fetch(path, options);
+      if (r.status === 401) { location.href = '/ui/login?next=' + encodeURIComponent(location.pathname); return null; }
+      if (r.status === 403) { document.body.innerHTML = '<main style="padding:60px;text-align:center"><h1>403</h1><p>Нужны admin-права.</p><a href="/ui/profile" style="color:var(--glass-orb-1)">← к профилю</a></main>'; return null; }
+      return r;
+    } catch (e) {
+      console.error('api error', e);
+      throw e;
+    }
+  }
+
+  let currentStatus = 'pending';
+
+  async function loadProposals() {
+    const list = document.getElementById('proposalsList');
+    list.innerHTML = '<div class="empty">Загружаем…</div>';
+    const r = await api('/admin/rule-proposals?status=' + encodeURIComponent(currentStatus));
+    if (!r || !r.ok) {
+      list.innerHTML = '<div class="empty">Не удалось загрузить (' + (r ? r.status : 'no resp') + ')</div>';
+      return;
+    }
+    const j = await r.json();
+    const items = j.items || [];
+    if (!items.length) {
+      list.innerHTML = '<div class="empty">Нет предложений в статусе <b>' + currentStatus + '</b>.</div>';
+      return;
+    }
+    list.innerHTML = items.map(p => renderProposal(p)).join('');
+    attachHandlers();
+  }
+
+  function renderProposal(p) {
+    const overThreshold = (p.votes_up >= (p.vote_threshold || 3));
+    const dsBlock = p.ds_analysis
+      ? `<div class="ds-analysis">🤖 <b>DeepSeek анализ:</b> ${esc(p.ds_analysis)}${p.ds_suggested_severity ? '<br><b>Предложенный severity:</b> ' + esc(p.ds_suggested_severity) : ''}</div>`
+      : (overThreshold ? '<div class="meta">⏳ DeepSeek анализ ожидает запуска cron</div>' : '<div class="meta">↑ голосов недостаточно для DS-review (порог: ' + (p.vote_threshold || 3) + ')</div>');
+    const actions = (p.status === 'pending' || p.status === 'reviewing')
+      ? `<div class="actions">
+           <button class="btn btn-approve" data-action="approve" data-id="${esc(p.id)}">✅ Approve</button>
+           <button class="btn btn-reject"  data-action="reject"  data-id="${esc(p.id)}">❌ Reject</button>
+         </div>
+         <div class="approve-form" id="form-${esc(p.id)}">
+           <label>Severity при approve:</label>
+           <select name="severity">
+             <option value="recommended">recommended</option>
+             <option value="core">core (immutable)</option>
+           </select>
+           <label>Review notes (опц.):</label>
+           <textarea name="notes" rows="3" placeholder="Почему approve/reject..."></textarea>
+           <div class="actions">
+             <button class="btn btn-approve" data-confirm="approve" data-id="${esc(p.id)}">Подтвердить approve</button>
+             <button class="btn btn-reject"  data-confirm="reject"  data-id="${esc(p.id)}">Подтвердить reject</button>
+             <button class="btn" data-cancel="${esc(p.id)}">Отмена</button>
+           </div>
+         </div>`
+      : `<div class="meta">Reviewed: ${fmtDate(p.reviewed_at)}${p.review_notes ? ' — ' + esc(p.review_notes) : ''}</div>`;
+    return `
+      <div class="proposal" data-id="${esc(p.id)}">
+        <div class="proposal-header">
+          <div>
+            <div><b>scope:</b> <code>${esc(p.proposed_scope)}</code></div>
+            <div class="proposal-meta">
+              <span>от: ${esc(p.owner_email || p.owner_user_id)}</span>
+              <span>${fmtDate(p.created_at)}</span>
+            </div>
+          </div>
+          <span class="badge-vote">↑ ${p.votes_up || 0} / ↓ ${p.votes_down || 0}</span>
+        </div>
+        <div class="proposal-body">${esc(p.proposed_body)}</div>
+        ${p.rationale ? `<div class="proposal-rationale">💭 ${esc(p.rationale)}</div>` : ''}
+        ${dsBlock}
+        ${actions}
+      </div>`;
+  }
+
+  function attachHandlers() {
+    document.querySelectorAll('[data-action="approve"], [data-action="reject"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('form-' + btn.dataset.id).classList.add('open');
+      });
+    });
+    document.querySelectorAll('[data-cancel]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('form-' + btn.dataset.cancel).classList.remove('open');
+      });
+    });
+    document.querySelectorAll('[data-confirm]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.dataset.confirm;
+        const id = btn.dataset.id;
+        const form = document.getElementById('form-' + id);
+        const severity = form.querySelector('[name=severity]').value;
+        const notes = form.querySelector('[name=notes]').value.trim();
+        btn.disabled = true; btn.textContent = '...';
+        const body = { severity: severity || undefined, review_notes: notes || undefined };
+        const r = await api('/admin/rule-proposals/' + encodeURIComponent(id) + '/' + action, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r && r.ok) {
+          loadProposals();
+        } else {
+          alert('Failed: ' + (r ? r.status : 'no resp'));
+          btn.disabled = false; btn.textContent = action === 'approve' ? 'Подтвердить approve' : 'Подтвердить reject';
+        }
+      });
+    });
+  }
+
+  document.querySelectorAll('.filter-tabs button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.filter-tabs button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      currentStatus = b.dataset.status;
+      loadProposals();
+    });
+  });
+
+  loadProposals();
+</script>
+
+</body>
+</html>

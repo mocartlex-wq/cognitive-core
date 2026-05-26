@@ -33,7 +33,7 @@ from app.db.s3 import get_s3
 logger = logging.getLogger(__name__)
 
 MEDIA_BUCKET = "media-frames"
-TTL_MINUTES = 15
+TTL_MINUTES = 1440  # 24h (2026-05-26 per ewewew feedback — frames должны выживать compaction)
 SCAN_INTERVAL_SECONDS = 300  # every 5 min
 
 
