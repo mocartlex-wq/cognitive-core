@@ -431,6 +431,7 @@
 <script src="/static/theme.js?v=20260520"></script>
 <script src="/static/error-reporter.js?v=20260521" defer></script>
 <script src="/static/auth-widget.js?v=20260522" defer></script>
+<script src="/static/machine-fp.js?v=20260526" defer></script>
 <script>
   async function api(path, opts = {}) {
     const r = await fetch(path, { credentials: 'same-origin', ...opts });
@@ -1005,6 +1006,13 @@
       project: form.project.value.trim() || null,
       machine: form.machine.value.trim() || null,
     };
+    // Browser-stable fingerprint — группирует агентов одного браузера в одну machine card
+    try {
+      data.machine_fingerprint = await window.getMachineFingerprint();
+      data.machine_label = window.getMachineLabel();
+    } catch (e) {
+      console.warn('machine fingerprint failed:', e);
+    }
     const r = await api('/user/agents/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
