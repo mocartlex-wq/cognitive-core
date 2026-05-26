@@ -412,8 +412,12 @@ async def _resolve_agent_full(request: Request) -> tuple[str, str | None]:
             result = (row["agent_id"], row["owner_user_id"])
             request.state._resolved_agent = result
             return result
-    except Exception:
-        pass
+    except Exception as e:
+        # FIX 2026-05-26: silent except скрывал postgres pool/connection failures
+        # → агент видел "API key not registered" даже когда настоящая причина
+        # была DB outage. Теперь warning в логи, fallback на legacy ValueError.
+        log.warning("_resolve_agent: agent_keys DB lookup failed: %s — falling back to env-only",
+                    type(e).__name__)
 
     raise ValueError(
         "API key not registered. Создан через /ui/profile + «Передать помощнику» "

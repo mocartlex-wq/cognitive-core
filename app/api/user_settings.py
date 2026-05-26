@@ -119,6 +119,8 @@ async def list_external_keys(request: Request):
         except SecretsVaultError:
             masked = "*** (ключ неисправен)"
             # Перезаписать last_test_status чтобы UI знал
+            # FIX 2026-05-26: раньше silent except → ошибки vault и DB update
+            # тонули. Теперь логируем — admin может найти broken keys в /var/log.
             try:
                 async with pool.acquire() as conn:
                     await conn.execute(
@@ -127,8 +129,9 @@ async def list_external_keys(request: Request):
                             WHERE owner_user_id = $1::uuid AND provider = $2""",
                         user.user_id, provider,
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("user_settings: failed to mark %s key as decrypt_failed for user=%s: %s",
+                               provider, str(user.user_id)[:8], type(e).__name__)
 
         items.append({
             "provider": provider,
@@ -243,8 +246,12 @@ async def test_external_key(provider: str, request: Request):
 
     try:
         plain_key = decrypt(row["api_key_encrypted"])
-    except SecretsVaultError:
+    except SecretsVaultError as e_vault:
         # Mark status decrypt_failed чтобы UI показал
+        # FIX 2026-05-26: silent except → log warning. Без этого vault errors
+        # тонули, admin не видел сколько ключей broken.
+        logger.warning("user_settings.test_external_key: vault decrypt FAILED for provider=%s user=%s: %s",
+                       provider, str(user.user_id)[:8], type(e_vault).__name__)
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
@@ -254,8 +261,9 @@ async def test_external_key(provider: str, request: Request):
                         WHERE owner_user_id=$1::uuid AND provider=$2""",
                     user.user_id, provider,
                 )
-        except Exception:
-            pass
+        except Exception as e_db:
+            logger.warning("user_settings.test_external_key: also failed to update DB status: %s",
+                           type(e_db).__name__)
         raise HTTPException(
             status_code=500,
             detail="Не удалось расшифровать ключ — пересохраните его.",
