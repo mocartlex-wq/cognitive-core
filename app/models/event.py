@@ -7,8 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class RawEventInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_agent: str = Field(..., min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
-    domain: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    # FIX 2026-05-26: разрешить Unicode-буквы (Cyrillic etc) — agent_id уже
+    # принимает их (PR #32), source_agent должен match'ить тот же alphabet.
+    # `\w` в Python regex = [a-zA-Z0-9_] + Unicode-letters (без re.ASCII flag).
+    source_agent: str = Field(..., min_length=2, max_length=64, pattern=r"^[\w.-]+$")
+    # Domain: разрешить Unicode + hyphens для имён вроде 'офис-mocartlex' или
+    # 'project-alpha'. Lowercase requirement убран — Cyrillic не имеет case.
+    domain: str = Field(..., min_length=1, max_length=64, pattern=r"^[\w][\w.-]*$")
     payload: dict = Field(...)
 
 
