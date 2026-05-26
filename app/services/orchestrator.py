@@ -179,7 +179,12 @@ DESTRUCTIVE_ACTIONS = frozenset(name for name, spec in ACTIONS.items() if spec["
 
 
 def build_system_prompt(orchestrator_id: str = "orchestrator", rules_section: str = "") -> str:
-    """System prompt для DeepSeek — описание роли + whitelisted actions."""
+    """System prompt для DeepSeek — описание роли + whitelisted actions.
+
+    Если передан непустой rules_section (Markdown text from build_rules_section),
+    он препендится к base prompt с разделителем. Это для inject per-owner
+    Agent Operating Rules (Phase 6).
+    """
     actions_doc = []
     for name, spec in ACTIONS.items():
         flag = " (DESTRUCTIVE → требует approval owner-а)" if spec["destructive"] else ""
@@ -258,11 +263,7 @@ Owner: «найди в памяти упоминания deploy и перешл�
 
 ОТВЕЧАЙ ТОЛЬКО JSON, БЕЗ ПОЯСНЕНИЙ."""
     if rules_section:
-        return rules_section + "
-
----
-
-" + base_prompt
+        return rules_section + "\n\n---\n\n" + base_prompt
     return base_prompt
 
 
