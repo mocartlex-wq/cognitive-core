@@ -346,11 +346,22 @@
     </p>
     <button class="btn btn-sm" id="proposeRuleBtn" style="margin-top:6px">➕ Предложить правило</button>
 
-    <h3 style="font-size:15px;margin:22px 0 8px;color:var(--glass-text)">Мои предложения</h3>
-    <div id="ownProposalsBlock" class="empty" style="font-size:13px">Загружаем…</div>
+    <details style="margin-top:18px">
+      <summary style="cursor:pointer;font-size:15px;color:var(--glass-text);font-weight:600;padding:6px 0;user-select:none">
+        Мои предложения <span id="ownProposalsCount" class="meta" style="margin-left:6px;font-weight:400;font-size:12.5px">(0)</span>
+      </summary>
+      <div id="ownProposalsBlock" class="empty" style="font-size:13px;margin-top:8px">Загружаем…</div>
+    </details>
 
-    <h3 style="font-size:15px;margin:22px 0 8px;color:var(--glass-text)">Публичные proposals (для голосования)</h3>
-    <div id="publicProposalsBlock" class="empty" style="font-size:13px">Загружаем…</div>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:15px;color:var(--glass-text);font-weight:600;padding:6px 0;user-select:none">
+        Голосование за предложения от других <span id="publicProposalsCount" class="meta" style="margin-left:6px;font-weight:400;font-size:12.5px">(0)</span>
+      </summary>
+      <p class="msg-line" style="font-size:12.5px;margin:6px 0">
+        Чужие proposals — для тех кто хочет помочь развивать платформу. Открывайте по желанию.
+      </p>
+      <div id="publicProposalsBlock" class="empty" style="font-size:13px;margin-top:8px">Загружаем…</div>
+    </details>
   </div>
 
   <dialog id="addRuleDialog" style="background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:12px;padding:24px;color:var(--glass-text);max-width:520px;width:90%">
@@ -1500,8 +1511,11 @@
       const j = await r.json();
       const ob = document.getElementById('ownProposalsBlock');
       const pb = document.getElementById('publicProposalsBlock');
+      const obc = document.getElementById('ownProposalsCount');
+      const pbc = document.getElementById('publicProposalsCount');
 
       const own = j.own || [];
+      if (obc) obc.textContent = '(' + own.length + ')';
       if (!own.length) {
         ob.innerHTML = '<div style="color:var(--glass-text-dim);padding:8px">Вы пока не делали предложений.</div>';
       } else {
@@ -1509,6 +1523,7 @@
       }
 
       const pub = j.public || [];
+      if (pbc) pbc.textContent = '(' + pub.length + ')';
       if (!pub.length) {
         pb.innerHTML = '<div style="color:var(--glass-text-dim);padding:8px">Нет публичных предложений для голосования.</div>';
       } else {
