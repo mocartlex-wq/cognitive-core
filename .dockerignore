@@ -1,0 +1,60 @@
+# What NOT to copy into Docker image (COPY . . in Dockerfile).
+#
+# CRITICAL: ./nats/ is a docker-compose bind mount source for nats SERVER
+# config (cognitive_nats container reads /etc/nats/nats.conf). It must NOT
+# be copied into the cognitive_api image — Python's namespace-package
+# discovery treats /app/nats/ as a module, breaking `import nats` from
+# nats-py with: module 'nats' has no attribute 'connect'.
+#
+# Incident 2026-05-26: claim_token + replication outbox spammed logs with
+# this error every 100ms for hours.
+nats/
+
+# Git internals (not needed in runtime image, big)
+.git/
+.github/
+
+# Local dev artifacts
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Documentation (served as static via nginx, not bundled in api)
+docs/
+launch/
+sandbox/
+*.md
+!app/**/*.md
+
+# Tests (not needed in production runtime)
+tests/
+pytest.ini
+
+# Secrets / local config (defensive — also in .gitignore)
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.key
+*.crt
+*.pem
+nginx/certs/
+
+# Backups / runtime data
+backups/
+data/
+
+# CI / scripts not needed in runtime
+scripts/installer*.ps1
+scripts/installer*.sh
