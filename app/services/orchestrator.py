@@ -178,7 +178,7 @@ ACTIONS: dict[str, dict[str, Any]] = {
 DESTRUCTIVE_ACTIONS = frozenset(name for name, spec in ACTIONS.items() if spec["destructive"])
 
 
-def build_system_prompt(orchestrator_id: str = "orchestrator") -> str:
+def build_system_prompt(orchestrator_id: str = "orchestrator", rules_section: str = "") -> str:
     """System prompt для DeepSeek — описание роли + whitelisted actions."""
     actions_doc = []
     for name, spec in ACTIONS.items():
@@ -187,7 +187,7 @@ def build_system_prompt(orchestrator_id: str = "orchestrator") -> str:
         actions_doc.append(f"  - {name}{flag}: {spec['description']} args: {{{args_doc}}}")
     actions_block = "\n".join(actions_doc)
 
-    return f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
+    base_prompt = f"""Ты — Orchestrator (agent_id={orchestrator_id}) в системе Cognitive Core.
 Твоя роль — принимать команды от owner-а и других агентов на естественном русском
 языке и преобразовывать их в одно или несколько whitelisted действий. Ты НЕ выполняешь
 действия напрямую — ты только классифицируешь намерение и подбираешь параметры.
@@ -482,6 +482,13 @@ def is_owner_message(msg: dict, cfg: OrchestratorConfig) -> bool:
 
     Логика: если sender совпадает с cfg.owner_agent_id — это owner.
     """
+    if rules_section:
+        return rules_section + "
+
+---
+
+" + base_prompt
+    return base_prompt
     sender = msg.get("from") or ""
     if cfg.owner_agent_id and sender == cfg.owner_agent_id:
         return True
