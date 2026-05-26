@@ -31,7 +31,7 @@ services:
       # переключить base image Dockerfile.gpu на `nvidia/cuda:12.2.0-cudnn8-runtime-ubuntu22.04`
       # или install: `apt-get install -y libcudnn8`.
       WHISPER_DEVICE: "cuda"
-      WHISPER_COMPUTE_TYPE: "float16"
+      WHISPER_COMPUTE_TYPE: "int8_float16"  # Pascal (compute 6.1) doesn't do efficient FP16; mixed int8/FP16 is best
     deploy:
       resources:
         reservations:
