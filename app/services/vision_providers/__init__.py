@@ -37,7 +37,7 @@ Whitelist providers — см. PROVIDER_REGISTRY ниже.
 """
 from __future__ import annotations
 
-from . import claude, gemini, gigachat, minimax, openai, qwen
+from . import claude, gemini, gigachat, minimax, openai, qwen, yandexgpt
 
 # Каноничный whitelist + порядок по preference (cheap-and-good сначала).
 # UI fall-through пробует ключи в этом порядке: первый working — wins.
@@ -45,27 +45,30 @@ PROVIDER_ORDER: list[str] = [
     "qwen",       # Alibaba — лучшее ratio для русского + дёшево
     "minimax",    # Hailuo — отличный visual reasoning
     "gigachat",   # Sber — РФ-резидентный
+    "yandexgpt",  # Yandex Cloud — РФ-резидентный, 152-ФЗ OK
     "claude",     # Anthropic Haiku — быстрый и качественный
     "openai",     # GPT-4o-mini — стабильно
     "gemini",     # Google 2.0 Flash — fastest
 ]
 
 PROVIDER_LABELS: dict[str, str] = {
-    "qwen":     "Qwen-VL (Alibaba)",
-    "minimax":  "MiniMax (Hailuo)",
-    "gigachat": "GigaChat (Sber)",
-    "claude":   "Claude (Anthropic)",
-    "openai":   "GPT-4o (OpenAI)",
-    "gemini":   "Gemini (Google)",
+    "qwen":      "Qwen-VL (Alibaba)",
+    "minimax":   "MiniMax (Hailuo)",
+    "gigachat":  "GigaChat (Sber)",
+    "yandexgpt": "YandexGPT (Yandex Cloud)",
+    "claude":    "Claude (Anthropic)",
+    "openai":    "GPT-4o (OpenAI)",
+    "gemini":    "Gemini (Google)",
 }
 
 PROVIDER_REGISTRY = {
-    "qwen":     qwen.analyze,
-    "minimax":  minimax.analyze,
-    "gigachat": gigachat.analyze,
-    "claude":   claude.analyze,
-    "openai":   openai.analyze,
-    "gemini":   gemini.analyze,
+    "qwen":      qwen.analyze,
+    "minimax":   minimax.analyze,
+    "gigachat":  gigachat.analyze,
+    "yandexgpt": yandexgpt.analyze,
+    "claude":    claude.analyze,
+    "openai":    openai.analyze,
+    "gemini":    gemini.analyze,
 }
 
 
