@@ -31,3 +31,6 @@ async def client(api_url):
 @pytest.fixture
 def known_domain():
     return f"test_{__name__.rsplit('.', 1)[-1]}".replace("_", "")[:32]
+
+# M1 PR #115: session fixtures для authed_client / admin_client
+from tests.fixtures.session import admin_account_session, admin_client, authed_client, test_account_session, test_email  # noqa: F401
