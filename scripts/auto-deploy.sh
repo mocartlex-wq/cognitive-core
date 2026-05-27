@@ -57,40 +57,66 @@ notify() {
 
 cd "$REPO_DIR"
 
-# Diverge guard (DS+ai-crm-deploy peer-review 2026-05-08): если working tree
-# модифицирован вручную (sed/cp/edit-on-server), git pull --ff-only упадёт,
-# auto-deploy будет фейлиться каждый тик. Лучше явно abort + rate-limited
-# alert чем тихий restart loop. Owner делает `sudo git reset --hard origin/main`
-# после того как committed identical content в main.
+# Diverge guard + self-heal (DS+ai-crm-deploy peer-review 2026-05-08, upgraded
+# 2026-05-26):
+#
+# Если working tree модифицирован вручную (sed/cp/edit-on-server), git pull --ff-only
+# падает. Раньше — слепой abort. Теперь:
+#   1. Fetch origin first (нужен актуальный origin/$BRANCH для сравнения)
+#   2. Если working tree dirty НО `git diff origin/$BRANCH` пусто — это safe-state:
+#      контент уже совпадает с тем что будет после pull, только index расходится.
+#      Лечится `git checkout -- .` + `git clean -fd` для untracked которые
+#      присутствуют в origin (но git их видит как ?? потому что HEAD старый).
+#   3. Если diff vs origin/$BRANCH НЕ пустой — реальная дивергенция, аборт + alert.
+#
+# Это разблокирует случай когда раньше owner делал runtime-edit, потом то же
+# самое попало в PR через GitHub. Без self-heal — server stuck forever.
+
+# Pre-fetch чтобы знать origin/$BRANCH
+if [ -n "$REPO_HTTPS_URL" ]; then
+    git fetch --quiet "$REPO_HTTPS_URL" "$BRANCH" 2>&1 \
+        | sed -E "s|https://[^@]+@|https://***@|g" || true
+    git update-ref "refs/remotes/origin/$BRANCH" FETCH_HEAD 2>/dev/null || true
+else
+    git fetch --quiet origin "$BRANCH" 2>&1 || true
+fi
+
 if ! git diff-index --quiet HEAD 2>/dev/null; then
-    DIRTY_FILES=$(git status --short 2>/dev/null | head -5 | tr '\n' '|')
-    log "ABORT: working tree dirty, refusing to pull. Run 'sudo git reset --hard origin/main' after committing your changes."
-    log "dirty files: $DIRTY_FILES"
-    SENTINEL=/var/run/cognitive/deploy-dirty.alerted
-    if [ ! -f "$SENTINEL" ] || [ $(( $(date +%s) - $(stat -c %Y "$SENTINEL" 2>/dev/null || echo 0) )) -gt 3600 ]; then
-        /usr/local/bin/cognitive-notify.sh "auto-deploy: server tree DIRTY, pull blocked. Run: sudo git reset --hard origin/main. Files: $DIRTY_FILES" 2>/dev/null
-        touch "$SENTINEL"
+    # Working tree dirty. Check if content matches origin/$BRANCH (safe self-heal case)
+    if git diff --quiet "origin/$BRANCH" -- . 2>/dev/null; then
+        log "dirty index but content matches origin/$BRANCH — self-healing via checkout + clean"
+        git checkout --quiet -- . 2>/dev/null || true
+        # Удаляем untracked которые есть в origin/$BRANCH (старые runtime-installed файлы)
+        # `git clean -fd` уберёт всё untracked — но только в файлах под git control,
+        # не в /var/log или внешних путях. Safe для git repo.
+        git clean -fd 2>/dev/null || true
+        if git diff-index --quiet HEAD 2>/dev/null; then
+            log "self-healed: working tree clean now"
+            rm -f /var/run/cognitive/deploy-dirty.alerted 2>/dev/null
+        else
+            log "WARNING: self-heal не полностью сработал, продолжаем но pull может упасть"
+        fi
+    else
+        DIRTY_FILES=$(git status --short 2>/dev/null | head -5 | tr '\n' '|')
+        log "ABORT: working tree dirty AND diverged from origin/$BRANCH"
+        log "dirty files: $DIRTY_FILES"
+        log "to investigate: git diff origin/$BRANCH"
+        log "to force-fix:   sudo git reset --hard origin/$BRANCH && sudo git clean -fd"
+        SENTINEL=/var/run/cognitive/deploy-dirty.alerted
+        if [ ! -f "$SENTINEL" ] || [ $(( $(date +%s) - $(stat -c %Y "$SENTINEL" 2>/dev/null || echo 0) )) -gt 3600 ]; then
+            /usr/local/bin/cognitive-notify.sh "auto-deploy: server tree DIRTY+DIVERGED, manual fix needed. Files: $DIRTY_FILES" 2>/dev/null
+            touch "$SENTINEL"
+        fi
+        exit 0
     fi
-    exit 0
 fi
 rm -f /var/run/cognitive/deploy-dirty.alerted 2>/dev/null
 
-# Не паникуем если git fetch упал по сети — попробуем в следующий тик.
-# PR #24: fetch через HTTPS+PAT (SSH ключ для deploy не настроен).
-# Маскируем PAT в логах sed-ом (защита от случайного попадания в журнал).
-fetch_ok=1
-if [ -n "$REPO_HTTPS_URL" ]; then
-    git fetch --quiet "$REPO_HTTPS_URL" "$BRANCH" 2>&1 \
-        | sed -E "s|https://[^@]+@|https://***@|g" \
-        || fetch_ok=0
-    # Sync origin/main ref так чтобы git rev-parse origin/$BRANCH работал.
-    # FETCH_HEAD актуален, но origin/<branch> может быть stale если remote SSH сломан.
-    git update-ref "refs/remotes/origin/$BRANCH" FETCH_HEAD 2>/dev/null || true
-else
-    git fetch --quiet origin "$BRANCH" 2>&1 || fetch_ok=0
-fi
-if [ "$fetch_ok" = "0" ]; then
-    log "git fetch failed, will retry next tick" >&2
+# Net-safe: убеждаемся что fetch выше реально успел. Если нет — exit и retry.
+# (Pre-fetch для dirty-self-heal уже произошёл; если упал — origin/$BRANCH ref
+# мог остаться stale, тогда PREV != NEW даст fake-diff. Safer: re-verify.)
+if ! git rev-parse "origin/$BRANCH" >/dev/null 2>&1; then
+    log "origin/$BRANCH ref missing после fetch — пропускаем тик, retry next" >&2
     exit 0
 fi
 

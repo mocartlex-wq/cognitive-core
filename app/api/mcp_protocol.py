@@ -117,11 +117,13 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "cognitive_consolidate",
-        "description": "Запустить consolidation цикл вручную (daily или weekly).",
+        "description": "Запустить consolidation цикл вручную (daily=L1→L2 или weekly=L2→L3). Для weekly domain обязателен.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "level": {"type": "string", "enum": ["daily", "weekly"], "default": "daily"},
+                "domain": {"type": "string", "description": "Опц. для daily (все домены если None), ОБЯЗАТЕЛЕН для weekly"},
+                "since_hours": {"type": "integer", "description": "Только для daily: window in hours (default 24)"},
             },
         },
     },
@@ -540,7 +542,20 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         level = a.get("level", "daily")
         if level not in {"daily", "weekly"}:
             raise ValueError("level must be 'daily' or 'weekly'")
-        return await _call_self(request, "POST", f"/memory/consolidate/{level}", timeout_s=28.0)
+        # FIX 2026-05-26: domain не передавался в query → /memory/consolidate/weekly
+        # падал 422 "missing field". daily-endpoint принимает None (= все домены),
+        # weekly требует конкретный domain.
+        params: dict[str, Any] = {}
+        domain = a.get("domain")
+        if domain:
+            params["domain"] = domain
+        if level == "daily":
+            since_hours = a.get("since_hours")
+            if since_hours is not None:
+                params["since_hours"] = since_hours
+        elif level == "weekly" and not domain:
+            raise ValueError("cognitive_consolidate(level=weekly) требует параметр 'domain'")
+        return await _call_self(request, "POST", f"/memory/consolidate/{level}", params=params or None, timeout_s=28.0)
 
     if name == "cognitive_health":
         return await _call_self(request, "GET", "/health", timeout_s=4.0)
