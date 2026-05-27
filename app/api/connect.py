@@ -628,113 +628,148 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
         # антивирусы автоматически превьюят URL и съедают one-shot token до
         # того как агент успеет claim'нуть. Даём куски — агент сам соберёт.
         "prompt_for_agent": (
-            f"Привет! У меня для тебя claim-token Cognitive Core (живёт 10 мин, one-shot, "
-            f"НЕ ставь URL в browser — съест preview):\n\n"
+            f"Cognitive Core claim-token (10 мин, one-shot):\n\n"
             f"  TOKEN: {token}\n"
-            f"  BASE:  https://mcp.me-ai.ru\n"
-            f"  PATH:  /user/connect/claim?token=<вставь-TOKEN-сверху>\n\n"
-            f"Cognitive Core = память + комнаты для агентов + DM. После подключения "
-            f"у тебя появятся 24 MCP-инструмента: cognitive_remember/recall (память), "
-            f"room_join/post/read (комнаты), cognitive_send/inbox (DM), и т.д.\n\n"
-            f"=== ШАГ 0 — РАЗВИЛКА ===\n"
-            f"Сначала посмотри свой список доступных tools:\n"
-            f"  • Если ты УЖЕ видишь `cognitive_health`, `cognitive_recall` и т.п. — НИЧЕГО "
-            f"НЕ ДЕЛАЙ. Скажи owner'у «уже подключён, токен не нужен» — он сгорит сам через "
-            f"10 мин. END.\n"
-            f"  • Если cognitive_* tools НЕ видны — проверь конфиг:\n"
-            f"    python -X utf8 -c \"import json,os; p=os.path.expanduser('~/.claude.json'); "
-            f"d=json.load(open(p,encoding='utf-8')) if os.path.exists(p) else {{}}; "
-            f"s=d.get('mcpServers',{{}}).get('cognitive-core'); url=str(s) if s else ''; "
-            f"print('PRIMARY' if 'mcp.me-ai.ru' in url else ('LEGACY' if ('mcp.xn----8sbwawqx4fza' in url or '\\u0438\\u0438-\\u043f\\u0430\\u043c\\u044f\\u0442\\u044c' in url) else 'MISSING'))\"\n\n"
-            f"    → PRIMARY — конфиг уже на canonical mcp.me-ai.ru. Дальше:\n"
-            f"      (a) Проверь не устарел ли локальный `cogmedia` CLI если он установлен. "
-            f"Старая версия имела cookie-auth + legacy URL и сейчас падает с 401. "
-            f"Bash: `command -v cogmedia >/dev/null && curl -fsSL https://mcp.me-ai.ru/static/cogmedia -o \"$(command -v cogmedia)\" && chmod +x \"$(command -v cogmedia)\"`. "
-            f"PowerShell: `if (Get-Command cogmedia -ea 0) {{ iwr https://mcp.me-ai.ru/static/cogmedia -OutFile (Get-Command cogmedia).Source }}`. "
-            f"Это безопасно — обновляешь свой собственный tool, не config/api_key.\n"
-            f"      (b) Попроси owner перезапустить Claude Code (одной строкой, без объяснений) и END. Claim НЕ нужен.\n"
-            f"    → LEGACY — конфиг на старом punycode-домене. Дальше:\n"
-            f"      (a) Тихо обнови `cogmedia` CLI если он установлен (старая версия может "
-            f"висеть с cookie-auth + 401). Bash: `command -v cogmedia >/dev/null && curl -fsSL "
-            f"https://mcp.me-ai.ru/static/cogmedia -o \"$(command -v cogmedia)\" && chmod +x "
-            f"\"$(command -v cogmedia)\"`. PowerShell: `if (Get-Command cogmedia -ea 0) {{ iwr "
-            f"https://mcp.me-ai.ru/static/cogmedia -OutFile (Get-Command cogmedia).Source }}`. "
-            f"Свой tool — обновлять без вопросов.\n"
-            f"      (b) Про MCP URL — спроси owner-а человеческим текстом: «У тебя в "
-            f"~/.claude.json старый URL `mcp.xn----...`, заменить на `mcp.me-ai.ru`? "
-            f"Это легче читается, api_key остаётся прежний.» — и жди явного «да». Если "
-            f"«нет/потом» — оставь, legacy URL работает неограниченно. END (claim НЕ нужен).\n"
-            f"    → MISSING — конфига нет. Продолжай ниже (ШАГ 1).\n\n"
-            f"=== ШАГ 1 — CLAIM (только если MISSING) ===\n"
-            f"Через Bash сделай curl с User-Agent (важно — не Mozilla):\n"
-            f"  curl -H 'User-Agent: claude-code-agent' -o /tmp/claim.json <BASE><PATH>\n\n"
-            f"В ответе будут api_key + готовый JSON для ~/.claude.json (HTTP MCP transport).\n\n"
+            f"  BASE:  https://mcp.me-ai.ru\n\n"
+            f"=== TL;DR ===\n"
+            f"• Если у тебя УЖЕ есть cognitive_* tools — игнорируй токен (он для другого агента).\n"
+            f"• Если config есть но tools нет — попроси рестарт Claude Code.\n"
+            f"• Если ни tools ни config — выполни ШАГ 1 (claim).\n"
+            f"• Если tools есть но agent_id отличается от {default_id!r} — это другой агент того же owner-а, игнорируй.\n\n"
+            f"=== ШАГ 0 — DECISION TREE (читай первым) ===\n"
+            f"```python\n"
+            f"# Проверь свои MCP tools\n"
+            f"if 'cognitive_health' in available_tools:\n"
+            f"    me = cognitive_agent_manifest()  # вернёт твой agent_id + owner.email + peers\n"
+            f"    peek = GET /user/connect/claim/peek?token={token}  # не consume!\n"
+            f"    if peek.agent_id == me.agent_id: respond('уже подключён, токен не нужен')\n"
+            f"    elif peek.owner_email_masked.split('@')[1] == me.owner.email.split('@')[1]:\n"
+            f"        respond(f'токен для другого агента {{peek.agent_id}} того же owner-а — игнорирую')\n"
+            f"    else: respond('⚠️ токен от чужого owner-а')\n"
+            f"    STOP\n"
+            f"# config без tools\n"
+            f"config = read_json('~/.claude.json').mcpServers.get('cognitive-core')\n"
+            f"if config and 'mcp.me-ai.ru' in str(config):\n"
+            f"    respond('конфиг есть, попроси owner рестарт Claude Code'); STOP\n"
+            f"# нет ни tools ни config → ШАГ 1\n"
+            f"```\n\n"
+            f"=== ⚠️ IDENTITY WARNING ===\n"
+            f"Claim перезаписывает X-API-Key в ~/.claude.json. Если у тебя УЖЕ было подключение\n"
+            f"под другим agent_id — твоя прежняя память/история/DM по старому agent_id станут\n"
+            f"недоступны из этой сессии (на сервере останутся, доступ через UI владельца).\n"
+            f"Прежде чем claim'ить — убедись что этот token действительно для тебя.\n\n"
+            f"=== ШАГ 1 — CLAIM (только если MISSING + token для тебя) ===\n"
+            f"  curl -H 'User-Agent: claude-code-agent' -o /tmp/claim.json \\\n"
+            f"    'https://mcp.me-ai.ru/user/connect/claim?token={token}'\n\n"
+            f"В ответе: api_key + готовый JSON для ~/.claude.json (HTTP MCP transport).\n\n"
             f"=== ШАГ 2 — MERGE INTO CONFIG ===\n"
-            f"Edit-инструментом аккуратно вставь mcpServers.cognitive-core в config (НЕ "
-            f"перезаписывай existing servers, не печатай api_key в transcript — читай из "
-            f"/tmp/claim.json через python+env).\n\n"
-            f"=== ШАГ 3 — ASK FOR RESTART ===\n"
-            f"Попроси owner'а перезапустить Claude Code/Cursor. После рестарта у тебя "
-            f"появятся 24 MCP-инструмента.\n\n"
-            f"=== ШАГ 4 — ВНИКНИ В ВОЗМОЖНОСТИ (важно!) ===\n"
-            f"Первым делом после рестарта вызови `cognitive_agent_manifest` — вернёт твой "
-            f"agent_id + историю + categorized список tools + best_practices + rate-limits.\n"
-            f"Затем — `cognitive_continue` (память + pending DM).\n\n"
-            f"=== ШАГ 5 — ЧТО У ТЕБЯ ЕСТЬ (конкретно, без догадок) ===\n"
-            f"Платформа cognitive-core это НЕ просто 24 MCP tool — это **полноценный workspace**:\n\n"
-            f"📚 ПАМЯТЬ (5-слойная: L1 события → L2 дневные сводки → L3 знания через "
-            f"DeepSeek куратор → L4 архив снапшотов в MinIO → OP быстрая Redis):\n"
-            f"  • `cognitive_remember(domain, task, result, feedback, lessons)` — записать "
-            f"факт/решение/lesson. ВАЖНО: в lessons/tools_used НЕ ставь '--' (двойное тире) "
-            f"и ';' — SQL injection filter заблокирует.\n"
-            f"  • `cognitive_recall(query, domain, top_k)` — семантический KNN-поиск по L3.\n"
-            f"  • `cognitive_consolidate(level=daily|weekly)` — manual trigger свёртки.\n\n"
-            f"🏠 КОМНАТЫ для team collaboration (HTTP REST + MCP tools):\n"
-            f"  • `room_join(room_key)`, `room_post(room_key, text)`, `room_read(room_key)`.\n"
-            f"  • `room_ask(room_key, question, wait_for_agents, timeout)` — long-poll Q&A.\n"
-            f"  • Кросс-платформенно: твоя комната видна Claude Code, ChatGPT GPT, Cursor, "
-            f"любому MCP-агенту owner-а.\n\n"
-            f"💬 DM между агентами того же owner-а:\n"
-            f"  • `cognitive_send(to, text)`, `cognitive_inbox(since_minutes)`.\n"
-            f"  • `cognitive_my_team()` — список всех агентов owner-а + кто online.\n"
-            f"  • `cognitive_online(within_seconds=120)` — кто сейчас активен.\n\n"
-            f"🎥 МЕДИА (видео/аудио/изображения с auto-транскрипцией):\n"
-            f"  • Установка/обновление (одна команда — bash):\n"
-            f"      mkdir -p ~/bin && curl -fsSL https://mcp.me-ai.ru/static/cogmedia -o ~/bin/cogmedia && chmod +x ~/bin/cogmedia\n"
-            f"    PowerShell (Windows):\n"
-            f"      New-Item -ItemType Directory -Force \"$HOME\\bin\" | Out-Null; iwr https://mcp.me-ai.ru/static/cogmedia -OutFile \"$HOME\\bin\\cogmedia\"\n"
-            f"  • Если получаешь 401 — у тебя СТАРАЯ версия (cookie-auth). Просто запусти "
-            f"команду выше ещё раз — она перепишет файл. Новая версия auto-discoverит api_key "
-            f"из ~/.claude.json через X-API-Key. Magic-link / cookies / письма НЕ нужны.\n"
-            f"  • Использование: `cogmedia upload <path/to/file>`. Поддерживает "
-            f".mp4/.mov/.mp3/.wav/.jpg/.png. Сервер делает: видео → 12 frames + Whisper "
-            f"транскрипт; аудио → Whisper; изображение → store.\n"
-            f"  • TTL медиа 15 мин в MinIO (метаданные навсегда в L1 `domain=media_analysis`).\n"
-            f"  • После upload вызови `cognitive_recall(domain='media_analysis', query='...')` "
-            f"чтобы найти результат (включая URL кадров для Read).\n"
-            f"  • Платформа даёт shared Qwen-VL + DeepSeek fallback для видео-mechanics. "
-            f"Хочешь качественный анализ через MiniMax / Claude / OpenAI / Gemini? "
-            f"Подключи СВОЙ api_key в /ui/profile → «🤖 Внешние AI-провайдеры». "
-            f"Vision_analyzer автоматически использует твой ключ (оплата на твоём счету у провайдера). "
-            f"Документация: https://mcp.me-ai.ru/docs/external-providers.md\n\n"
-            f"📦 ПРОЕКТНЫЕ ФАЙЛЫ через Gitea (self-hosted git):\n"
-            f"  • Твой git-сервер: https://git.me-ai.ru\n"
-            f"  • Твой org там создан автоматически (по slug твоего email до '@').\n"
-            f"  • Используй для backup кода/configs/больших файлов (LFS support).\n"
-            f"  • `git remote add gitea https://git.me-ai.ru/<твой-org>/<repo>.git`.\n\n"
-            f"💾 STATE для compaction-survival:\n"
-            f"  • `cognitive_save_state(current_task, state_data)` — snapshot working memory "
-            f"перед длинной задачей или auto-/compact.\n"
-            f"  • `cognitive_resume()` — после рестарта/compact восстановит state + inbox + online.\n\n"
-            f"=== БЫСТРЫЕ ПРИВЫЧКИ ===\n"
-            f"1. ПЕРЕД задачей → `cognitive_recall(query='похожая задача')` — не дублировать.\n"
-            f"2. ПОСЛЕ важного решения/lesson → `cognitive_remember`.\n"
-            f"3. Длинная сессия → `cognitive_save_state` в начале.\n"
-            f"4. Не знаешь возможностей → `cognitive_agent_manifest`.\n"
-            f"5. Кто рядом → `cognitive_my_team`.\n"
-            f"6. Media-анализ → `cogmedia upload` + `cognitive_recall(domain='media_analysis')`.\n\n"
-            f"Подробная документация: https://mcp.me-ai.ru/docs/concepts.md"
+            f"Edit-инструментом вставь mcpServers.cognitive-core в ~/.claude.json\n"
+            f"(НЕ перезаписывай existing servers; api_key читай из /tmp/claim.json через python).\n\n"
+            f"=== ШАГ 3 — RESTART + DISCOVER ===\n"
+            f"Попроси owner-а рестарт Claude Code. После рестарта — FIRST tool call:\n"
+            f"  cognitive_agent_manifest()  ← вернёт agent_id, owner.{{email,org_slug,plan}}, peers[], categorized tools, best_practices, rate_limits\n\n"
+            f"=== ПРИМЕРЫ ОТВЕТА ===\n"
+            f"  1) tools есть, agent_id совпадает → «уже подключён под {{me}}, токен не нужен»\n"
+            f"  2) tools есть, agent_id={{peek.agent_id}} ≠ {{me}}, same owner → «токен для твоего другого\n"
+            f"     агента {{peek.agent_id}} (slug={{peek.org_slug}}, machine={{peek.machine_label}}).\n"
+            f"     Если хочешь чтобы я стал им — подтверди явно (потеряю прежнюю identity)»\n"
+            f"  3) ни tools ни config → выполняю ШАГ 1..3\n\n"
+            f"=== ВОЗМОЖНОСТИ ПОСЛЕ CLAIM (краткий обзор) ===\n"
+            f"📚 Память: cognitive_remember / cognitive_recall (5-слойная, KNN-поиск)\n"
+            f"🏠 Комнаты: room_join / room_post / room_read / room_ask (long-poll)\n"
+            f"💬 DM: cognitive_send / cognitive_inbox + cognitive_my_team\n"
+            f"🎥 Медиа: cogmedia upload <file> или MCP cognitive_media_upload (base64 ≤36KB)\n"
+            f"📦 Git: https://git.me-ai.ru/<твой-org> (LFS support)\n"
+            f"💾 State: cognitive_save_state + cognitive_resume (compaction-survival)\n\n"
+            f"После рестарта вызови cognitive_agent_manifest для полного списка tools + best_practices.\n"
+            f"Документация: https://mcp.me-ai.ru/docs/concepts.md"
         ),
+    }
+
+
+@router.get("/claim/peek")
+async def peek_claim_token(token: str, request: Request):
+    """Public endpoint — посмотреть для кого выдан claim-token БЕЗ consume.
+
+    Per ewewew bug-report: multi-agent owner может иметь несколько pending
+    агентов одновременно. Если у Claude Code сессии уже есть подключение,
+    она получает token-сообщение адресованное ДРУГОМУ агенту того же owner-а.
+    Раньше единственный способ узнать кому токен — попытаться claim (one-shot,
+    ломает токен). Теперь peek — увидеть {agent_id, machine_label,
+    owner_email_masked} — и понять «это не для меня, не трогать».
+
+    Возвращает только non-sensitive поля; token остаётся валидным к claim.
+    410 если уже использован, 404 если не было такого.
+    """
+    token_clean = (token or "").strip().upper()
+    now = time.time()
+
+    audit = _CLAIM_TOKENS_USED.get(token_clean)
+    if audit:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "error": "token_already_used",
+                "used_at": audit["used_at"],
+                "used_ago_seconds": int(now - audit["used_at"]),
+            },
+        )
+
+    entry = None
+    try:
+        r = await get_redis()
+        raw = await r.get(f"cogcore:claim:{token_clean}")
+        if raw:
+            entry = json.loads(raw)
+    except Exception as e:
+        logger.warning("Redis GET failed in peek, falling back to memory: %s", e)
+        entry = _CLAIM_TOKENS.get(token_clean)
+    if not entry:
+        entry = _CLAIM_TOKENS.get(token_clean)
+    if not entry:
+        raise HTTPException(status_code=404, detail={"error": "token_not_found"})
+
+    age = now - entry.get("created_at", now)
+    if age > CLAIM_TTL_SECONDS:
+        raise HTTPException(
+            status_code=410,
+            detail={"error": "token_expired", "age_seconds": int(age)},
+        )
+
+    owner_email_masked = None
+    org_slug = None
+    machine_label = entry.get("machine_hint")
+    try:
+        from app.db.postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT a.email, s.machine_label FROM accounts a "
+                "LEFT JOIN agent_states s ON s.agent_id = $2 "
+                "WHERE a.user_id = $1::uuid LIMIT 1",
+                entry["user_id"], entry.get("agent_id"),
+            )
+            if row:
+                email = row["email"] or ""
+                if email and "@" in email:
+                    local, domain = email.split("@", 1)
+                    masked_local = (local[:3] + "***") if len(local) > 3 else "***"
+                    owner_email_masked = f"{masked_local}@{domain}"
+                    org_slug = local
+                if row["machine_label"]:
+                    machine_label = row["machine_label"]
+    except Exception as e:
+        logger.warning("peek: owner lookup failed: %s", e)
+
+    return {
+        "token": token_clean,
+        "agent_id": entry.get("agent_id"),
+        "platform": entry.get("platform"),
+        "machine_label": machine_label,
+        "owner_email_masked": owner_email_masked,
+        "org_slug": org_slug,
+        "created_at": entry.get("created_at"),
+        "expires_in_seconds": int(CLAIM_TTL_SECONDS - age),
     }
 
 

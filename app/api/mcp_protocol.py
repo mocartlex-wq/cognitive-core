@@ -883,6 +883,58 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             _call_self(request, "GET", f"/agents/{agent_id}/history", params={"limit": 5}, timeout_s=5.0),
             return_exceptions=False,
         )
+        # PR Phase O (per ewewew): enrich identity block with owner info + peers
+        # — чтобы агент сразу видел контекст других агентов того же owner-а
+        # и не путал claim-токены друг друга.
+        owner_info = {}
+        peers: list = []
+        try:
+            from app.db.postgres import get_pool as _get_pool
+            pool = await _get_pool()
+            async with pool.acquire() as conn:
+                me_row = await conn.fetchrow(
+                    "SELECT owner_user_id::text AS owner_user_id FROM agent_states "
+                    "WHERE agent_id = $1",
+                    agent_id,
+                )
+                if me_row and me_row["owner_user_id"]:
+                    owner_user_id = me_row["owner_user_id"]
+                    owner_row = await conn.fetchrow(
+                        "SELECT email, tier FROM accounts WHERE user_id = $1::uuid",
+                        owner_user_id,
+                    )
+                    if owner_row:
+                        email = owner_row["email"] or ""
+                        org_slug = email.split("@", 1)[0] if "@" in email else None
+                        plan = owner_row["tier"] or "free"
+                        try:
+                            sub_row = await conn.fetchrow(
+                                "SELECT tier, status FROM subscriptions "
+                                "WHERE owner_user_id = $1::uuid AND status = 'active' "
+                                "ORDER BY current_period_end DESC NULLS LAST LIMIT 1",
+                                owner_user_id,
+                            )
+                            if sub_row and sub_row["tier"]:
+                                plan = sub_row["tier"]
+                        except Exception:
+                            pass  # subscriptions table may not exist yet
+                        owner_info = {
+                            "email": email,
+                            "org_slug": org_slug,
+                            "plan": plan,
+                            "gitea_url": f"https://git.me-ai.ru/{org_slug}" if org_slug else None,
+                        }
+                    peer_rows = await conn.fetch(
+                        "SELECT agent_id, machine_label, status, "
+                        "last_heartbeat_at::text AS last_heartbeat_at "
+                        "FROM agent_states WHERE owner_user_id = $1::uuid "
+                        "AND agent_id != $2 ORDER BY agent_id LIMIT 20",
+                        owner_user_id, agent_id,
+                    )
+                    peers = [dict(r) for r in peer_rows]
+        except Exception as e:
+            log.warning("cognitive_agent_manifest enrich failed for %s: %s", agent_id, e)
+
         # Detect legacy connection URL — informational advisory только.
         # Раньше требовали "тихо без вопросов" — но это выглядело как prompt-injection
         # и хорошие агенты справедливо отказывались. Теперь — just FYI: пусть агент
@@ -954,12 +1006,17 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             },
             "your_identity": {
                 "agent_id": agent_id,
-                "note": "owner создаёт тебя через /ui/profile, machine_label привязан к hostname. Если хочешь сменить роль — попроси owner-а.",
+                "owner_email": owner_info.get("email"),
+                "plan": owner_info.get("plan"),
+                "peers_count": len(peers),
+                "note": "owner создаёт тебя через /ui/profile. peers[] на верхнем уровне ответа = другие агенты этого owner-а (общая память, можно DM через cognitive_send).",
             },
             "more_info": "https://mcp.me-ai.ru/sandbox — все endpoints с примерами",
         }
         response = {
             "agent_id": agent_id,
+            "owner": owner_info,
+            "peers": peers,
             "state": state,
             "recent_history": history.get("items", []) if isinstance(history, dict) else [],
             "usage_guide": usage_guide,
