@@ -316,7 +316,7 @@
         <li>Приоритетная поддержка (24 ч)</li>
         <li class="feat-none">SLA</li>
       </ul>
-      <a href="mailto:owner@ии-память.рф?subject=Pro tier подключение" class="tier-cta featured">Связаться</a>
+      <button type="button" class="tier-cta featured" onclick="startCheckout('pro')">Перейти на Pro</button>
     </div>
 
     <!-- ENTERPRISE -->
@@ -432,6 +432,104 @@
     const v = document.getElementById('ver');
     if (v) v.textContent = 'v' + (d.version || '?');
   }).catch(() => {});
+
+  // === Checkout flow (2026-05-26 PR feat/pricing-billing-wire) ===
+  // Click "Перейти на Pro" → выбор provider (Stripe USD / ЮKassa RUB) → checkout URL.
+  // Если backend ответил 503 (provider не настроен) — friendly message.
+  // Если 401 (не залогинен) — redirect на /ui/login с return URL.
+  window.startCheckout = async function(tier) {
+    // Простой modal с выбором provider — НЕ открываем сразу два конкурирующих
+    // запроса, даём юзеру осознанно выбрать.
+    const provider = await pickProvider();
+    if (!provider) return;  // юзер закрыл modal
+
+    try {
+      const r = await fetch(`/api/billing/checkout/${tier}?provider=${provider}`, {
+        method: 'POST',
+        credentials: 'include',  // важно: cookie-auth
+      });
+
+      if (r.status === 401) {
+        const next = encodeURIComponent('/ui/pricing');
+        window.location.href = `/ui/login?return=${next}`;
+        return;
+      }
+      if (r.status === 503) {
+        const data = await r.json().catch(() => ({}));
+        showToast(`⚠️ ${data.detail || 'Платёжный провайдер пока не настроен'}. ` +
+                  'Напишите owner@me-ai.ru — подключим вручную.');
+        return;
+      }
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        showToast(`Ошибка: ${data.detail || r.statusText}`);
+        return;
+      }
+
+      const data = await r.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        showToast('Неожиданный ответ сервера, попробуйте ещё раз');
+      }
+    } catch (e) {
+      showToast(`Сеть недоступна: ${e.message}`);
+    }
+  };
+
+  // Provider picker — простой prompt-based modal без библиотек.
+  async function pickProvider() {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);' +
+                               'display:flex;align-items:center;justify-content:center;z-index:9999;' +
+                               'backdrop-filter:blur(6px);';
+      overlay.innerHTML = `
+        <div style="background:var(--glass-bg,#1a1a2e);border:1px solid rgba(255,255,255,0.1);
+                    border-radius:18px;padding:32px;max-width:420px;color:#e8e8f0;
+                    box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+          <h3 style="margin:0 0 8px;font-size:19px;font-weight:600;">Как оплачиваем?</h3>
+          <p style="margin:0 0 24px;color:#888;font-size:14px;">Выберите подходящий способ:</p>
+          <button id="pick-yookassa" style="width:100%;padding:14px;margin-bottom:10px;
+                    border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);
+                    color:#fff;border-radius:11px;font-size:15px;cursor:pointer;text-align:left;">
+            🇷🇺 <b>ЮKassa</b> — карты МИР / Visa-РФ / Сбер ID / СБП<br>
+            <span style="font-size:12px;color:#999;">490 ₽/мес, оплата в рублях</span>
+          </button>
+          <button id="pick-stripe" style="width:100%;padding:14px;margin-bottom:18px;
+                    border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);
+                    color:#fff;border-radius:11px;font-size:15px;cursor:pointer;text-align:left;">
+            🌐 <b>Stripe</b> — Visa/MasterCard/Apple Pay (foreign cards)<br>
+            <span style="font-size:12px;color:#999;">$5/мес, оплата в долларах</span>
+          </button>
+          <button id="pick-cancel" style="width:100%;padding:10px;border:none;background:transparent;
+                    color:#888;cursor:pointer;font-size:13px;">Отмена</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      const close = (val) => {
+        document.body.removeChild(overlay);
+        resolve(val);
+      };
+      overlay.querySelector('#pick-yookassa').onclick = () => close('yookassa');
+      overlay.querySelector('#pick-stripe').onclick = () => close('stripe');
+      overlay.querySelector('#pick-cancel').onclick = () => close(null);
+      overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    });
+  }
+
+  // Простой toast (без библиотек). Auto-hide 5 сек.
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
+                      'background:rgba(20,20,30,0.95);color:#fff;padding:14px 22px;border-radius:11px;' +
+                      'border:1px solid rgba(248,81,73,0.3);box-shadow:0 8px 24px rgba(0,0,0,0.4);' +
+                      'font-size:14px;max-width:90%;z-index:9999;backdrop-filter:blur(8px);';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 5000);
+  }
 </script>
 
 <script src="/static/error-reporter.js?v=20260521" defer></script>
