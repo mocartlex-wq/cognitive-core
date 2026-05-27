@@ -1,0 +1,143 @@
+groups:
+  - name: cognitive-core
+    interval: 30s
+    rules:
+      - alert: APIDown
+        expr: up{job="cognitive-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: cognitive-api
+        annotations:
+          summary: "Cognitive API is down ({{ $labels.instance }})"
+          description: "Prometheus has been unable to scrape cognitive-api at {{ $labels.instance }} for more than 2 minutes. The API process is either crashed, hung, or unreachable."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#apidown"
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(cognitive_http_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(cognitive_http_requests_total[5m])), 0.001)
+            > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: cognitive-api
+        annotations:
+          summary: "High 5xx error rate on cognitive-api ({{ $value | humanizePercentage }})"
+          description: "More than 5% of HTTP requests are returning 5xx responses over the last 5 minutes. Current ratio: {{ $value | humanizePercentage }}. Check application logs and dependency health."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#higherrorrate"
+
+      - alert: ElevatedErrorRate
+        expr: |
+          sum(rate(cognitive_http_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(cognitive_http_requests_total[5m])), 0.001)
+            > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          service: cognitive-api
+        annotations:
+          summary: "Elevated 5xx error rate on cognitive-api ({{ $value | humanizePercentage }})"
+          description: "More than 1% of HTTP requests are returning 5xx responses over the last 10 minutes. Investigate before it escalates."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#higherrorrate"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(cognitive_http_latency_seconds_bucket[5m])) by (endpoint, le)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: cognitive-api
+        annotations:
+          summary: "HTTP p95 latency >500ms on {{ $labels.endpoint }}"
+          description: "Endpoint {{ $labels.endpoint }} has p95 latency of {{ $value | humanizeDuration }} for >10 minutes. Check Postgres/Redis/LLM upstream latency."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#highlatency"
+
+      - alert: DiskAlmostFull
+        expr: |
+          100 - (
+            node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              /
+            node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              * 100
+          ) > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: cognitive-core
+        annotations:
+          summary: "Disk usage above 85% on {{ $labels.instance }} ({{ $value | humanize }}%)"
+          description: "Root filesystem on {{ $labels.instance }} is {{ $value | humanize }}% full. Run cogcore-backup-tier.sh and check /var/lib/docker, /opt/cognitive-core/data."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#diskalmostfull"
+
+      - alert: DiskCritical
+        expr: |
+          100 - (
+            node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              /
+            node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              * 100
+          ) > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: cognitive-core
+        annotations:
+          summary: "Disk usage critical (>95%) on {{ $labels.instance }}"
+          description: "Root filesystem on {{ $labels.instance }} is {{ $value | humanize }}% full. Postgres writes will fail soon. Free space immediately."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#diskalmostfull"
+
+      - alert: PostgresQuerySlow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(cognitive_postgres_query_duration_seconds_bucket[5m])) by (le)
+          ) * 1000 > 500
+        for: 5m
+        labels:
+          severity: warning
+          service: cognitive-postgres
+        annotations:
+          summary: "Postgres p95 query latency >500ms ({{ $value | humanize }}ms)"
+          description: "Postgres p95 query latency has been above 500ms for 5 minutes. Check pg_stat_statements, vacuum activity, connection pool exhaustion."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#postgresqueryslow"
+
+      - alert: RateLimitSpike
+        expr: sum(rate(cognitive_rate_limit_hits_total[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: cognitive-api
+        annotations:
+          summary: "Rate limit hits >5/s for 10 minutes"
+          description: "Sustained rate limit hits — {{ $value | humanize }}/s. Possible abuse, runaway agent, or misconfigured client. Check cognitive_rate_limit_hits_total by agent_id."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#ratelimitspike"
+
+      - alert: LLMErrorSpike
+        expr: |
+          sum(rate(cognitive_llm_calls_total{status!="success"}[5m]))
+            /
+          clamp_min(sum(rate(cognitive_llm_calls_total[5m])), 0.001)
+            > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          service: cognitive-llm
+        annotations:
+          summary: "LLM error rate >20% ({{ $value | humanizePercentage }})"
+          description: "More than 20% of LLM calls failing for >10 minutes. Check provider status (Anthropic/OpenAI/GigaChat/YandexGPT) and circuit breaker."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#llmerrorspike"
+
+      - alert: APIMemoryHigh
+        expr: process_resident_memory_bytes{job="cognitive-api"} > 7e9
+        for: 15m
+        labels:
+          severity: warning
+          service: cognitive-api
+        annotations:
+          summary: "Cognitive API RSS >7GB ({{ $value | humanize1024 }}B)"
+          description: "API container limit is 8GB. Approaching OOM. Check for leaks in async tasks, large LLM context, or queue backlog."
+          runbook_url: "https://git.me-ai.ru/cognitive/cognitive-core/src/branch/main/docs/sre-runbook.md#apimemoryhigh"
