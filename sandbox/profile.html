@@ -655,45 +655,81 @@
     if (!r) return;
     const j = await r.json();
     const block = document.getElementById('roomsBlock');
+    const createBtn = `<button class="btn primary btn-sm" onclick="createRoom()" style="margin-left:auto">+ Создать комнату</button>`;
     if (j.count === 0) {
-      block.outerHTML = '<div id="roomsBlock" class="empty">У вас пока нет комнат. <a href="/ui">Создать первую →</a></div>';
+      block.outerHTML = `<div id="roomsBlock" class="empty" style="display:flex;align-items:center;gap:12px;justify-content:space-between">
+        <span>У вас пока нет комнат.</span>${createBtn}</div>`;
       return;
     }
-    const grid = j.items.map(r => `
-      <div class="item">
-        <div>
+    const items = j.items.map(r => {
+      const labelOwner = r.is_owner ? 'владелец' : 'участник';
+      const isPub = r.is_public ? '' : ' · приватная';
+      const editBtns = r.is_owner ? `
+          <button class="btn secondary btn-sm" title="Переименовать комнату" onclick="event.stopPropagation();renameRoom('${esc(r.id)}','${esc((r.name||'').replace(/'/g,'&#39;'))}')">✏️</button>
+          <button class="btn danger btn-sm" title="Удалить комнату (вместе со всеми сообщениями)" onclick="event.stopPropagation();deleteRoom('${esc(r.id)}','${esc((r.name||'').replace(/'/g,'&#39;'))}')">🗑️</button>` : '';
+      return `
+      <div class="item" style="display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
           <div class="name">${esc(r.name || '(без названия)')}</div>
-          <div class="meta">${r.is_owner ? 'владелец' : 'участник'} · ${fmtDate(r.created_at)} ${r.is_public ? '' : '· приватная'}</div>
+          <div class="meta">${labelOwner} · ${fmtDate(r.created_at)}${isPub}</div>
         </div>
         <a href="/ui?id=${encodeURIComponent(r.id)}" class="btn secondary btn-sm">Открыть</a>
-      </div>`).join('');
-    block.outerHTML = `<div id="roomsBlock" class="grid">${grid}</div>`;
+        ${editBtns}
+      </div>`;
+    }).join('');
+    block.outerHTML = `<div id="roomsBlock">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px">${createBtn}</div>
+        <div class="grid">${items}</div>
+      </div>`;
   }
 
-  function agentDot(a) {
-    const mcpOnline = a.mcp_online === true;
-    const eventOnline = a.last_heartbeat_at && (Date.now() - Date.parse(a.last_heartbeat_at)) < 90000;
-    if (mcpOnline) {
-      return '<span title="MCP подключён (SSE active)" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#4cc960;box-shadow:0 0 6px rgba(76,201,96,0.7);margin-right:6px;vertical-align:middle"></span>';
+  window.createRoom = async function() {
+    const name = prompt('Название комнаты (например: «AI Серверная», «Команда Q4», «Личный совет»):', '');
+    if (!name || !name.trim()) return;
+    const desc = prompt('Краткое описание (необязательно):', '') || '';
+    const r = await api('/user/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), description: desc.trim(), is_public: true }),
+    });
+    if (!r) return;
+    if (r.ok) {
+      const d = await r.json();
+      alert(`Комната «${d.name}» создана!\n\nКлюч для приглашения агентов:\n${d.api_key}\n\n(Сохраните — пароль для входа в комнату, как в Zoom)`);
+      loadRooms();
+    } else {
+      const e = await r.text();
+      alert('Не удалось создать: ' + e);
     }
-    if (eventOnline) {
-      return '<span title="Активность за последние 90 сек (REST)" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ff8c42;margin-right:6px;vertical-align:middle"></span>';
-    }
-    return '<span title="Не подключён" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#444;margin-right:6px;vertical-align:middle"></span>';
-  }
+  };
 
-  function agentChip(a) {
-    // PR #35: pending_claim — ждёт пока новая Claude Code сессия сделает claim
-    if (a.status === 'pending_claim') {
-      const sec = a.pending_ttl_sec || 0;
-      const min = Math.ceil(sec / 60);
-      return `<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922;border:1px solid rgba(210,153,34,0.4)" title="Ждёт claim от новой Claude Code сессии. Удалится через ${min} мин если claim не сделан.">pending ${min}m</span>`;
+  window.renameRoom = async function(roomId, currentName) {
+    const newName = prompt('Новое название комнаты:', currentName || '');
+    if (newName === null) return;
+    const trimmed = newName.trim();
+    if (!trimmed) { alert('Название не может быть пустым'); return; }
+    const r = await api(`/user/rooms/${encodeURIComponent(roomId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed }),
+    });
+    if (!r) return;
+    if (r.ok) loadRooms();
+    else alert('Не удалось переименовать: ' + await r.text());
+  };
+
+  window.deleteRoom = async function(roomId, name) {
+    if (!confirm(`Удалить комнату «${name}»?\n\nЭто действие необратимо — удалятся все сообщения и участники.`)) return;
+    const r = await api(`/user/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' });
+    if (!r) return;
+    if (r.ok) {
+      const d = await r.json();
+      alert(`Комната удалена. Сообщений: ${d.deleted_messages_count || 0}`);
+      loadRooms();
+    } else {
+      alert('Не удалось удалить: ' + await r.text());
     }
-    if (a.mcp_online) return '<span class="chip online" title="MCP-канал live">MCP</span>';
-    const eventOnline = a.last_heartbeat_at && (Date.now() - Date.parse(a.last_heartbeat_at)) < 90000;
-    if (eventOnline) return '<span class="chip" style="background:rgba(255,140,66,0.15);color:#ff8c42">REST</span>';
-    return '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim)">offline</span>';
-  }
+  };
 
   async function loadAgents() {
     const r = await api('/user/agents');
