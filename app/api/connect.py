@@ -646,7 +646,6 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
             raw = await r.get(f"cogcore:claim:{existing}")
             if raw:
                 entry = json.loads(raw)
-                age = time.time() - entry.get("created_at", time.time())
                 # Возвращаем минимальный response — caller получит token и
                 # сможет передать той же инструкцией. prompt_for_agent
                 # перегенерируется ниже с актуальным TTL.
