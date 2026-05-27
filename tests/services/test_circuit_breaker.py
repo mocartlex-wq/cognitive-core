@@ -3,7 +3,6 @@
 Pure state-machine — no IO, no fixtures beyond pytest.
 Manipulates _time.monotonic via monkeypatch для simulating timeouts.
 """
-import pytest
 from unittest.mock import patch
 
 from app.services.llm_client import (
