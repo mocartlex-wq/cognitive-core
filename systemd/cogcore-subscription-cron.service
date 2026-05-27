@@ -1,0 +1,14 @@
+[Unit]
+Description=Cognitive Core — daily check expired subscriptions, downgrade to free tier
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/cognitive-core/scripts/cogcore-subscription-cron.py --apply
+User=root
+StandardOutput=journal
+StandardError=journal
+
+# Защита: timeout 5 минут, runs once.
+TimeoutStartSec=300
