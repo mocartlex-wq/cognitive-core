@@ -117,11 +117,13 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "cognitive_consolidate",
-        "description": "Запустить consolidation цикл вручную (daily или weekly).",
+        "description": "Запустить consolidation цикл вручную (daily=L1→L2 или weekly=L2→L3). Для weekly domain обязателен.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "level": {"type": "string", "enum": ["daily", "weekly"], "default": "daily"},
+                "domain": {"type": "string", "description": "Опц. для daily (все домены если None), ОБЯЗАТЕЛЕН для weekly"},
+                "since_hours": {"type": "integer", "description": "Только для daily: window in hours (default 24)"},
             },
         },
     },
@@ -325,6 +327,135 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+
+    # ─── Rooms — multi-agent collaboration (Phase 6.5, 2026-05-26) ──────────
+    # Тhinly wraps cognitive-rooms service на :9098 (proxy через nginx /rooms).
+    {
+        "name": "room_create",
+        "description": (
+            "Создать новую комнату для multi-agent коллаборации. "
+            "Возвращает room_id + room_key (api_key для комнаты, секретный — "
+            "храните сами). После создания агент-creator автоматически считается "
+            "owner комнаты, room_key передаётся другим агентам для join."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Человеко-читаемое имя комнаты", "default": "Untitled"},
+                "description": {"type": "string", "description": "Опц. описание для UI", "default": ""},
+            },
+        },
+    },
+    {
+        "name": "room_join",
+        "description": (
+            "Присоединиться к существующей комнате. После join агент видит "
+            "комнату в room_messages history + получает live notifications "
+            "(через cognitive_inbox). Требует room_id + room_key — оба от создателя."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["room_id", "room_key"],
+            "properties": {
+                "room_id": {"type": "string", "description": "UUID комнаты"},
+                "room_key": {"type": "string", "description": "Секретный rk_* токен из room_create"},
+                "agent_id": {"type": "string", "description": "Опц. — иначе используется текущий agent_id из X-API-Key"},
+            },
+        },
+    },
+    {
+        "name": "room_post",
+        "description": (
+            "Отправить сообщение в комнату broadcast. Все participants увидят "
+            "через room_read. Не использовать для long-task — для них room_ask "
+            "(который ждёт ответа конкретных агентов)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["room_id", "room_key", "text"],
+            "properties": {
+                "room_id": {"type": "string"},
+                "room_key": {"type": "string"},
+                "text": {"type": "string", "minLength": 1, "description": "Текст сообщения"},
+                "parent_id": {"type": "string", "description": "Опц. — UUID родительского сообщения для thread"},
+            },
+        },
+    },
+    {
+        "name": "room_read",
+        "description": (
+            "Прочитать сообщения комнаты. Возвращает последние limit сообщений "
+            "(или с since timestamp если задан). Используйте перед ответом в "
+            "комнате чтобы видеть контекст."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["room_id", "room_key"],
+            "properties": {
+                "room_id": {"type": "string"},
+                "room_key": {"type": "string"},
+                "since": {"type": "string", "description": "Опц. ISO timestamp — вернуть только сообщения после"},
+                "limit": {"type": "integer", "default": 50, "description": "Максимум сообщений (default 50)"},
+            },
+        },
+    },
+    {
+        "name": "room_ask",
+        "description": (
+            "Задать вопрос конкретным агентам с long-poll ожиданием ответа. "
+            "wait_for — список agent_ids которые должны ответить. Сервер ждёт "
+            "до timeout_sec, потом возвращает partial answers + если кто-то "
+            "offline, авто-proxy через DeepSeek (отметка `*-proxy` в from_agent)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["room_id", "room_key", "text", "wait_for"],
+            "properties": {
+                "room_id": {"type": "string"},
+                "room_key": {"type": "string"},
+                "text": {"type": "string", "minLength": 1},
+                "wait_for": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                             "description": "agent_ids которые должны ответить"},
+                "timeout_sec": {"type": "integer", "default": 60, "description": "Макс ожидание (default 60s)"},
+                "wait_response": {"type": "boolean", "default": True,
+                                  "description": "Если false — вернуть question_id сразу, не ждать"},
+            },
+        },
+    },
+    {
+        "name": "room_answer",
+        "description": (
+            "Ответить на pending question в комнате. question_id берётся из "
+            "room_pending. После answer asker получает уведомление (если он в "
+            "long-poll) или увидит при следующем room_pending sync."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["room_id", "room_key", "question_id", "text"],
+            "properties": {
+                "room_id": {"type": "string"},
+                "room_key": {"type": "string"},
+                "question_id": {"type": "string", "description": "UUID из room_pending"},
+                "text": {"type": "string", "minLength": 1},
+            },
+        },
+    },
+    {
+        "name": "room_pending",
+        "description": (
+            "Получить список pending questions в комнате — где меня (текущий "
+            "agent_id) ждут как respondee. Используйте для wake-up flow: после "
+            "compaction/restart агент вызывает чтобы найти что должен ответить."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["room_id", "room_key"],
+            "properties": {
+                "room_id": {"type": "string"},
+                "room_key": {"type": "string"},
+            },
+        },
+    },
 ]
 
 
@@ -398,6 +529,54 @@ async def _call_self(
 
 
 # ─────────────────────────────────────────────────────────────────
+# External HTTP helper для cognitive-rooms service (port 9098)
+# ─────────────────────────────────────────────────────────────────
+# Rooms — отдельный systemd service на сервере (не часть FastAPI app), поэтому
+# ASGI-transport _call_self не подходит. Используем httpx через nginx proxy
+# (/rooms/* → host.docker.internal:9098/rooms/*), который уже работает.
+#
+# Аутентификация: X-Room-Key для участников комнаты (создаётся в room_create).
+# Каждый MCP tool принимает room_key как параметр — передаём в header.
+ROOMS_BASE_URL = os.environ.get("ROOMS_BASE_URL", "http://cognitive_nginx/rooms")
+ROOMS_TIMEOUT_S = float(os.environ.get("ROOMS_TIMEOUT_S", "10.0"))
+
+
+async def _call_rooms(
+    method: str,
+    sub_path: str,
+    *,
+    json_body: dict | None = None,
+    params: dict | None = None,
+    room_key: str | None = None,
+    agent_id: str | None = None,
+    timeout_s: float | None = None,
+) -> dict:
+    """Call cognitive-rooms service through nginx proxy.
+
+    sub_path: либо пусто (для POST /rooms), либо начинается с "/" (например
+    "/{room_id}/post"). ROOMS_BASE_URL уже включает /rooms.
+
+    Returns response.json() или {"_error": ...} для проблем сети/парсинга.
+    """
+    url = f"{ROOMS_BASE_URL.rstrip('/')}{sub_path}"
+    headers: dict[str, str] = {}
+    if room_key:
+        headers["X-Room-Key"] = room_key
+    if agent_id:
+        headers["X-Agent-Id"] = agent_id
+    tmo = timeout_s if timeout_s is not None else ROOMS_TIMEOUT_S
+    try:
+        async with AsyncClient(timeout=tmo) as client:
+            resp = await client.request(method, url, headers=headers, json=json_body, params=params)
+    except Exception as e:
+        return {"_error": f"{type(e).__name__}: {e}", "_path": url, "_method": method}
+    try:
+        return resp.json()
+    except Exception:
+        return {"_status": resp.status_code, "_text": resp.text[:500]}
+
+
+# ─────────────────────────────────────────────────────────────────
 # Cached agent_id lookup from X-API-Key
 # ─────────────────────────────────────────────────────────────────
 _KEYS_CACHE: dict[str, dict[str, str]] = {"_data": {}, "_loaded_at": 0}
@@ -459,8 +638,12 @@ async def _resolve_agent_full(request: Request) -> tuple[str, str | None]:
             result = (row["agent_id"], row["owner_user_id"])
             request.state._resolved_agent = result
             return result
-    except Exception:
-        pass
+    except Exception as e:
+        # FIX 2026-05-26: silent except скрывал postgres pool/connection failures
+        # → агент видел "API key not registered" даже когда настоящая причина
+        # была DB outage. Теперь warning в логи, fallback на legacy ValueError.
+        log.warning("_resolve_agent: agent_keys DB lookup failed: %s — falling back to env-only",
+                    type(e).__name__)
 
     raise ValueError(
         "API key not registered. Создан через /ui/profile + «Передать помощнику» "
@@ -587,7 +770,20 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         level = a.get("level", "daily")
         if level not in {"daily", "weekly"}:
             raise ValueError("level must be 'daily' or 'weekly'")
-        return await _call_self(request, "POST", f"/memory/consolidate/{level}", timeout_s=28.0)
+        # FIX 2026-05-26: domain не передавался в query → /memory/consolidate/weekly
+        # падал 422 "missing field". daily-endpoint принимает None (= все домены),
+        # weekly требует конкретный domain.
+        params: dict[str, Any] = {}
+        domain = a.get("domain")
+        if domain:
+            params["domain"] = domain
+        if level == "daily":
+            since_hours = a.get("since_hours")
+            if since_hours is not None:
+                params["since_hours"] = since_hours
+        elif level == "weekly" and not domain:
+            raise ValueError("cognitive_consolidate(level=weekly) требует параметр 'domain'")
+        return await _call_self(request, "POST", f"/memory/consolidate/{level}", params=params or None, timeout_s=28.0)
 
     if name == "cognitive_health":
         return await _call_self(request, "GET", "/health", timeout_s=4.0)
@@ -883,6 +1079,98 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             raise ValueError("cognitive_video_status: task_id обязателен")
         return await _call_self(request, "GET", f"/api/video/status/{task_id}",
                                 params={"provider": provider}, timeout_s=12.0)
+
+    # ─── Rooms handlers ────────────────────────────────────────────────────
+    if name == "room_create":
+        agent_id = await _resolve_agent(request)
+        body = {
+            "name": a.get("name", "Untitled"),
+            "description": a.get("description", ""),
+            "created_by": agent_id,
+        }
+        return await _call_rooms("POST", "", json_body=body, agent_id=agent_id, timeout_s=10.0)
+
+    if name == "room_join":
+        room_id = a.get("room_id")
+        room_key = a.get("room_key")
+        if not room_id or not room_key:
+            raise ValueError("room_join: room_id и room_key обязательны")
+        agent_id = a.get("agent_id") or await _resolve_agent(request)
+        return await _call_rooms("POST", f"/{room_id}/join",
+                                 json_body={"agent_id": agent_id},
+                                 room_key=room_key, agent_id=agent_id, timeout_s=8.0)
+
+    if name == "room_post":
+        room_id = a.get("room_id")
+        room_key = a.get("room_key")
+        text = a.get("text", "")
+        if not room_id or not room_key or not text.strip():
+            raise ValueError("room_post: room_id, room_key, text обязательны (text непустой)")
+        agent_id = await _resolve_agent(request)
+        body: dict[str, Any] = {"from_agent": agent_id, "text": text}
+        if a.get("parent_id"):
+            body["parent_id"] = a["parent_id"]
+        return await _call_rooms("POST", f"/{room_id}/post",
+                                 json_body=body, room_key=room_key, agent_id=agent_id, timeout_s=8.0)
+
+    if name == "room_read":
+        room_id = a.get("room_id")
+        room_key = a.get("room_key")
+        if not room_id or not room_key:
+            raise ValueError("room_read: room_id и room_key обязательны")
+        agent_id = await _resolve_agent(request)
+        params: dict[str, Any] = {"limit": int(a.get("limit", 50))}
+        if a.get("since"):
+            params["since"] = a["since"]
+        return await _call_rooms("GET", f"/{room_id}/messages",
+                                 params=params, room_key=room_key, agent_id=agent_id, timeout_s=8.0)
+
+    if name == "room_ask":
+        room_id = a.get("room_id")
+        room_key = a.get("room_key")
+        text = a.get("text", "")
+        wait_for = a.get("wait_for") or []
+        if not room_id or not room_key or not text.strip():
+            raise ValueError("room_ask: room_id, room_key, text обязательны")
+        if not isinstance(wait_for, list) or not wait_for:
+            raise ValueError("room_ask: wait_for должен быть непустым списком agent_ids")
+        agent_id = await _resolve_agent(request)
+        timeout_sec = int(a.get("timeout_sec", 60))
+        wait_response = bool(a.get("wait_response", True))
+        body = {
+            "asker": agent_id,
+            "text": text,
+            "wait_for": wait_for,
+            "timeout_sec": timeout_sec,
+            "wait_response": wait_response,
+        }
+        # При wait_response=True endpoint может ждать до timeout_sec → даём timeout +10s
+        room_timeout = (timeout_sec + 10) if wait_response else 10.0
+        return await _call_rooms("POST", f"/{room_id}/ask",
+                                 json_body=body, room_key=room_key, agent_id=agent_id,
+                                 timeout_s=room_timeout)
+
+    if name == "room_answer":
+        room_id = a.get("room_id")
+        room_key = a.get("room_key")
+        question_id = a.get("question_id")
+        text = a.get("text", "")
+        if not all([room_id, room_key, question_id]) or not text.strip():
+            raise ValueError("room_answer: room_id, room_key, question_id, text обязательны")
+        agent_id = await _resolve_agent(request)
+        return await _call_rooms("POST", f"/{room_id}/answer/{question_id}",
+                                 json_body={"answerer": agent_id, "text": text},
+                                 room_key=room_key, agent_id=agent_id, timeout_s=8.0)
+
+    if name == "room_pending":
+        room_id = a.get("room_id")
+        room_key = a.get("room_key")
+        if not room_id or not room_key:
+            raise ValueError("room_pending: room_id и room_key обязательны")
+        agent_id = await _resolve_agent(request)
+        # GET /rooms/{id}/pending — server отфильтрует по X-Agent-Id header (нашему agent_id)
+        return await _call_rooms("GET", f"/{room_id}/pending",
+                                 room_key=room_key, agent_id=agent_id, timeout_s=8.0)
 
     raise ValueError(f"unknown tool: {name}")
 

@@ -263,9 +263,9 @@ async def revoke_key(req: RevokeRequest, agent_id: str = Depends(verify_api_key)
             req.api_key,
         )
         if owner is None:
-            raise HTTPException(status_code=404, detail="Key not found or already revoked")
+            raise HTTPException(status_code=404, detail="Ключ не найден или уже отозван")
         if owner != agent_id:
-            raise HTTPException(status_code=403, detail="Can only revoke own keys")
+            raise HTTPException(status_code=403, detail="Можно отозвать только свои ключи")
         await conn.execute(
             "UPDATE agent_keys SET revoked_at = NOW() WHERE api_key = $1",
             req.api_key,
