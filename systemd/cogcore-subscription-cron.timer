@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily 03:30 UTC — check expired subscriptions, downgrade to free
+Documentation=https://github.com/mocartlex-wq/cognitive-core/blob/main/scripts/cogcore-subscription-cron.py
+
+[Timer]
+# Daily at 03:30 UTC (= 06:30 MSK) — после nightly consolidation cron
+# но до morning checks. Минимизирует риск collision с другими DB cron jobs.
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+Unit=cogcore-subscription-cron.service
+
+[Install]
+WantedBy=timers.target
