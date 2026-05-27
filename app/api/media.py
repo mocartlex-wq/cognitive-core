@@ -640,8 +640,7 @@ class UploadB64Body(BaseModel):
 # Cleanup orphan files делает существующий media_cleanup loop.
 # ─────────────────────────────────────────────────────────────────────────────
 
-import asyncio
-from app.db.redis import get_redis as _get_redis
+
 
 UPLOAD_TMP_DIR = Path("/tmp/cogcore-uploads")
 UPLOAD_TTL_SEC = 3600  # 1 hour to PUT + finalize before state evicted
