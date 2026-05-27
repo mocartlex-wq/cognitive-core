@@ -291,9 +291,11 @@ app.include_router(video_router)
 
 # Billing (Phase post-launch 2026-05-26): Stripe + ЮKassa subscriptions
 # /api/billing/checkout/{tier}, /webhook/{provider}, /subscriptions/me
+from app.api.admin_slo import router as admin_slo_router
 from app.api.billing import router as billing_router  # noqa: E402
 
 app.include_router(billing_router)
+app.include_router(admin_slo_router)
 
 # Unified Agent Onboarding wizard (2026-05-21): /user/connect/* + /user/agents/{id}/verify
 from app.api.connect import router as connect_router
