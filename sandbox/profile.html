@@ -731,6 +731,31 @@
     }
   };
 
+  function agentDot(a) {
+    const mcpOnline = a.mcp_online === true;
+    const eventOnline = a.last_heartbeat_at && (Date.now() - Date.parse(a.last_heartbeat_at)) < 90000;
+    if (mcpOnline) {
+      return '<span title="MCP подключён (SSE active)" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#4cc960;box-shadow:0 0 6px rgba(76,201,96,0.7);margin-right:6px;vertical-align:middle"></span>';
+    }
+    if (eventOnline) {
+      return '<span title="Активность за последние 90 сек (REST)" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ff8c42;margin-right:6px;vertical-align:middle"></span>';
+    }
+    return '<span title="Не подключён" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#444;margin-right:6px;vertical-align:middle"></span>';
+  }
+
+  function agentChip(a) {
+    // PR #35: pending_claim — ждёт пока новая Claude Code сессия сделает claim
+    if (a.status === 'pending_claim') {
+      const sec = a.pending_ttl_sec || 0;
+      const min = Math.ceil(sec / 60);
+      return `<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922;border:1px solid rgba(210,153,34,0.4)" title="Ждёт claim от новой Claude Code сессии. Удалится через ${min} мин если claim не сделан.">pending ${min}m</span>`;
+    }
+    if (a.mcp_online) return '<span class="chip online" title="MCP-канал live">MCP</span>';
+    const eventOnline = a.last_heartbeat_at && (Date.now() - Date.parse(a.last_heartbeat_at)) < 90000;
+    if (eventOnline) return '<span class="chip" style="background:rgba(255,140,66,0.15);color:#ff8c42">REST</span>';
+    return '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim)">offline</span>';
+  }
+
   async function loadAgents() {
     const r = await api('/user/agents');
     if (!r) return;
