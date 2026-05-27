@@ -1,0 +1,11 @@
+[Unit]
+Description=Trigger hourly upload orphan cleanup
+Requires=cogcore-upload-cleanup.service
+
+[Timer]
+# Каждый час в :17 (нечётное смещение чтобы не biться с другими таймерами)
+OnCalendar=*-*-* *:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

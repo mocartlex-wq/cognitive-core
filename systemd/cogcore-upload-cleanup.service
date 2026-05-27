@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly cleanup of /tmp/cogcore-uploads orphan files
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cognitive-core/scripts/cleanup-uploads.sh
+StandardOutput=journal
+StandardError=journal
