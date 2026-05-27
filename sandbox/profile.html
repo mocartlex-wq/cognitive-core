@@ -1035,6 +1035,30 @@
       machine_hint: form.machine_hint.value.trim() || null,
       platform: form.platform.value,
     };
+    // PR K (follow-up к PR #106 idempotency): если agent_id уже есть в pending
+    // status — backend всё равно вернёт тот же live token (idempotent), но
+    // owner может быть confused если думал что выдаёт новый. Покажем info.
+    if (data.agent_id) {
+      try {
+        const agentsResp = await api('/user/agents');
+        if (agentsResp && agentsResp.ok) {
+          const agents = await agentsResp.json();
+          const existing = (agents.items || []).find(a => a.agent_id === data.agent_id && a.status === 'pending_claim');
+          if (existing) {
+            const proceed = confirm(
+              'Помощник «' + data.agent_id + '» уже в статусе pending_claim.\n\n' +
+              'Backend вернёт ТОТ ЖЕ token что вы выдавали раньше (idempotent).\n' +
+              'Если нужен новый помощник — отмените и введите другой agent_id.\n\n' +
+              'Продолжить (получить тот же token)?'
+            );
+            if (!proceed) return;
+          }
+        }
+      } catch (err) {
+        // non-fatal — продолжаем submit
+        console.debug('pre-check pending agent failed:', err);
+      }
+    }
     const r = await api('/user/connect/issue-claim-token', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
