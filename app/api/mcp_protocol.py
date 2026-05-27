@@ -278,6 +278,53 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+
+    # ─── AI Video Generation (Phase post-launch 2026-05-26) ────────────
+    # Per-tenant Kling/Sora API key через /ui/profile External AI providers
+    # (provider="kling_video", key="access_key|secret_key")
+    {
+        "name": "cognitive_video_generate",
+        "description": (
+            "Создать видео через Kling.ai (или Sora когда public API). "
+            "Asynchronous — возвращает task_id, потом polling через "
+            "cognitive_video_status. Generation занимает 30-180s в зависимости "
+            "от duration и модели. Требует Kling key в /ui/profile."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["prompt"],
+            "properties": {
+                "prompt": {"type": "string", "minLength": 3, "maxLength": 2000,
+                           "description": "Текст промпта для генерации"},
+                "provider": {"type": "string", "enum": ["kling_video", "sora_video"],
+                             "default": "kling_video"},
+                "image_url": {"type": "string",
+                              "description": "Опц. — для image2video режима (URL картинки)"},
+                "duration_sec": {"type": "integer", "minimum": 3, "maximum": 10, "default": 5},
+                "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"], "default": "16:9"},
+                "model_name": {"type": "string",
+                               "description": "Опц. override — kling-v1 (cheap) или kling-v1-pro (best)"},
+            },
+        },
+    },
+    {
+        "name": "cognitive_video_status",
+        "description": (
+            "Poll статус задачи генерации видео. Возвращает status "
+            "(queued/generating/completed/failed) + progress_pct + video_url "
+            "когда completed. Вызывайте каждые 10-30 секунд после "
+            "cognitive_video_generate."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["task_id"],
+            "properties": {
+                "task_id": {"type": "string", "description": "task_id из cognitive_video_generate response"},
+                "provider": {"type": "string", "enum": ["kling_video", "sora_video"],
+                             "default": "kling_video"},
+            },
+        },
+    },
 ]
 
 
@@ -809,6 +856,33 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             }
         except Exception as e:
             return {"_error": f"my_team failed: {e}"}
+
+    # ─── AI Video Generation handlers (post-launch 2026-05-26) ───────────────
+    if name == "cognitive_video_generate":
+        prompt = a.get("prompt", "")
+        if not prompt or not prompt.strip():
+            raise ValueError("cognitive_video_generate: prompt обязателен (3-2000 chars)")
+        body: dict[str, Any] = {
+            "prompt": prompt,
+            "provider": a.get("provider", "kling_video"),
+            "duration_sec": int(a.get("duration_sec", 5)),
+            "aspect_ratio": a.get("aspect_ratio", "16:9"),
+        }
+        if a.get("image_url"):
+            body["image_url"] = a["image_url"]
+        if a.get("model_name"):
+            body["model_name"] = a["model_name"]
+        # Submit может занять ~30s до Kling response — даём 35s timeout
+        return await _call_self(request, "POST", "/api/video/generate",
+                                json_body=body, timeout_s=35.0)
+
+    if name == "cognitive_video_status":
+        task_id = a.get("task_id")
+        provider = a.get("provider", "kling_video")
+        if not task_id:
+            raise ValueError("cognitive_video_status: task_id обязателен")
+        return await _call_self(request, "GET", f"/api/video/status/{task_id}",
+                                params={"provider": provider}, timeout_s=12.0)
 
     raise ValueError(f"unknown tool: {name}")
 
