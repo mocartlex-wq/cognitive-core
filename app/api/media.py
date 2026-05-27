@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db.postgres import get_pool
+from app.db.redis import get_redis as _get_redis
 from app.db.s3 import get_s3
 from app.security.middleware import require_admin
 from app.services.media_analyzer import (
