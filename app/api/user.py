@@ -131,6 +131,139 @@ async def my_rooms(request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# POST /user/rooms — создать комнату (CRUD из /ui/profile)
+# PATCH /user/rooms/{id} — переименовать
+# DELETE /user/rooms/{id} — удалить
+# Direct DB ops (минуя rooms-service на :9098), потому что rooms таблица
+# shared в cognitive_postgres. rooms-service отвечает только за messages
+# /post /ask /answer (runtime ops). Для CRUD комнат — backend ходит в БД сам.
+# ─────────────────────────────────────────────────────────────────────────
+class CreateRoomBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str | None = Field(None, max_length=500)
+    is_public: bool = Field(True)
+
+
+class PatchRoomBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(None, min_length=1, max_length=120)
+    description: str | None = Field(None, max_length=500)
+    is_public: bool | None = None
+
+
+@router.post("/rooms")
+async def create_my_room(body: CreateRoomBody, request: Request):
+    """Создать новую комнату — owner становится her owner_user_id.
+
+    Возвращает {id, api_key, name} — api_key (rk_...) можно использовать
+    как X-Room-Key чтобы агенты могли join'ниться. UI показывает его в
+    диалоге «Поделиться ссылкой».
+    """
+    user = await require_user(request)
+    api_key = "rk_" + secrets.token_urlsafe(32)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO rooms (name, description, created_by, api_key,
+                                   owner_user_id, is_public, status)
+                VALUES ($1, $2, $3, $4, $5::uuid, $6, 'active')
+                RETURNING id::text AS id, name, api_key, created_at::text
+                """,
+                body.name, body.description or "", user.email,
+                api_key, str(user.user_id), body.is_public,
+            )
+        except Exception as e:
+            logger.error("create_room failed user=%s err=%s", user.user_id, e)
+            raise HTTPException(status_code=500, detail=f"Не удалось создать комнату: {e}")
+    logger.info("room_created user=%s room=%s name=%s", user.user_id, row["id"], body.name)
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "api_key": row["api_key"],
+        "created_at": row["created_at"],
+    }
+
+
+@router.patch("/rooms/{room_id}")
+async def patch_my_room(room_id: str, body: PatchRoomBody, request: Request):
+    """Переименовать / отредактировать описание / переключить public-флаг.
+
+    Только owner_user_id комнаты может. Возвращает обновлённую запись.
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM rooms WHERE id = $1::uuid",
+            room_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+
+        sets, vals = [], []
+        if body.name is not None:
+            sets.append(f"name = ${len(vals)+1}")
+            vals.append(body.name)
+        if body.description is not None:
+            sets.append(f"description = ${len(vals)+1}")
+            vals.append(body.description)
+        if body.is_public is not None:
+            sets.append(f"is_public = ${len(vals)+1}")
+            vals.append(body.is_public)
+        if not sets:
+            return {"ok": True, "changed": 0}
+        vals.append(room_id)
+        await conn.execute(
+            f"UPDATE rooms SET {', '.join(sets)} WHERE id = ${len(vals)}::uuid",
+            *vals,
+        )
+    logger.info("room_patched user=%s room=%s fields=%s", user.user_id, room_id, len(sets))
+    return {"ok": True, "room_id": room_id}
+
+
+@router.delete("/rooms/{room_id}")
+async def delete_my_room(room_id: str, request: Request):
+    """Удалить комнату — CASCADE снимает room_participants + room_messages.
+
+    Только owner_user_id может. Возвращает {ok, deleted_messages_count}.
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM rooms WHERE id = $1::uuid",
+            room_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+        # Считаем сообщения для audit (показываем сколько было удалено)
+        try:
+            msgs = await conn.fetchval(
+                "SELECT COUNT(*) FROM room_messages WHERE room_id = $1::uuid",
+                room_id,
+            ) or 0
+        except Exception:
+            msgs = 0
+        # Удаляем (если CASCADE отсутствует — сначала зависимости)
+        try:
+            await conn.execute("DELETE FROM room_messages WHERE room_id = $1::uuid", room_id)
+            await conn.execute("DELETE FROM room_participants WHERE room_id = $1::uuid", room_id)
+            await conn.execute("DELETE FROM rooms WHERE id = $1::uuid", room_id)
+        except Exception as e:
+            logger.error("delete_room failed user=%s room=%s err=%s", user.user_id, room_id, e)
+            raise HTTPException(status_code=500, detail=f"Не удалось удалить: {e}")
+    logger.info("room_deleted user=%s room=%s msgs_cleaned=%s", user.user_id, room_id, msgs)
+    return {"ok": True, "room_id": room_id, "deleted_messages_count": msgs}
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # /user/agents — мои помощники
 # ─────────────────────────────────────────────────────────────────────────
 @router.get("/agents")
