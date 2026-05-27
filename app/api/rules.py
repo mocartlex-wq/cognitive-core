@@ -60,7 +60,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 async def _require_admin(request: Request):
     user = await require_user(request)
     if not getattr(user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="admin required")
+        raise HTTPException(status_code=403, detail="Доступ только для администраторов")
     return user
 
 
@@ -176,7 +176,7 @@ async def create_user_rule(body: CreateRuleBody, request: Request) -> dict[str, 
             user.user_id, body.rule_id,
         )
         if dup:
-            raise HTTPException(status_code=409, detail=f"Rule with id «{body.rule_id}» already exists")
+            raise HTTPException(status_code=409, detail=f"Правило с id «{body.rule_id}» уже существует")
 
         row = await conn.fetchrow(
             """
@@ -203,9 +203,9 @@ async def patch_user_rule(rule_uuid: str, body: PatchRuleBody, request: Request)
             rule_uuid,
         )
         if owner_check is None:
-            raise HTTPException(status_code=404, detail="Rule not found")
+            raise HTTPException(status_code=404, detail="Правило не найдено")
         if str(owner_check) != str(user.user_id):
-            raise HTTPException(status_code=403, detail="Not your rule (platform rules immutable)")
+            raise HTTPException(status_code=403, detail="Это правило не ваше (платформенные правила нельзя менять)")
 
         sets: list[str] = []
         args: list[Any] = []
@@ -217,7 +217,7 @@ async def patch_user_rule(rule_uuid: str, body: PatchRuleBody, request: Request)
                 args.append(v)
                 idx += 1
         if not sets:
-            raise HTTPException(status_code=400, detail="Nothing to update")
+            raise HTTPException(status_code=400, detail="Нечего обновлять (не передано ни одного изменяемого поля)")
         sets.append("updated_at = NOW()")
         args.append(rule_uuid)
         row = await conn.fetchrow(
@@ -242,9 +242,9 @@ async def delete_user_rule(rule_uuid: str, request: Request) -> dict[str, Any]:
             rule_uuid,
         )
         if owner_check is None:
-            raise HTTPException(status_code=404, detail="Rule not found")
+            raise HTTPException(status_code=404, detail="Правило не найдено")
         if str(owner_check) != str(user.user_id):
-            raise HTTPException(status_code=403, detail="Not your rule")
+            raise HTTPException(status_code=403, detail="Это правило не ваше")
         await conn.execute("DELETE FROM agent_rules WHERE id = $1::uuid", rule_uuid)
     return {"ok": True, "deleted": rule_uuid}
 
@@ -332,12 +332,12 @@ async def vote_proposal(proposal_id: str, body: VoteBody, request: Request) -> d
             proposal_id,
         )
         if not proposal:
-            raise HTTPException(status_code=404, detail="Proposal not found")
+            raise HTTPException(status_code=404, detail="Предложение не найдено")
         if proposal["status"] not in ("pending", "reviewing"):
-            raise HTTPException(status_code=400, detail=f"Cannot vote on status={proposal['status']}")
+            raise HTTPException(status_code=400, detail=f"Нельзя голосовать за предложение в статусе «{proposal['status']}»")
         # Can't vote on own proposal
         if str(proposal["owner_user_id"]) == str(user.user_id):
-            raise HTTPException(status_code=403, detail="Cannot vote on your own proposal")
+            raise HTTPException(status_code=403, detail="Нельзя голосовать за собственное предложение")
         # Upsert vote
         async with conn.transaction():
             existing = await conn.fetchval(
@@ -410,9 +410,9 @@ async def admin_approve_proposal(
             proposal_id,
         )
         if not proposal:
-            raise HTTPException(status_code=404, detail="Proposal not found")
+            raise HTTPException(status_code=404, detail="Предложение не найдено")
         if proposal["status"] not in ("pending", "reviewing"):
-            raise HTTPException(status_code=400, detail=f"Already {proposal['status']}")
+            raise HTTPException(status_code=400, detail=f"Предложение уже в статусе «{proposal['status']}»")
         # Auto-generate rule_id from proposal id (or admin can provide)
         new_rule_id = f"rule-promoted-{str(proposal['id'])[:8]}"
         async with conn.transaction():

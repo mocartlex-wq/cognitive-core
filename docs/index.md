@@ -18,6 +18,7 @@
 | LangChain (Python) | [quickstart-langchain.md](quickstart-langchain.md) | 10 мин |
 | Telegram-бот (aiogram) | [quickstart-telegram-bot.md](quickstart-telegram-bot.md) | 15 мин |
 | Self-hosted VPS | [quickstart-self-hosted.md](quickstart-self-hosted.md) | 30 мин |
+| Multi-agent комнаты | [quickstart-rooms.md](quickstart-rooms.md) | 10 мин |
 
 ## Концепции
 
