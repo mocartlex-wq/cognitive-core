@@ -103,7 +103,7 @@ async def _enforce_owns_agent(request: Request, agent_id: str) -> None:
     if agent_owner is None:
         return  # legacy agent без owner — пропускаем (не наш)
     if str(agent_owner) != str(caller_owner):
-        raise HTTPException(status_code=403, detail="agent not owned by caller")
+        raise HTTPException(status_code=403, detail="Помощник не принадлежит вам")
 
 
 @router.get("/{agent_id}/state")

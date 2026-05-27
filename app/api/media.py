@@ -122,8 +122,11 @@ async def _check_admin_or_owner(request: Request):
                         "UPDATE agent_keys SET last_used_at = NOW() WHERE api_key = $1",
                         api_key,
                     )
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:
+                # last_used_at — best-effort metric (non-fatal). Log чтобы
+                # видеть если pool/postgres consistently недоступен.
+                logger.warning("media: failed to bump last_used_at for agent=%s: %s",
+                               row.get("agent_id", "?"), type(e).__name__)
             return _AgentCtx(
                 agent_id=row["agent_id"],
                 user_id=row["user_id"],
@@ -332,11 +335,12 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         return result
 
     finally:
-        # Cleanup временных файлов
+        # Cleanup временных файлов — silent failures накапливают диск,
+        # логируем если cleanup ломается (накопит /tmp выше 1GB → видно в alerts)
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("media.video: tmp cleanup failed for %s: %s", tmp_dir, type(e).__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -401,8 +405,8 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     finally:
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("media.image: tmp cleanup failed for %s: %s", tmp_dir, type(e).__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────
