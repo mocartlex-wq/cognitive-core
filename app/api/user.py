@@ -200,8 +200,6 @@ class CreateAgentBody(BaseModel):
     project: str | None = Field(None, max_length=64)
     machine: str | None = Field(None, max_length=128)
     capabilities: list[str] | None = None
-    machine_fingerprint: str | None = Field(None, min_length=8, max_length=32, pattern=r"^[a-f0-9]+$")
-    machine_label: str | None = Field(None, max_length=128)
 
 
 async def _create_agent_core(user, body: CreateAgentBody) -> dict:
@@ -238,9 +236,8 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
             await conn.execute(
                 """
                 INSERT INTO agent_states
-                    (agent_id, owner_user_id, project, machine, capabilities, notes,
-                     machine_fingerprint, machine_label)
-                VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8)
+                    (agent_id, owner_user_id, project, machine, capabilities, notes)
+                VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6)
                 """,
                 body.agent_id,
                 user.user_id,
@@ -248,8 +245,6 @@ async def _create_agent_core(user, body: CreateAgentBody) -> dict:
                 body.machine,
                 _json.dumps(body.capabilities or [], ensure_ascii=False),
                 body.description,
-                body.machine_fingerprint,
-                body.machine_label,
             )
             await conn.execute(
                 """
@@ -438,40 +433,76 @@ class PatchAgentBody(BaseModel):
 
 @router.patch("/agents/{agent_id}")
 async def patch_agent(agent_id: str, body: PatchAgentBody, request: Request):
-    """Переименовать машину / описание helper-а. Только owner может."""
+    """Переименовать машину / описание helper-а. Только owner может.
+
+    machine_label — общий атрибут группы агентов с одинаковым machine_fingerprint
+    (UI карандаш висит на шапке машины). Поэтому при изменении machine_label
+    обновляем ВСЕ строки этого fingerprint у этого owner-а, иначе grouping
+    в /agents показывает разный label у разных агентов одной машины (race).
+    description / project — per-agent атрибуты, обновляются только текущий row.
+    """
     user = await require_user(request)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        owner = await conn.fetchval(
-            "SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1",
+        row = await conn.fetchrow(
+            "SELECT owner_user_id::text AS owner, machine_fingerprint "
+            "FROM agent_states WHERE agent_id = $1",
             agent_id,
         )
-        if not owner:
+        if not row:
             raise HTTPException(status_code=404, detail="Помощник не найден")
-        if str(owner) != str(user.user_id):
+        if str(row["owner"]) != str(user.user_id):
             raise HTTPException(status_code=403, detail="Не ваш помощник")
-        # Build dynamic UPDATE
-        sets = []
-        vals = []
+        fingerprint = row["machine_fingerprint"]
+
+        rows_changed = 0
+        # 1) machine_label → broadcast to entire machine group (если есть fingerprint)
         if body.machine_label is not None:
-            sets.append(f"machine_label = ${len(vals)+1}")
-            vals.append(body.machine_label)
+            if fingerprint:
+                res = await conn.execute(
+                    "UPDATE agent_states SET machine_label = $1, updated_at = NOW() "
+                    "WHERE owner_user_id = $2 AND machine_fingerprint = $3",
+                    body.machine_label, user.user_id, fingerprint,
+                )
+            else:
+                # legacy агент без fingerprint — обновляем только его
+                res = await conn.execute(
+                    "UPDATE agent_states SET machine_label = $1, updated_at = NOW() "
+                    "WHERE agent_id = $2",
+                    body.machine_label, agent_id,
+                )
+            # asyncpg returns "UPDATE <n>"
+            try:
+                rows_changed += int(res.split()[-1])
+            except (ValueError, IndexError):
+                pass
+
+        # 2) per-agent fields → только этот row
+        per_agent_sets, per_agent_vals = [], []
         if body.description is not None:
-            sets.append(f"notes = ${len(vals)+1}")
-            vals.append(body.description)
+            per_agent_sets.append(f"notes = ${len(per_agent_vals)+1}")
+            per_agent_vals.append(body.description)
         if body.project is not None:
-            sets.append(f"project = ${len(vals)+1}")
-            vals.append(body.project)
-        if not sets:
-            return {"ok": True, "changed": 0}
-        sets.append("updated_at = NOW()")
-        vals.append(agent_id)
-        await conn.execute(
-            f"UPDATE agent_states SET {', '.join(sets)} WHERE agent_id = ${len(vals)}",
-            *vals,
-        )
-    logger.info("agent_patched user=%s agent=%s fields=%s", user.user_id, agent_id, len(sets) - 1)
-    return {"ok": True, "agent_id": agent_id}
+            per_agent_sets.append(f"project = ${len(per_agent_vals)+1}")
+            per_agent_vals.append(body.project)
+        if per_agent_sets:
+            per_agent_sets.append("updated_at = NOW()")
+            per_agent_vals.append(agent_id)
+            res = await conn.execute(
+                f"UPDATE agent_states SET {', '.join(per_agent_sets)} "
+                f"WHERE agent_id = ${len(per_agent_vals)}",
+                *per_agent_vals,
+            )
+            try:
+                rows_changed += int(res.split()[-1])
+            except (ValueError, IndexError):
+                pass
+
+    logger.info(
+        "agent_patched user=%s agent=%s fp=%s rows_changed=%s",
+        user.user_id, agent_id, fingerprint, rows_changed,
+    )
+    return {"ok": True, "agent_id": agent_id, "rows_changed": rows_changed}
 
 
 @router.get("/media")

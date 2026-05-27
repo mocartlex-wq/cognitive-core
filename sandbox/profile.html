@@ -310,120 +310,6 @@
     <div id="mediaBlock" class="empty">Загружаем…</div>
   </div>
 
-  <!-- PR #52 (2026-05-24): per-tenant external AI provider keys.
-       Opt-in — без своих ключей платформа использует shared Qwen + DeepSeek
-       fallback. Со своими — vision-analyzer перенаправляется на твой провайдер
-       и оплата идёт на твой счёт у провайдера. -->
-  <div class="card">
-    <h2>
-      🤖 Внешние AI-провайдеры
-      <span style="font-size:12px;font-weight:500;color:var(--glass-text-dim);margin-left:auto">opt-in</span>
-    </h2>
-    <p class="msg-line" style="margin: 0 0 14px; font-size: 13px; line-height: 1.5">
-      Подключи свой ключ — платформа использует его для vision-анализа видео,
-      оплата идёт на твой счёт у провайдера. Без ключей — используется shared Qwen
-      или DeepSeek fallback от платформы. <br>
-      <a href="/docs/external-providers.md" target="_blank" style="color:var(--glass-orb-1)">Где взять ключ →</a>
-    </p>
-    <div id="externalKeysBlock" class="empty">Загружаем…</div>
-  </div>
-  <!-- Agent Operating Rules — Phase 6 -->
-  <div class="card">
-    <h2>🎯 Правила для агентов</h2>
-    <div id="platformRulesBanner" class="msg-line"
-         style="background:rgba(88,166,255,0.08);border-left:3px solid var(--glass-orb-1);padding:10px 14px;border-radius:4px;margin-bottom:14px">
-      Загружаем платформенные правила…
-    </div>
-
-    <h3 style="font-size:15px;margin:14px 0 8px;color:var(--glass-text)">Мои правила</h3>
-    <div id="userRulesBlock" class="empty">Загружаем…</div>
-    <button class="btn btn-sm" id="addRuleBtn" style="margin-top:10px">➕ Добавить правило</button>
-
-    <h3 style="font-size:15px;margin:22px 0 8px;color:var(--glass-text)">Предложить новое правило для платформы</h3>
-    <p class="msg-line" style="font-size:12.5px">
-      Если 3+ tenants проголосуют ↑ за ваше предложение — оно попадёт на review
-      AI-куратора + админа платформы. При approve правило станет официальным.
-    </p>
-    <button class="btn btn-sm" id="proposeRuleBtn" style="margin-top:6px">➕ Предложить правило</button>
-
-    <details style="margin-top:18px">
-      <summary style="cursor:pointer;font-size:15px;color:var(--glass-text);font-weight:600;padding:6px 0;user-select:none">
-        Мои предложения <span id="ownProposalsCount" class="meta" style="margin-left:6px;font-weight:400;font-size:12.5px">(0)</span>
-      </summary>
-      <div id="ownProposalsBlock" class="empty" style="font-size:13px;margin-top:8px">Загружаем…</div>
-    </details>
-
-    <details style="margin-top:10px">
-      <summary style="cursor:pointer;font-size:15px;color:var(--glass-text);font-weight:600;padding:6px 0;user-select:none">
-        Голосование за предложения от других <span id="publicProposalsCount" class="meta" style="margin-left:6px;font-weight:400;font-size:12.5px">(0)</span>
-      </summary>
-      <p class="msg-line" style="font-size:12.5px;margin:6px 0">
-        Чужие proposals — для тех кто хочет помочь развивать платформу. Открывайте по желанию.
-      </p>
-      <div id="publicProposalsBlock" class="empty" style="font-size:13px;margin-top:8px">Загружаем…</div>
-    </details>
-  </div>
-
-  <dialog id="addRuleDialog" style="background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:12px;padding:24px;color:var(--glass-text);max-width:520px;width:90%">
-    <h3 style="margin:0 0 14px">Добавить своё правило</h3>
-    <form id="addRuleForm">
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Rule ID (короткий идентификатор)</label>
-      <input name="rule_id" pattern="^[\w.\-]+$" minlength="3" maxlength="128" placeholder="my-commit-russian" required style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;font-family:var(--mono);font-size:13px;box-sizing:border-box">
-
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Scope</label>
-      <select name="scope" required style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;box-sizing:border-box">
-        <option value="general">general (общее правило)</option>
-        <option value="pre-answer">pre-answer (перед ответом)</option>
-        <option value="post-task">post-task (после задачи)</option>
-        <option value="per-task">per-task (на каждую задачу)</option>
-        <option value="mid-task">mid-task (во время выполнения)</option>
-      </select>
-
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Severity</label>
-      <select name="severity" style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;box-sizing:border-box">
-        <option value="user">user (моё личное правило)</option>
-        <option value="recommended">recommended (override платформенного, если применимо)</option>
-      </select>
-
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Текст правила</label>
-      <textarea name="body" required minlength="5" maxlength="2000" rows="4" placeholder="Например: всегда писать commit-сообщения на русском языке" style="width:100%;padding:10px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box;margin-bottom:14px"></textarea>
-
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" class="btn secondary btn-sm" data-close="addRuleDialog">Отмена</button>
-        <button type="submit" class="btn btn-sm">Добавить</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="proposeRuleDialog" style="background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:12px;padding:24px;color:var(--glass-text);max-width:520px;width:90%">
-    <h3 style="margin:0 0 14px">Предложить новое правило для платформы</h3>
-    <p class="msg-line" style="font-size:12.5px;margin-bottom:14px">
-      Опишите правило которое полезно ВСЕМ агентам на платформе, не только вашим. Если другие tenants поддержат (3+ ↑) — попадёт к админу на review.
-    </p>
-    <form id="proposeRuleForm">
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Scope</label>
-      <select name="proposed_scope" required style="width:100%;padding:8px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);margin-bottom:10px;box-sizing:border-box">
-        <option value="general">general</option>
-        <option value="pre-answer">pre-answer</option>
-        <option value="post-task">post-task</option>
-        <option value="per-task">per-task</option>
-        <option value="mid-task">mid-task</option>
-      </select>
-
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Текст предлагаемого правила</label>
-      <textarea name="proposed_body" required minlength="10" maxlength="2000" rows="4" placeholder="Например: перед deploy ВСЕГДА запускать smoke-test всех публичных endpoints" style="width:100%;padding:10px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box;margin-bottom:10px"></textarea>
-
-      <label style="font-size:12px;color:var(--glass-text-dim);margin-bottom:4px;display:block">Обоснование (опц.)</label>
-      <textarea name="rationale" maxlength="1000" rows="3" placeholder="Какую проблему это решает? Какие риски без этого правила?" style="width:100%;padding:10px 12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:7px;color:var(--glass-text);font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box;margin-bottom:14px"></textarea>
-
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" class="btn secondary btn-sm" data-close="proposeRuleDialog">Отмена</button>
-        <button type="submit" class="btn btn-sm">Отправить предложение</button>
-      </div>
-    </form>
-  </dialog>
-
-
   <div class="card">
     <h2>Мои устройства</h2>
     <div id="sessionsBlock" class="empty">Загружаем…</div>
@@ -527,7 +413,6 @@
 <script src="/static/theme.js?v=20260520"></script>
 <script src="/static/error-reporter.js?v=20260521" defer></script>
 <script src="/static/auth-widget.js?v=20260522" defer></script>
-<script src="/static/machine-fp.js?v=20260526" defer></script>
 <script>
   async function api(path, opts = {}) {
     const r = await fetch(path, { credentials: 'same-origin', ...opts });
@@ -723,7 +608,6 @@
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
-              <button class="btn secondary btn-sm" title="Переименовать машину" onclick="event.stopPropagation();event.preventDefault();renameAgent('${esc(a.agent_id)}', '${esc((a.machine_label || '').replace(/'/g, '&#39;'))}')">✏️</button>
               <button class="btn danger btn-sm" title="Удалить помощника + revoke ключи" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc(a.agent_id)}')">🗑️</button>
               <span class="meta" style="color:var(--glass-text-dim)">▾</span>
             </div>
@@ -733,10 +617,17 @@
           </div>
         </details>`;
       }).join('');
+      // Карандаш «Переименовать машину» висит на шапке группы, не на агенте —
+      // действие меняет ОБЩИЙ machine_label всей группы. Передаём первого агента
+      // как identifier для PATCH (backend хранит label на каждом agent row).
+      const firstAgentId = m.agents[0] && m.agents[0].agent_id;
+      const renameBtn = firstAgentId
+        ? `<button class="btn secondary btn-sm" style="margin-left:8px;font-weight:normal" title="Переименовать эту машину (например: Офис, Ноут, Сервер)" onclick="event.stopPropagation();event.preventDefault();renameMachine('${esc(firstAgentId)}', '${esc((m.machine_label || '').replace(/'/g, '&#39;'))}')">✏️</button>`
+        : '';
       return `
         <details open style="margin-bottom:14px">
           <summary style="cursor:pointer; padding:8px 12px; background:var(--glass-bg-light); border:1px solid var(--glass-border); border-radius:10px; user-select:none; font-weight:600">
-            ${machineDot}🖥️ ${esc(m.machine_label || 'Машина')}${fp}
+            ${machineDot}🖥️ ${esc(m.machine_label || 'Машина')}${fp}${renameBtn}
             <span class="meta" style="margin-left:8px;font-weight:normal">${m.agents.length} ${m.agents.length === 1 ? 'агент' : (m.agents.length < 5 ? 'агента' : 'агентов')}</span>
           </summary>
           <div style="display:grid; gap:8px; margin-top:8px">${agentsHtml}</div>
@@ -749,9 +640,17 @@
   // Auto-refresh каждые 20 сек — owner видит когда агент подключается
   setInterval(() => { loadAgents(); }, 20000);
 
-  // v3: rename machine_label
-  window.renameAgent = async function(agentId, currentLabel) {
-    const newLabel = prompt(`Новое имя машины для «${agentId}»:`, currentLabel || '');
+  // v3: rename machine_label. Карандаш переехал в шапку группы машин
+  // (раньше висел на агенте → owner думал что переименовывает агента).
+  // Backend хранит label per-agent row, поэтому передаём первого агента
+  // группы как identifier — PATCH применит label ко всем строкам с тем же
+  // machine_fingerprint в user.py.
+  window.renameMachine = async function(agentId, currentLabel) {
+    const newLabel = prompt(
+      'Новое имя этой машины (например: Офис, Ноут, Сервер).\n' +
+      'Имя видно только вам и группирует всех помощников с этой машины:',
+      currentLabel || ''
+    );
     if (newLabel === null) return;  // cancel
     const r = await api(`/user/agents/${encodeURIComponent(agentId)}`, {
       method: 'PATCH',
@@ -1102,13 +1001,6 @@
       project: form.project.value.trim() || null,
       machine: form.machine.value.trim() || null,
     };
-    // Browser-stable fingerprint — группирует агентов одного браузера в одну machine card
-    try {
-      data.machine_fingerprint = await window.getMachineFingerprint();
-      data.machine_label = window.getMachineLabel();
-    } catch (e) {
-      console.warn('machine fingerprint failed:', e);
-    }
     const r = await api('/user/agents/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1225,12 +1117,7 @@
       html += bar(u.agents.pct, 'Помощников', u.agents.used, u.agents.max, '');
       if (u.tier === 'free' && (u.events.pct > 70 || u.storage_mb.pct > 70 || u.agents.pct > 70)) {
         html += `<div style="margin-top:12px;padding:10px 14px;background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.3);border-radius:9px;font-size:13px">
-          Подходите к лимитам free-тарифа. <a href="/ui/pricing" style="color:var(--glass-orb-1);font-weight:600">Перейти на Pro →</a>
-        </div>`;
-      } else if (u.tier === 'free') {
-        // Минимальный hint даже без перегрузки — пусть знают что Pro существует
-        html += `<div style="margin-top:10px;font-size:12px;color:var(--glass-text-dim);text-align:right">
-          Нужно больше? <a href="/ui/pricing" style="color:var(--glass-orb-1)">Тарифы →</a>
+          Подходите к лимитам free-тарифа. <a href="#" style="color:var(--glass-orb-1);font-weight:600" onclick="alert('Pro-тариф пока недоступен — следите за анонсами'); return false">Перейти на Pro →</a>
         </div>`;
       }
       block.innerHTML = html;
@@ -1240,400 +1127,7 @@
     }
   }
 
-  // ─── External AI providers (PR #52, per-tenant keys) ────────────────
-  // GET список → render row для каждого known provider → input или masked-display.
-  // Test / Save / Remove работают inline без modal'а.
-  // Provider links — landing pages, не deep links (deep ссылки часто меняются).
-  // Tenant сам найдёт «Get API Key» в их UI после логина.
-  const PROVIDER_HINTS = {
-    openrouter: {
-      icon: '🌐',
-      desc: 'OpenRouter — мульти-провайдер. Один ключ → Qwen-VL, Claude, GPT, Gemini. Оплата USDT/крипта (без зарубежной карты). Рекомендую для РФ-tenants.',
-      where: 'https://openrouter.ai/keys',
-    },
-    qwen: {
-      icon: '🐲',
-      desc: 'Qwen-VL прямо у Alibaba. ⚠️ DashScope требует Real-Name verification. Проще через OpenRouter (см. выше).',
-      where: 'https://openrouter.ai/keys',
-    },
-    minimax: {
-      icon: '🌀',
-      desc: 'MiniMax — отличный visual reasoning. После логина в User Center → API Keys.',
-      where: 'https://platform.minimax.io/',
-    },
-    gigachat: {
-      icon: '🇷🇺',
-      desc: 'GigaChat от Сбера — РФ-резидентный, оплата рублями через Сбер ID. Vision из коробки.',
-      where: 'https://developers.sber.ru/studio',
-    },
-    yandexgpt: {
-      icon: '🇷🇺',
-      desc: 'YandexGPT (Yandex Cloud) — РФ-резидентный, 152-ФЗ OK. Формат ключа: <code>folder_id|api_key</code> (одной строкой через "|"). Vision preview.',
-      where: 'https://console.cloud.yandex.ru/',
-    },
-    claude: {
-      icon: '🧠',
-      desc: 'Claude Haiku 4.5 — лучшее качество vision. Нужна зарубежная карта или ProxyAPI-посредник.',
-      where: 'https://platform.claude.com/',
-    },
-    openai: {
-      icon: '🔮',
-      desc: 'GPT-4o-mini — самый дешёвый ($0.90 за 1000 видео). Нужна зарубежная карта.',
-      where: 'https://platform.openai.com/api-keys',
-    },
-    gemini: {
-      icon: '✨',
-      desc: 'Gemini 2.0 Flash — понимает видео нативно, есть free tier 15 RPM. Из РФ нужен proxy.',
-      where: 'https://aistudio.google.com/apikey',
-    },
-  };
-
-  function statusBadge(status) {
-    if (!status) return '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim)">не проверен</span>';
-    if (status === 'ok') return '<span class="chip online">connected</span>';
-    if (status === 'auth_failed') return '<span class="chip" style="background:rgba(248,81,73,0.18);color:#ff7770">auth failed</span>';
-    if (status === 'rate_limit') return '<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922">rate limit</span>';
-    if (status === 'decrypt_failed') return '<span class="chip" style="background:rgba(248,81,73,0.18);color:#ff7770">ключ повреждён</span>';
-    if (status === 'timeout') return '<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922">timeout</span>';
-    return '<span class="chip" style="background:rgba(248,81,73,0.18);color:#ff7770">error</span>';
-  }
-
-  async function loadExternalKeys() {
-    const block = document.getElementById('externalKeysBlock');
-    if (!block) return;
-    let j;
-    try {
-      const r = await api('/user/settings/external-keys');
-      if (!r) return;
-      if (!r.ok) {
-        block.outerHTML = `<div id="externalKeysBlock" class="empty">Не удалось загрузить (${r.status}).</div>`;
-        return;
-      }
-      j = await r.json();
-    } catch (e) {
-      block.outerHTML = `<div id="externalKeysBlock" class="empty">Ошибка: ${esc(e.message)}</div>`;
-      return;
-    }
-
-    const byProvider = {};
-    (j.items || []).forEach(it => byProvider[it.provider] = it);
-    const all = j.available_providers || [];
-    if (!all.length) {
-      block.outerHTML = '<div id="externalKeysBlock" class="empty">Список providers пуст.</div>';
-      return;
-    }
-
-    const rows = all.map(p => {
-      const hint = PROVIDER_HINTS[p.id] || { icon: '🔌', desc: p.label, where: '' };
-      const configured = byProvider[p.id];
-      const header = `
-        <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;gap:14px;align-items:center">
-          <span style="font-size:20px">${hint.icon}</span>
-          <div style="flex:1;min-width:0">
-            <div class="name">${esc(p.label)} ${configured ? statusBadge(configured.last_test_status) : '<span class="chip" style="background:rgba(100,100,100,0.12);color:var(--glass-text-dim)">не настроен</span>'}</div>
-            <div class="meta" style="font-size:12.5px">${esc(hint.desc)}</div>
-          </div>
-          <span class="meta" style="color:var(--glass-text-dim)">▾</span>
-        </summary>
-      `;
-
-      let body;
-      if (configured) {
-        const used = configured.last_used_at ? fmtDate(configured.last_used_at) : 'никогда';
-        const tested = configured.last_test_at ? fmtDate(configured.last_test_at) : 'не проверялся';
-        body = `
-          <div style="padding:0 16px 14px;border-top:1px solid var(--glass-border)">
-            <div class="row"><span class="k">Ключ</span><span class="v" style="font-family:var(--mono);font-size:12.5px">${esc(configured.masked_key)}</span></div>
-            ${configured.base_url ? `<div class="row"><span class="k">base_url</span><span class="v" style="font-family:var(--mono);font-size:12px">${esc(configured.base_url)}</span></div>` : ''}
-            ${configured.model_name ? `<div class="row"><span class="k">model</span><span class="v">${esc(configured.model_name)}</span></div>` : ''}
-            <div class="row"><span class="k">Использован</span><span class="v">${esc(used)}</span></div>
-            <div class="row"><span class="k">Проверен</span><span class="v">${esc(tested)}</span></div>
-            <div class="toolbar">
-              <button class="btn secondary btn-sm" data-action="test" data-provider="${esc(p.id)}">Проверить</button>
-              <button class="btn danger btn-sm" data-action="remove" data-provider="${esc(p.id)}">Удалить</button>
-            </div>
-            <div id="ext-msg-${esc(p.id)}" class="msg-line" style="margin-top:8px"></div>
-          </div>
-        `;
-      } else {
-        const where = hint.where ? `<a href="${esc(hint.where)}" target="_blank" style="color:var(--glass-orb-1)">Получить ключ →</a>` : '';
-        body = `
-          <div style="padding:0 16px 14px;border-top:1px solid var(--glass-border)">
-            <p class="msg-line" style="margin:10px 0 10px;font-size:12.5px">${where}</p>
-            <form data-provider="${esc(p.id)}" class="ext-save-form" onsubmit="return false">
-              <div class="field" style="margin-bottom:10px">
-                <input type="password" placeholder="api_key" autocomplete="off"
-                       name="api_key" required minlength="4" maxlength="2048"
-                       style="width:100%;padding:10px 13px;font-size:14px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--mono);box-sizing:border-box">
-              </div>
-              <details style="margin-bottom:10px">
-                <summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none">Дополнительно (base_url / model)</summary>
-                <div style="margin-top:10px;display:grid;gap:8px">
-                  <input type="text" placeholder="base_url (опц.)" name="base_url" maxlength="500"
-                         style="width:100%;padding:9px 12px;font-size:13px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--mono);box-sizing:border-box">
-                  <input type="text" placeholder="model_name (опц.)" name="model_name" maxlength="200"
-                         style="width:100%;padding:9px 12px;font-size:13px;border-radius:9px;border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);font-family:var(--mono);box-sizing:border-box">
-                </div>
-              </details>
-              <div class="toolbar">
-                <button type="submit" class="btn btn-sm" data-action="save" data-provider="${esc(p.id)}">💾 Сохранить</button>
-              </div>
-            </form>
-            <div id="ext-msg-${esc(p.id)}" class="msg-line" style="margin-top:8px"></div>
-          </div>
-        `;
-      }
-      return `<details style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:14px;margin-bottom:8px">${header}${body}</details>`;
-    }).join('');
-
-    block.outerHTML = `<div id="externalKeysBlock">${rows}</div>`;
-    // Wire up handlers
-    document.querySelectorAll('#externalKeysBlock [data-action]').forEach(el => {
-      el.addEventListener('click', handleExternalKeyAction);
-    });
-    document.querySelectorAll('#externalKeysBlock .ext-save-form').forEach(form => {
-      form.addEventListener('submit', handleExternalKeySave);
-    });
-  }
-
-  async function handleExternalKeyAction(ev) {
-    const btn = ev.currentTarget;
-    const action = btn.dataset.action;
-    const provider = btn.dataset.provider;
-    const msg = document.getElementById('ext-msg-' + provider);
-    if (action === 'test') {
-      btn.disabled = true; if (msg) msg.textContent = 'Проверяем…';
-      try {
-        const r = await api(`/user/settings/external-key/${encodeURIComponent(provider)}/test`, { method: 'POST' });
-        if (!r) return;
-        const j = await r.json();
-        if (msg) {
-          if (j.ok) msg.innerHTML = `<span style="color:#4cc960">✓ ${esc(j.message || 'Подключение работает')} · ${j.latency_ms} мс</span>`;
-          else msg.innerHTML = `<span style="color:#ff7770">✗ ${esc(j.message || 'Не получилось')} · status=${esc(j.status || '?')}</span>`;
-        }
-        setTimeout(loadExternalKeys, 1500);
-      } catch (e) {
-        if (msg) msg.innerHTML = `<span style="color:#ff7770">Ошибка: ${esc(e.message)}</span>`;
-      } finally { btn.disabled = false; }
-    } else if (action === 'remove') {
-      if (!confirm(`Удалить ключ для ${provider}?`)) return;
-      btn.disabled = true;
-      try {
-        const r = await api(`/user/settings/external-key/${encodeURIComponent(provider)}`, { method: 'DELETE' });
-        if (!r) return;
-        if (r.ok) loadExternalKeys();
-        else {
-          const j = await r.json();
-          alert(`Ошибка: ${j.detail || r.status}`);
-        }
-      } finally { btn.disabled = false; }
-    }
-  }
-
-  async function handleExternalKeySave(ev) {
-    ev.preventDefault();
-    const form = ev.currentTarget;
-    const provider = form.dataset.provider;
-    const msg = document.getElementById('ext-msg-' + provider);
-    const data = {
-      provider: provider,
-      api_key: form.api_key.value.trim(),
-      base_url: (form.base_url && form.base_url.value.trim()) || null,
-      model_name: (form.model_name && form.model_name.value.trim()) || null,
-    };
-    if (!data.api_key) { if (msg) msg.textContent = 'Введите api_key'; return; }
-    if (msg) msg.textContent = 'Сохраняем…';
-    const btn = form.querySelector('button[type="submit"]');
-    if (btn) btn.disabled = true;
-    try {
-      const r = await api('/user/settings/external-key', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!r) return;
-      const j = await r.json();
-      if (r.ok) {
-        if (msg) msg.innerHTML = `<span style="color:#4cc960">✓ Сохранён (${esc(j.masked_key || '')}). Жмите «Проверить» для validate.</span>`;
-        setTimeout(loadExternalKeys, 1200);
-      } else {
-        if (msg) msg.innerHTML = `<span style="color:#ff7770">${esc(j.detail || r.status)}</span>`;
-      }
-    } finally { if (btn) btn.disabled = false; }
-  }
-
-  loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions(); loadUsage(); loadExternalKeys();
-</script>
-<script>
-
-  // ─── Agent Operating Rules (Phase 6) ─────────────────────────────────
-  async function loadAgentRules() {
-    try {
-      const r = await api('/user/rules');
-      if (!r || !r.ok) return;
-      const j = await r.json();
-      const banner = document.getElementById('platformRulesBanner');
-      if (banner) banner.innerHTML = 'ℹ️ ' + esc(j.platform_notice || ('Платформа применяет ' + (j.platform_count || 0) + ' базовых правил.'));
-      const ub = document.getElementById('userRulesBlock');
-      const items = j.items || [];
-      if (!items.length) {
-        ub.innerHTML = '<div style="color:var(--glass-text-dim);padding:14px;font-size:13px">У вас пока нет своих правил. Используйте кнопку выше чтобы добавить первое.</div>';
-      } else {
-        ub.innerHTML = items.map(rule => {
-          const sevColor = rule.severity === 'recommended' ? '#d29922' : 'var(--glass-orb-1)';
-          return `<div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:8px;padding:12px;margin-bottom:8px">
-            <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px">
-              <div>
-                <code style="font-size:12px;color:${sevColor}">[${esc(rule.severity)}]</code>
-                <span style="font-size:12px;color:var(--glass-text-dim)">scope:${esc(rule.scope)}</span>
-                <span class="chip ${rule.active ? '' : 'offline'}" style="margin-left:8px;font-size:11px">${rule.active ? 'active' : 'paused'}</span>
-              </div>
-              <div style="display:flex;gap:6px">
-                <button class="btn secondary btn-sm" data-rule-toggle="${esc(rule.id)}" data-active="${rule.active}" title="${rule.active ? 'pause' : 'resume'}">${rule.active ? '⏸' : '▶'}</button>
-                <button class="btn danger btn-sm" data-rule-delete="${esc(rule.id)}" title="delete">🗑</button>
-              </div>
-            </div>
-            <div style="font-size:13.5px;line-height:1.45">${esc(rule.body)}</div>
-            <div class="meta" style="font-size:11px;margin-top:6px;font-family:var(--mono)">${esc(rule.rule_id)}</div>
-          </div>`;
-        }).join('');
-        // Attach handlers
-        document.querySelectorAll('[data-rule-toggle]').forEach(b => b.addEventListener('click', async () => {
-          const id = b.dataset.ruleToggle;
-          const newActive = b.dataset.active !== 'true';
-          const r = await api('/user/rules/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: newActive }) });
-          if (r && r.ok) loadAgentRules();
-        }));
-        document.querySelectorAll('[data-rule-delete]').forEach(b => b.addEventListener('click', async () => {
-          if (!confirm('Удалить правило?')) return;
-          const id = b.dataset.ruleDelete;
-          const r = await api('/user/rules/' + id, { method: 'DELETE' });
-          if (r && r.ok) loadAgentRules();
-        }));
-      }
-    } catch (e) { console.warn('loadAgentRules', e); }
-    loadProposals();
-  }
-
-  async function loadProposals() {
-    try {
-      const r = await api('/user/rules/proposals');
-      if (!r || !r.ok) return;
-      const j = await r.json();
-      const ob = document.getElementById('ownProposalsBlock');
-      const pb = document.getElementById('publicProposalsBlock');
-      const obc = document.getElementById('ownProposalsCount');
-      const pbc = document.getElementById('publicProposalsCount');
-
-      const own = j.own || [];
-      if (obc) obc.textContent = '(' + own.length + ')';
-      if (!own.length) {
-        ob.innerHTML = '<div style="color:var(--glass-text-dim);padding:8px">Вы пока не делали предложений.</div>';
-      } else {
-        ob.innerHTML = own.map(p => renderOwnProposal(p)).join('');
-      }
-
-      const pub = j.public || [];
-      if (pbc) pbc.textContent = '(' + pub.length + ')';
-      if (!pub.length) {
-        pb.innerHTML = '<div style="color:var(--glass-text-dim);padding:8px">Нет публичных предложений для голосования.</div>';
-      } else {
-        pb.innerHTML = pub.map(p => renderPublicProposal(p)).join('');
-        document.querySelectorAll('[data-vote-up], [data-vote-down]').forEach(b => b.addEventListener('click', async () => {
-          const id = b.dataset.voteUp || b.dataset.voteDown;
-          const vote = b.dataset.voteUp ? 1 : -1;
-          const r = await api('/user/rules/proposals/' + id + '/vote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vote }) });
-          if (r && r.ok) loadProposals();
-        }));
-      }
-    } catch (e) { console.warn('loadProposals', e); }
-  }
-
-  function renderOwnProposal(p) {
-    const statusBadge = {
-      'pending': '<span class="chip" style="background:rgba(210,153,34,0.18);color:#d29922">⏳ pending</span>',
-      'reviewing': '<span class="chip" style="background:rgba(88,166,255,0.18);color:var(--glass-orb-1)">🔍 reviewing</span>',
-      'approved': '<span class="chip online">✅ approved</span>',
-      'rejected': '<span class="chip offline">❌ rejected</span>',
-      'duplicate': '<span class="chip" style="background:rgba(100,100,100,0.2);color:var(--glass-text-dim)">duplicate</span>',
-    }[p.status] || '';
-    return `<div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">${statusBadge}<span style="font-size:12px;color:var(--glass-text-dim)">scope:${esc(p.proposed_scope)}</span><span style="margin-left:auto;font-size:12px">↑${p.votes_up || 0} ↓${p.votes_down || 0}</span></div>
-      <div style="font-size:13px;line-height:1.45">${esc(p.proposed_body)}</div>
-      ${p.review_notes ? `<div class="meta" style="font-size:11px;margin-top:6px;font-style:italic">Review: ${esc(p.review_notes)}</div>` : ''}
-    </div>`;
-  }
-
-  function renderPublicProposal(p) {
-    const userVoted = p.my_vote != null;
-    return `<div style="background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-        <span style="font-size:12px;color:var(--glass-text-dim)">scope:${esc(p.proposed_scope)}</span>
-        <span style="margin-left:auto;font-size:12px">↑${p.votes_up || 0} ↓${p.votes_down || 0} / порог: ${p.vote_threshold || 3}</span>
-      </div>
-      <div style="font-size:13px;line-height:1.45">${esc(p.proposed_body)}</div>
-      ${p.rationale ? `<div class="meta" style="font-size:11.5px;margin-top:6px;font-style:italic">${esc(p.rationale)}</div>` : ''}
-      <div style="display:flex;gap:6px;margin-top:10px">
-        <button class="btn btn-sm" data-vote-up="${esc(p.id)}" ${userVoted && p.my_vote === 1 ? 'disabled style="opacity:0.5"' : ''}>↑ ${p.my_vote === 1 ? 'голос за' : 'за'}</button>
-        <button class="btn btn-sm secondary" data-vote-down="${esc(p.id)}" ${userVoted && p.my_vote === -1 ? 'disabled style="opacity:0.5"' : ''}>↓ ${p.my_vote === -1 ? 'голос против' : 'против'}</button>
-      </div>
-    </div>`;
-  }
-
-  // Modal handlers
-  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
-    document.getElementById(b.dataset.close).close();
-  }));
-  document.getElementById('addRuleBtn')?.addEventListener('click', () => {
-    document.getElementById('addRuleDialog').showModal();
-  });
-  document.getElementById('proposeRuleBtn')?.addEventListener('click', () => {
-    document.getElementById('proposeRuleDialog').showModal();
-  });
-  document.getElementById('addRuleForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const body = {
-      rule_id: form.rule_id.value.trim(),
-      severity: form.severity.value,
-      scope: form.scope.value,
-      body: form.body.value.trim(),
-    };
-    const r = await api('/user/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (r && r.ok) {
-      document.getElementById('addRuleDialog').close();
-      form.reset();
-      loadAgentRules();
-    } else {
-      const j = r ? await r.json() : { detail: 'no response' };
-      alert('Ошибка: ' + (j.detail || r.status));
-    }
-  });
-  document.getElementById('proposeRuleForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const body = {
-      proposed_scope: form.proposed_scope.value,
-      proposed_body: form.proposed_body.value.trim(),
-      rationale: form.rationale.value.trim() || null,
-    };
-    const r = await api('/user/rules/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (r && r.ok) {
-      document.getElementById('proposeRuleDialog').close();
-      form.reset();
-      loadProposals();
-    } else {
-      const j = r ? await r.json() : { detail: 'no response' };
-      alert('Ошибка: ' + (j.detail || r.status));
-    }
-  });
-
-  // Initial load
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadAgentRules);
-  } else {
-    loadAgentRules();
-  }
-
+  loadMe(); loadRooms(); loadAgents(); loadMedia(); loadSessions(); loadUsage();
 </script>
 </body>
 </html>
