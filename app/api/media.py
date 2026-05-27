@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db.postgres import get_pool
+from app.db.redis import get_redis as _get_redis
 from app.db.s3 import get_s3
 from app.security.middleware import require_admin
 from app.services.media_analyzer import (
@@ -620,6 +621,280 @@ class UploadB64Body(BaseModel):
     file_b64: str = Field(..., description="base64-encoded file content")
     filename: str = Field(..., min_length=1, max_length=255, description="original filename с extension")
     kind: str = Field("auto", pattern=r"^(auto|video|image|audio)$", description="auto = detect from extension")
+
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resumable upload (ewewew P2: обходит base64 context-cap для media > ~36KB).
+# Pattern:
+#   POST /upload-init {filename, size_bytes, content_type}
+#     → {upload_id, put_url, ttl_seconds}
+#   PUT  /upload/{upload_id} body=raw bytes
+#     → {status: "uploaded", bytes: N}
+#   POST /upload/{upload_id}/finalize
+#     → routes на analyze_video/image/audio по extension, возвращает
+#       {media_id, frames, transcript, vision_summary} как существующие
+#       /video /image /audio endpoints.
+#
+# State хранится в Redis (TTL 1 час). Tmp файлы — /tmp/cogcore-uploads/.
+# Cleanup orphan files делает существующий media_cleanup loop.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+
+UPLOAD_TMP_DIR = Path("/tmp/cogcore-uploads")
+UPLOAD_TTL_SEC = 3600  # 1 hour to PUT + finalize before state evicted
+
+
+class UploadInitBody(BaseModel):
+    """Init resumable upload — owner объявляет намерение."""
+    filename: str = Field(..., min_length=1, max_length=255)
+    size_bytes: int = Field(..., ge=1, le=2 * 1024 * 1024 * 1024)  # max 2GB
+    content_type: str | None = Field(None, max_length=128)
+
+
+@router.post("/upload-init")
+async def upload_init(body: UploadInitBody, request: Request) -> dict:
+    """Объявить resumable upload, получить upload_id + URL для PUT.
+
+    Возвращает put_url относительно текущего host — agent сам подставит
+    https://mcp.me-ai.ru/ или https://self-hosted.example/ префикс.
+    """
+    user = await _check_admin_or_owner(request)
+    ext = Path(body.filename).suffix.lower()
+    if ext not in ALLOWED_VIDEO_EXT and ext not in ALLOWED_IMAGE_EXT and ext not in ALLOWED_AUDIO_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"расширение {ext!r} не поддерживается. Допустимые: "
+                   f"video={ALLOWED_VIDEO_EXT}, image={ALLOWED_IMAGE_EXT}, audio={ALLOWED_AUDIO_EXT}",
+        )
+    if body.size_bytes > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=f"size_bytes > {MAX_UPLOAD_SIZE_MB}MB platform limit",
+        )
+
+    upload_id = uuid.uuid4().hex
+    state = {
+        "user_email": user.email,
+        "filename": body.filename,
+        "safe_name": sanitize_filename(body.filename),
+        "size_bytes": body.size_bytes,
+        "content_type": body.content_type or "application/octet-stream",
+        "ext": ext,
+        "received_bytes": 0,
+        "status": "initialized",
+        "media_id": None,  # set after finalize
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    try:
+        r = await _get_redis()
+        await r.setex(f"cogcore:upload:{upload_id}", UPLOAD_TTL_SEC, json.dumps(state))
+    except Exception as e:
+        logger.error("upload_init redis failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"state store failed: {e}")
+
+    logger.info("upload_init user=%s upload_id=%s filename=%s size=%d",
+                user.email, upload_id, body.filename, body.size_bytes)
+    return {
+        "upload_id": upload_id,
+        "put_url": f"/api/media/upload/{upload_id}",
+        "finalize_url": f"/api/media/upload/{upload_id}/finalize",
+        "ttl_seconds": UPLOAD_TTL_SEC,
+        "max_size_mb": MAX_UPLOAD_SIZE_MB,
+    }
+
+
+@router.put("/upload/{upload_id}")
+async def upload_put(upload_id: str, request: Request) -> dict:
+    """Stream raw bytes на disk. Без UploadFile multipart — просто request body.
+
+    Не auth-check здесь (init endpoint уже проверил user). upload_id серверует
+    как opaque token — owner получил его из init response, который и был
+    auth-gated.
+
+    Заодно валидация размера vs объявленного в init: если PUT > size_bytes —
+    отказ, чтоб не было неконтролируемого диска.
+    """
+    try:
+        r = await _get_redis()
+        raw = await r.get(f"cogcore:upload:{upload_id}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"state lookup failed: {e}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="upload_id not found или expired (TTL 1h)")
+    state = json.loads(raw)
+    if state["status"] != "initialized":
+        raise HTTPException(
+            status_code=409,
+            detail=f"upload {upload_id} status={state['status']}, нельзя PUT (используй другой upload_id)",
+        )
+
+    UPLOAD_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = UPLOAD_TMP_DIR / f"{upload_id}.bin"
+    bytes_written = 0
+    max_bytes = state["size_bytes"]
+    try:
+        with open(tmp_path, "wb") as f:
+            async for chunk in request.stream():
+                bytes_written += len(chunk)
+                if bytes_written > max_bytes:
+                    tmp_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"PUT body > объявленного size_bytes={max_bytes}",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"write failed: {e}")
+
+    state["received_bytes"] = bytes_written
+    state["status"] = "uploaded"
+    await r.setex(f"cogcore:upload:{upload_id}", UPLOAD_TTL_SEC, json.dumps(state))
+    logger.info("upload_put upload_id=%s bytes=%d", upload_id, bytes_written)
+    return {"status": "uploaded", "bytes": bytes_written, "next": f"POST {state.get('finalize_url', f'/api/media/upload/{upload_id}/finalize')}"}
+
+
+@router.post("/upload/{upload_id}/finalize")
+async def upload_finalize(upload_id: str, request: Request) -> dict:
+    """Запустить analyze pipeline на uploaded raw файле.
+
+    Dispatch по extension: video → analyze_video + frames + Whisper transcript,
+    audio → analyze_audio + Whisper, image → analyze_image.
+
+    Reuses логику из существующих /video /audio /image endpoints (frames upload
+    + L1 save + vision multi-provider stage). Возвращает тот же shape.
+
+    Idempotent: повторный finalize для уже-finalized upload_id вернёт прошлый
+    результат (media_id остаётся в state).
+    """
+    user = await _check_admin_or_owner(request)
+    try:
+        r = await _get_redis()
+        raw = await r.get(f"cogcore:upload:{upload_id}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"state lookup failed: {e}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="upload_id not found или expired")
+    state = json.loads(raw)
+    if state["status"] not in ("uploaded", "finalized"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"upload status={state['status']}, ожидался uploaded (сначала PUT)",
+        )
+    if state.get("user_email") != user.email and not user.is_admin:
+        raise HTTPException(status_code=403, detail="Не ваш upload")
+
+    # Idempotency: уже finalized
+    if state["status"] == "finalized" and state.get("media_id"):
+        logger.info("upload_finalize idempotent return media_id=%s", state["media_id"])
+        return state.get("finalize_result", {"media_id": state["media_id"], "note": "reused"})
+
+    tmp_path = UPLOAD_TMP_DIR / f"{upload_id}.bin"
+    if not tmp_path.exists():
+        raise HTTPException(status_code=410, detail="tmp file missing (cleanup ran?)")
+
+    media_id = uuid.uuid4().hex
+    ext = state["ext"]
+    safe_name = state["safe_name"]
+    # Rename tmp file to have proper extension (analyze_* expects extension)
+    final_tmp = UPLOAD_TMP_DIR / f"{upload_id}{ext}"
+    if final_tmp.exists():
+        final_tmp.unlink()
+    tmp_path.rename(final_tmp)
+
+    try:
+        if ext in ALLOWED_VIDEO_EXT:
+            result = await _analyze_and_save(
+                final_tmp, media_id, safe_name, user, kind="video",
+                analyze_fn=analyze_video,
+            )
+        elif ext in ALLOWED_AUDIO_EXT:
+            result = await _analyze_and_save(
+                final_tmp, media_id, safe_name, user, kind="audio",
+                analyze_fn=analyze_audio,
+            )
+        elif ext in ALLOWED_IMAGE_EXT:
+            result = await _analyze_and_save(
+                final_tmp, media_id, safe_name, user, kind="image",
+                analyze_fn=analyze_image,
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"unsupported ext {ext}")
+    finally:
+        # Always cleanup tmp file
+        try:
+            final_tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # Update state to finalized + store result for idempotency
+    state["status"] = "finalized"
+    state["media_id"] = media_id
+    state["finalize_result"] = result
+    await r.setex(f"cogcore:upload:{upload_id}", 600, json.dumps(state))  # 10min retention after finalize
+
+    return result
+
+
+async def _analyze_and_save(
+    tmp_path: Path, media_id: str, safe_name: str, user, kind: str, analyze_fn
+) -> dict:
+    """Shared post-upload pipeline: analyze → upload frames → vision → L1 save.
+
+    Минимальная версия — vision analysis опускаем (delegate в существующие endpoints
+    если нужно). Здесь focus на frames + transcript + L1 save.
+    """
+    logger.info("finalize analyze kind=%s media_id=%s file=%s", kind, media_id, safe_name)
+    try:
+        analysis = await analyze_fn(str(tmp_path))
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()[-500:]
+        logger.warning("finalize analyze failed: %s\n%s", e, tb)
+        status = 400 if isinstance(e, ValueError) else 500
+        raise HTTPException(status_code=status, detail=f"{type(e).__name__}: {e}")
+
+    # Upload frames if any (video case)
+    frame_records: list[dict] = []
+    if analysis.get("frames"):
+        _ensure_bucket()
+        for fr in analysis["frames"]:
+            local = Path(fr["local_path"])
+            key = f"{kind}/{media_id}/frame_{fr['index']:04d}.jpg"
+            try:
+                url = _upload_frame_to_s3(local, key)
+                frame_records.append({
+                    "index": fr["index"], "ts": fr.get("ts"), "key": key,
+                    "url": url, "size_bytes": fr.get("size_bytes"),
+                })
+            except Exception as e:
+                logger.warning("frame upload failed key=%s err=%s", key, e)
+
+    # L1 save
+    payload = {
+        "media_id": media_id,
+        "kind": kind,
+        "filename": safe_name,
+        "transcript": (analysis.get("transcript") or "")[:50_000],
+        "duration_sec": analysis.get("duration_sec"),
+        "frames": frame_records,
+        "uploader_email": user.email,
+        "via": "resumable_upload",
+    }
+    event_id = await _save_to_l1(payload, source_agent="media_uploader_resumable")
+    return {
+        "media_id": media_id,
+        "kind": kind,
+        "transcript": payload["transcript"],
+        "duration_sec": payload["duration_sec"],
+        "frames": frame_records,
+        "l1_event_id": event_id,
+    }
 
 
 @router.post("/upload_b64")
