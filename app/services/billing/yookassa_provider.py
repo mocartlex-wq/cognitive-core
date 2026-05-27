@@ -100,39 +100,95 @@ async def create_checkout(
         return {"error": f"parse_error: {type(e).__name__}"}
 
 
-def verify_webhook(body: bytes, signature: str, webhook_secret: Optional[str] = None) -> dict | None:
-    """ЮKassa webhook не имеет signature по умолчанию — verify через source IP.
+YOOKASSA_ALLOWED_IP_RANGES = [
+    # ЮKassa docs (https://yookassa.ru/developers/using-api/webhooks)
+    "185.71.76.0/27",
+    "185.71.77.0/27",
+    "77.75.153.0/25",
+    "77.75.154.128/25",
+    "77.75.156.11/32",
+    "77.75.156.35/32",
+]
+
+
+def _is_yookassa_ip(client_ip: str) -> bool:
+    """Check client_ip in YOOKASSA_ALLOWED_IP_RANGES (defense-in-depth поверх nginx)."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    for cidr in YOOKASSA_ALLOWED_IP_RANGES:
+        try:
+            if ip in ipaddress.ip_network(cidr):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def verify_webhook(body: bytes, signature: str, webhook_secret: Optional[str] = None,
+                   client_ip: Optional[str] = None) -> dict | None:
+    """ЮKassa webhook verify.
+
+    SECURITY 2026-05-26 (post-review fix #2): двухслойная защита:
+      1. Source IP whitelist — defense-in-depth ПОВЕРХ nginx allow directive
+         (если nginx misconfigured / proxy bypass — Python всё равно rejects).
+      2. Required fields validation — отбивает malformed payloads.
 
     Docs: https://yookassa.ru/developers/using-api/webhooks
-    ЮKassa отправляет уведомления с IP из whitelist:
-      185.71.76.0/27, 185.71.77.0/27, 77.75.153.0/25, 77.75.154.128/25,
-      77.75.156.11, 77.75.156.35
-
-    В нашем случае verify делает nginx через `allow` directive в location.
-    Если nginx разрешил — request от ЮKassa. Здесь просто parse body.
-
-    Для production-grade: добавить mTLS или secret-token в URL path.
     """
+    # Layer 1: IP whitelist (если caller передал client_ip).
+    if client_ip is not None and not _is_yookassa_ip(client_ip):
+        logger.warning("yookassa webhook: client_ip %s NOT in allowed ranges", client_ip)
+        return None
+
+    # Layer 2: parse + validate structure.
     try:
-        return json.loads(body.decode("utf-8"))
+        event = json.loads(body.decode("utf-8"))
     except Exception as e:
         logger.warning("yookassa webhook parse failed: %s", type(e).__name__)
         return None
 
+    # Required ЮKassa notification fields per docs.
+    if not isinstance(event, dict):
+        logger.warning("yookassa webhook: body not a JSON object")
+        return None
+    required = ("event", "object")
+    missing = [f for f in required if f not in event]
+    if missing:
+        logger.warning("yookassa webhook: missing fields %s", missing)
+        return None
+    obj = event.get("object")
+    if not isinstance(obj, dict) or not obj.get("id"):
+        logger.warning("yookassa webhook: object.id missing")
+        return None
+
+    return event
+
 
 async def handle_event(event: dict, db_pool) -> dict:
-    """Process verified ЮKassa notification."""
+    """Process verified ЮKassa notification.
+
+    SECURITY 2026-05-26 (post-review fix #1): atomic idempotency claim через
+    INSERT...ON CONFLICT DO NOTHING вместо SELECT-then-INSERT (race-condition).
+    """
     event_type = event.get("event", "")
     payment = event.get("object", {})
     payment_id = payment.get("id", "")
+    if not payment_id:
+        return {"action": "skipped_no_payment_id"}
 
-    # Idempotency
+    # Atomic idempotency: try INSERT first, RETURN если won the race.
     async with db_pool.acquire() as conn:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM billing_processed_events WHERE event_id = $1 AND provider = 'yookassa'",
-            payment_id,
+        claimed = await conn.fetchval(
+            """INSERT INTO billing_processed_events (event_id, provider, processed_at, event_type)
+                 VALUES ($1, 'yookassa', NOW(), $2)
+                 ON CONFLICT (event_id) DO NOTHING
+                 RETURNING event_id""",
+            payment_id, event_type,
         )
-        if exists:
+        if not claimed:
             return {"action": "skipped_duplicate", "event_id": payment_id}
 
     if event_type == "payment.succeeded":
@@ -161,9 +217,8 @@ async def handle_event(event: dict, db_pool) -> dict:
                     limits["max_agents"], limits["max_recall_per_min"],
                 )
                 await conn.execute(
-                    "INSERT INTO billing_processed_events (event_id, provider, processed_at) "
-                    "VALUES ($1, 'yookassa', NOW())",
-                    payment_id,
+                    "UPDATE billing_processed_events SET owner_user_id = $1::uuid WHERE event_id = $2",
+                    owner, payment_id,
                 )
         logger.info("yookassa upgraded owner=%s to tier=%s", owner[:8], target_tier)
         return {"action": "tier_upgraded", "owner": owner, "new_tier": target_tier}

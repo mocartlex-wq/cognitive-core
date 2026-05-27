@@ -135,17 +135,28 @@ def verify_webhook(body: bytes, signature: str, webhook_secret: Optional[str] = 
 
 
 async def handle_event(event: dict, db_pool) -> dict:
-    """Process verified Stripe event. Returns action taken."""
+    """Process verified Stripe event. Returns action taken.
+
+    SECURITY 2026-05-26 (post-review fix #1): idempotency через atomic
+    INSERT...ON CONFLICT DO NOTHING вместо SELECT-then-INSERT (race condition).
+    Если RETURNING вернул event_id — это первая обработка (мы держим lock через
+    PRIMARY KEY); если NULL — кто-то параллельно обработал → skip.
+    """
     event_type = event.get("type", "")
     event_id = event.get("id", "")
+    if not event_id:
+        return {"action": "skipped_no_event_id"}
 
-    # Idempotency check — has this event already been processed?
+    # Atomic idempotency claim: INSERT первым ходом, если PK конфликт — skip.
     async with db_pool.acquire() as conn:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM billing_processed_events WHERE event_id = $1 AND provider = 'stripe'",
-            event_id,
+        claimed = await conn.fetchval(
+            """INSERT INTO billing_processed_events (event_id, provider, processed_at, event_type)
+                 VALUES ($1, 'stripe', NOW(), $2)
+                 ON CONFLICT (event_id) DO NOTHING
+                 RETURNING event_id""",
+            event_id, event_type,
         )
-        if exists:
+        if not claimed:
             return {"action": "skipped_duplicate", "event_id": event_id}
 
     if event_type == "checkout.session.completed":
@@ -174,10 +185,11 @@ async def handle_event(event: dict, db_pool) -> dict:
                     limits["max_agents"], limits["max_recall_per_min"],
                 )
                 await conn.execute(
-                    "INSERT INTO billing_processed_events (event_id, provider, processed_at) "
-                    "VALUES ($1, 'stripe', NOW())",
-                    event_id,
+                    "UPDATE billing_processed_events SET owner_user_id = $1::uuid WHERE event_id = $2",
+                    owner, event_id,
                 )
+                # NOTE: INSERT в billing_processed_events уже произошёл вверху (atomic claim).
+                # Здесь только обогащаем owner_user_id для audit.
         logger.info("stripe upgraded owner=%s to tier=%s", owner[:8], target_tier)
         return {"action": "tier_upgraded", "owner": owner, "new_tier": target_tier}
 
