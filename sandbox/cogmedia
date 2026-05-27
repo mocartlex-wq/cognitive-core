@@ -68,7 +68,16 @@ if [ ! -f "$FILE" ]; then
 fi
 
 # ─── Auth key ───────────────────────────────────────────────────────────
-# Приоритет: env COGNITIVE_API_KEY (per-agent от wizard) > KEY_FILE (legacy)
+# Приоритет:
+#   1) env COGNITIVE_API_KEY — explicit override
+#   2) KEY_FILE (~/.config/cogcore/api-key) — legacy or per-agent
+#   3) ~/.claude.json mcpServers.cognitive-core.headers.X-API-Key — auto-discovery
+#      (NEW 2026-05-24: автоматически берёт api_key из MCP-конфига Claude Code/Cursor,
+#       чтобы агент в Claude Code сессии не возился с env / key file).
+KEY=""
+AUTH_HEADER=""
+CLAUDE_JSON="$HOME/.claude.json"
+
 if [ -n "$COGNITIVE_API_KEY" ]; then
     KEY=$(echo -n "$COGNITIVE_API_KEY" | tr -d '\n\r ' | head -c 200)
     AUTH_HEADER="X-API-Key: $KEY"
@@ -79,19 +88,41 @@ elif [ -r "$KEY_FILE" ]; then
         exit 67
     fi
     # Heuristic: 32+ символа без префиксов rk_/sk_ → скорее всего token_urlsafe(32) per-agent.
-    # Иначе считаем legacy owner-key.
     if [ ${#KEY} -ge 40 ] && [[ ! "$KEY" =~ ^(rk_|sk_|tk_) ]]; then
         AUTH_HEADER="X-API-Key: $KEY"
     else
         AUTH_HEADER="X-Owner-Key: $KEY"
     fi
-else
+elif [ -r "$CLAUDE_JSON" ] && command -v python3 >/dev/null 2>&1; then
+    # Auto-discovery из MCP config Claude Code / Cursor — без env / key file.
+    # Ищем в mcpServers.cognitive-core.headers.X-API-Key (HTTP transport)
+    # ИЛИ mcpServers.cognitive-core.env.COGNITIVE_API_KEY (stdio transport).
+    KEY=$(python3 -c "
+import json, sys, os
+try:
+    d = json.load(open(os.path.expanduser('~/.claude.json'), encoding='utf-8'))
+    s = d.get('mcpServers', {}).get('cognitive-core', {})
+    k = (s.get('headers', {}) or {}).get('X-API-Key', '')
+    if not k:
+        k = (s.get('env', {}) or {}).get('COGNITIVE_API_KEY', '')
+    print(k.strip())
+except Exception:
+    print('')
+" 2>/dev/null | tr -d '\n\r ' | head -c 200)
+    if [ -n "$KEY" ]; then
+        AUTH_HEADER="X-API-Key: $KEY"
+        echo "[cogmedia] auto-discovered api_key from ~/.claude.json" >&2
+    fi
+fi
+
+if [ -z "$AUTH_HEADER" ]; then
     echo "ERROR: API-key не найден" >&2
     echo "" >&2
-    echo "Опции:" >&2
-    echo "  1) env COGNITIVE_API_KEY='your-key' cogmedia file.png" >&2
-    echo "  2) echo 'your-key' > $KEY_FILE && chmod 600 $KEY_FILE" >&2
-    echo "  3) /ui/connect → wizard выдаст ключ + installer" >&2
+    echo "Опции (в порядке простоты):" >&2
+    echo "  1) Подключи cogcore через Claude Code → ключ авто-подхватится из ~/.claude.json" >&2
+    echo "  2) env COGNITIVE_API_KEY='your-key' cogmedia file.png" >&2
+    echo "  3) echo 'your-key' > $KEY_FILE && chmod 600 $KEY_FILE" >&2
+    echo "  4) /ui/connect → wizard выдаст ключ + installer" >&2
     exit 67
 fi
 

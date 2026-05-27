@@ -10,7 +10,7 @@
 
 1. Email + OTP → [`/ui/login`](https://mcp.me-ai.ru/ui/login)
 2. «🪄 Передать помощнику» в [`/ui/profile`](https://mcp.me-ai.ru/ui/profile) → 1-клик настройка для Claude Code / Cursor / ChatGPT
-3. После рестарта твоего AI-клиента — 25+ MCP-инструментов (`cognitive_remember`, `cognitive_recall`, `room_post`, `cognitive_video_generate`...)
+3. После рестарта твоего AI-клиента — 29 MCP-инструментов (`cognitive_remember`, `cognitive_recall`, `room_post`, `cognitive_video_generate`, `cognitive_media_upload_init`...)
 
 Free tier: 10k событий/день, 1 GB медиа, 10 агентов. Pro (490₽/мес или $5/mo) — 10x всё + приоритетная поддержка. Тарифы: [`/ui/pricing`](https://mcp.me-ai.ru/ui/pricing).
 
@@ -28,6 +28,9 @@ Free tier: 10k событий/день, 1 GB медиа, 10 агентов. Pro 
 | **152-ФЗ compliance** (РФ enterprise) | DPA + ФСТЭК-21 УЗ-3 | [compliance-152fz.md](docs/compliance-152fz.md) |
 | **Billing** (Stripe + ЮKassa) | `/api/billing/checkout/{tier}` | [quickstart-billing.md](docs/quickstart-billing.md) |
 | **Multi-tenant isolation** (Phase 4) | `owner_user_id` на всех L1-L4 queries | per-tenant MinIO prefix |
+| **Resumable upload** (PR #108, no context-cap) | `cognitive_media_upload_init/_finalize` | curl PUT обходит base64 в LLM context |
+| **Agent discovery + onboarding** (PR #101, #106, #110) | `claim/peek`, `cognitive_agent_manifest.peers[]`, 🟢-canary, idempotent claim | [agent-discovery.md](docs/agent-discovery.md), [memory-scope.md](docs/memory-scope.md) |
+| **Self-hosted instance** (one-liner) | `curl /static/install-self-hosted.sh \| sudo bash` | [onboarding-vps.md](docs/onboarding-vps.md) |
 
 Полный TOC документации: [docs/index.md](docs/index.md).
 
@@ -51,6 +54,16 @@ cp .env.example .env  # вставьте DEEPSEEK_API_KEY
 docker compose up -d
 open http://localhost:9001/   # главная с кнопкой "Запустить демо"
 ```
+
+## Свой VPS (one-liner, ~10 мин)
+
+Для tenant'ов кому нужна **полная изоляция** (не shared cloud):
+
+```bash
+curl -fsSL https://mcp.me-ai.ru/static/install-self-hosted.sh | sudo bash
+```
+
+Скрипт спросит домен + email + SMTP creds → выпустит TLS-сертификаты → поднимет docker-compose → прогонит миграции → создаст admin-аккаунт. Полная инструкция: [`docs/onboarding-vps.md`](docs/onboarding-vps.md).
 
 ## Production server (1 команда)
 
