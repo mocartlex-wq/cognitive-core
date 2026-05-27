@@ -640,20 +640,7 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
     if existing:
         logger.info("issue_claim_token reused existing token for agent=%s user=%s",
                     default_id, user.user_id)
-        # Загружаем существующий entry чтобы вернуть тот же prompt_for_agent
-        try:
-            r = await get_redis()
-            raw = await r.get(f"cogcore:claim:{existing}")
-            if raw:
-                entry = json.loads(raw)
-                # Возвращаем минимальный response — caller получит token и
-                # сможет передать той же инструкцией. prompt_for_agent
-                # перегенерируется ниже с актуальным TTL.
-                token = existing
-                # fall through to generate prompt с тем же token
-        except Exception as e:
-            logger.warning("issue_claim_token reuse fetch failed: %s", e)
-            token = _generate_claim_token()
+        token = existing
     else:
         token = _generate_claim_token()
 
