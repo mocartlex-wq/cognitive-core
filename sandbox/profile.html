@@ -723,7 +723,6 @@
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
-              <button class="btn secondary btn-sm" title="Переименовать машину" onclick="event.stopPropagation();event.preventDefault();renameAgent('${esc(a.agent_id)}', '${esc((a.machine_label || '').replace(/'/g, '&#39;'))}')">✏️</button>
               <button class="btn danger btn-sm" title="Удалить помощника + revoke ключи" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc(a.agent_id)}')">🗑️</button>
               <span class="meta" style="color:var(--glass-text-dim)">▾</span>
             </div>
@@ -733,10 +732,17 @@
           </div>
         </details>`;
       }).join('');
+      // Карандаш «Переименовать машину» висит на шапке группы — действие
+      // меняет ОБЩИЙ machine_label всей группы (backend broadcasts UPDATE на все
+      // agent_states с одинаковым owner_user_id+machine_fingerprint).
+      const firstAgentId = m.agents[0] && m.agents[0].agent_id;
+      const renameBtn = firstAgentId
+        ? `<button class="btn secondary btn-sm" style="margin-left:8px;font-weight:normal" title="Переименовать эту машину (например: Офис, Ноут, Сервер)" onclick="event.stopPropagation();event.preventDefault();renameMachine('${esc(firstAgentId)}', '${esc((m.machine_label || '').replace(/'/g, '&#39;'))}')">✏️</button>`
+        : '';
       return `
         <details open style="margin-bottom:14px">
           <summary style="cursor:pointer; padding:8px 12px; background:var(--glass-bg-light); border:1px solid var(--glass-border); border-radius:10px; user-select:none; font-weight:600">
-            ${machineDot}🖥️ ${esc(m.machine_label || 'Машина')}${fp}
+            ${machineDot}🖥️ ${esc(m.machine_label || 'Машина')}${fp}${renameBtn}
             <span class="meta" style="margin-left:8px;font-weight:normal">${m.agents.length} ${m.agents.length === 1 ? 'агент' : (m.agents.length < 5 ? 'агента' : 'агентов')}</span>
           </summary>
           <div style="display:grid; gap:8px; margin-top:8px">${agentsHtml}</div>
@@ -749,9 +755,17 @@
   // Auto-refresh каждые 20 сек — owner видит когда агент подключается
   setInterval(() => { loadAgents(); }, 20000);
 
-  // v3: rename machine_label
-  window.renameAgent = async function(agentId, currentLabel) {
-    const newLabel = prompt(`Новое имя машины для «${agentId}»:`, currentLabel || '');
+  // v3: rename machine_label. Карандаш переехал в шапку группы машин
+  // (раньше висел на агенте → owner думал что переименовывает агента).
+  // Backend хранит label per-agent row, поэтому передаём первого агента
+  // группы как identifier — PATCH применит label ко всем строкам с тем же
+  // machine_fingerprint в user.py.
+  window.renameMachine = async function(agentId, currentLabel) {
+    const newLabel = prompt(
+      'Новое имя этой машины (например: Офис, Ноут, Сервер).\n' +
+      'Имя видно только вам и группирует всех помощников с этой машины:',
+      currentLabel || ''
+    );
     if (newLabel === null) return;  // cancel
     const r = await api(`/user/agents/${encodeURIComponent(agentId)}`, {
       method: 'PATCH',
