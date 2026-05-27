@@ -495,10 +495,10 @@ async def render_qr(token: str):
     """
     entry = _QR_TOKENS.get(token)
     if not entry:
-        raise HTTPException(status_code=404, detail="QR-token expired or invalid")
+        raise HTTPException(status_code=404, detail="QR-токен недействителен или истёк")
     if time.time() - entry["created_at"] > QR_TTL_SECONDS:
         _QR_TOKENS.pop(token, None)
-        raise HTTPException(status_code=410, detail="QR-token expired (>10min)")
+        raise HTTPException(status_code=410, detail="QR-токен истёк (>10 минут). Сгенерируйте новый.")
 
     deep_link = f"{BASE_URL}/ui/connect/mobile?token={token}"
 
