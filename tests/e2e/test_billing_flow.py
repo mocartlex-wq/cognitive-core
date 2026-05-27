@@ -12,12 +12,12 @@ Pre-launch sanity check per DS recommendation.
 - Idempotency: replay same webhook → not double-applied
 - Rate limit: 6 checkouts in 60s → 429 on 6th
 """
-import os
+
 import time
 import hmac
 import hashlib
 import json
-import uuid
+
 import pytest
 from unittest.mock import patch, AsyncMock
 
