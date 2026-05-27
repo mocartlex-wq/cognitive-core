@@ -222,6 +222,41 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "cognitive_media_upload_init",
+        "description": (
+            "Init resumable media upload — для файлов > 36KB обходит base64 context-cap. "
+            "Возвращает upload_id + put_url. Агент потом через Bash: "
+            "curl -X PUT --data-binary @file 'https://mcp.me-ai.ru{put_url}'. "
+            "После успешного PUT — вызвать cognitive_media_upload_finalize(upload_id) "
+            "чтобы запустить analyze pipeline (frames + Whisper)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "имя файла e.g. video.mp4"},
+                "size_bytes": {"type": "integer", "description": "размер байт (для валидации)"},
+                "content_type": {"type": "string", "description": "MIME, e.g. video/mp4"},
+            },
+            "required": ["filename", "size_bytes"],
+        },
+    },
+    {
+        "name": "cognitive_media_upload_finalize",
+        "description": (
+            "Завершить resumable upload после успешного PUT. Запускает analyze pipeline "
+            "(video → frames + Whisper, audio → Whisper, image → store) и возвращает "
+            "{media_id, transcript, frames, l1_event_id}. Idempotent — повторный call "
+            "возвращает тот же результат."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "upload_id": {"type": "string", "description": "из cognitive_media_upload_init response"},
+            },
+            "required": ["upload_id"],
+        },
+    },
+    {
         "name": "cognitive_send",
         "description": "Direct message другому агенту.",
         "inputSchema": {
@@ -1024,6 +1059,23 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         if connection_advisory:
             response["connection_advisory"] = connection_advisory
         return response
+
+    if name == "cognitive_media_upload_init":
+        body = {
+            "filename": a.get("filename", "upload.bin"),
+            "size_bytes": int(a.get("size_bytes", 0)),
+            "content_type": a.get("content_type"),
+        }
+        return await _call_self(request, "POST", "/api/media/upload-init", json_body=body, timeout_s=5.0)
+
+    if name == "cognitive_media_upload_finalize":
+        upload_id = a.get("upload_id", "")
+        if not upload_id:
+            return {"error": "upload_id required"}
+        return await _call_self(
+            request, "POST", f"/api/media/upload/{upload_id}/finalize",
+            json_body={}, timeout_s=120.0,  # analyze может занять до 2 мин на длинном видео
+        )
 
     if name == "cognitive_media_upload":
         # P0 (2026-05-26 per ewewew feedback): MCP tool вместо bash CLI cogmedia.
