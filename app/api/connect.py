@@ -565,6 +565,52 @@ class IssueClaimBody(BaseModel):
     machine_fingerprint: str | None = Field(None, min_length=8, max_length=32, pattern=r"^[a-f0-9]+$")
 
 
+async def _find_existing_claim_token_for_agent(agent_id: str, user_id: str) -> str | None:
+    """Поиск существующего валидного claim-token для пары (agent_id, user_id).
+
+    Сканирует Redis ключи cogcore:claim:* и memory fallback. Возвращает первый
+    matching token который ещё не expired. Если не нашёл — None.
+
+    Используется для idempotency в issue_claim_token: множественные клики
+    «Выдать» для того же agent_id не должны создавать токены-зомби.
+    """
+    try:
+        r = await get_redis()
+        # Redis SCAN — non-blocking, безопасно на production
+        cursor = 0
+        while True:
+            cursor, keys = await r.scan(cursor=cursor, match="cogcore:claim:*", count=100)
+            for key in keys:
+                raw = await r.get(key)
+                if not raw:
+                    continue
+                try:
+                    entry = json.loads(raw)
+                except Exception:
+                    continue
+                if (
+                    entry.get("agent_id") == agent_id
+                    and str(entry.get("user_id")) == str(user_id)
+                ):
+                    # key format: cogcore:claim:TOKEN
+                    return key.decode().split(":", 2)[-1] if isinstance(key, bytes) else key.split(":", 2)[-1]
+            if cursor == 0:
+                break
+    except Exception as e:
+        logger.warning("find_existing_claim_token: Redis scan failed: %s", e)
+
+    # Memory fallback (rare path)
+    now = time.time()
+    for tok, entry in _CLAIM_TOKENS.items():
+        if (
+            entry.get("agent_id") == agent_id
+            and str(entry.get("user_id")) == str(user_id)
+            and now - entry.get("created_at", 0) < CLAIM_TTL_SECONDS
+        ):
+            return tok
+    return None
+
+
 @router.post("/issue-claim-token")
 async def issue_claim_token(body: IssueClaimBody, request: Request):
     """Сгенерировать short claim-token который агент обменяет на api_key.
@@ -582,9 +628,35 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
       • Не передаёт сам api_key — только пред-создаёт агента под user
     """
     user = await require_user(request)
-    token = _generate_claim_token()
     # Default agent_id если не задан — суффикс от платформы
     default_id = body.agent_id or f"{body.platform.split('_')[0]}-{secrets.token_hex(3)}"
+
+    # PR G (per ewewew misunderstanding о «UI auto-regen»): owner кликает
+    # «Выдать» несколько раз для того же agent_id → раньше каждый клик
+    # создавал НОВЫЙ token, что приводило к multiple tokens-zombies в чате
+    # агента. Теперь: если у этого agent_id уже есть валидный (не expired)
+    # token — возвращаем ЕГО, не генерируем новый. Идемпотентность.
+    existing = await _find_existing_claim_token_for_agent(default_id, str(user.user_id))
+    if existing:
+        logger.info("issue_claim_token reused existing token for agent=%s user=%s",
+                    default_id, user.user_id)
+        # Загружаем существующий entry чтобы вернуть тот же prompt_for_agent
+        try:
+            r = await get_redis()
+            raw = await r.get(f"cogcore:claim:{existing}")
+            if raw:
+                entry = json.loads(raw)
+                age = time.time() - entry.get("created_at", time.time())
+                # Возвращаем минимальный response — caller получит token и
+                # сможет передать той же инструкцией. prompt_for_agent
+                # перегенерируется ниже с актуальным TTL.
+                token = existing
+                # fall through to generate prompt с тем же token
+        except Exception as e:
+            logger.warning("issue_claim_token reuse fetch failed: %s", e)
+            token = _generate_claim_token()
+    else:
+        token = _generate_claim_token()
 
     # PR #35 (2026-05-23): СРАЗУ создаём pending agent_states row чтобы
     # owner видел в /ui/profile «pending claim» с countdown 10 мин.
@@ -614,12 +686,15 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
         "machine_fingerprint": body.machine_fingerprint,
         "created_at": time.time(),
     }
-    try:
-        r = await get_redis()
-        await r.setex(f"cogcore:claim:{token}", CLAIM_TTL_SECONDS, json.dumps(entry_data))
-    except Exception as e:
-        logger.warning("Redis SETEX failed, falling back to memory: %s", e)
-        _CLAIM_TOKENS[token] = entry_data
+    # Skip SETEX if we reused existing token — don't reset TTL (что прервёт
+    # countdown в UI). Если existing — это был тот же entry_data структура.
+    if not existing:
+        try:
+            r = await get_redis()
+            await r.setex(f"cogcore:claim:{token}", CLAIM_TTL_SECONDS, json.dumps(entry_data))
+        except Exception as e:
+            logger.warning("Redis SETEX failed, falling back to memory: %s", e)
+            _CLAIM_TOKENS[token] = entry_data
     return {
         "token": token,
         "expires_in_seconds": CLAIM_TTL_SECONDS,
