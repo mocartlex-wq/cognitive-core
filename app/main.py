@@ -283,6 +283,12 @@ from app.api.media import router as media_router
 
 app.include_router(media_router)
 
+# Video generation (Phase post-launch 2026-05-26): /api/video/{generate,status/{id}}
+# Per-tenant Kling/Sora API key через user_external_keys table
+from app.api.video import router as video_router  # noqa: E402
+
+app.include_router(video_router)
+
 # Billing (Phase post-launch 2026-05-26): Stripe + ЮKassa subscriptions
 # /api/billing/checkout/{tier}, /webhook/{provider}, /subscriptions/me
 from app.api.billing import router as billing_router  # noqa: E402
