@@ -49,14 +49,33 @@ def _extract_session_id(request: Request) -> str | None:
 # Public dependencies
 # ─────────────────────────────────────────────────────────────────────────
 async def require_user(request: Request) -> Session:
-    """Обязательная аутентификация. 401 если нет валидной сессии."""
+    """Обязательная аутентификация. 401 если нет валидной сессии.
+
+    FIX 2026-05-27 (ewewew agent report): error message переписан чтобы быть
+    actionable для CLI / API клиентов. Раньше «Войдите через ссылку из письма»
+    вводило в заблуждение агентов которые шлют X-API-Key (не cookie).
+    Теперь — двойной hint: для browser users + для API clients.
+    """
     sid = _extract_session_id(request)
     session = await verify_session(sid)
     if not session:
-        raise HTTPException(
-            status_code=401,
-            detail="Не авторизованы. Войдите через ссылку из письма.",
-        )
+        # Определяем тип клиента по наличию X-API-Key или User-Agent
+        has_api_key = bool(request.headers.get("X-API-Key", "").strip())
+        ua = (request.headers.get("user-agent") or "").lower()
+        is_api_client = (has_api_key or
+                         "claude" in ua or "agent" in ua or
+                         "curl" in ua or "python" in ua or "httpx" in ua)
+        if is_api_client:
+            detail = (
+                "Не авторизованы. Этот endpoint требует session-cookie "
+                "(login через /ui/login). API-клиенты должны использовать "
+                "endpoints с поддержкой X-API-Key (например /api/media/* "
+                "принимает per-agent X-API-Key). Если X-API-Key указан — "
+                "ключ невалиден или revoked."
+            )
+        else:
+            detail = "Не авторизованы. Войдите через https://mcp.me-ai.ru/ui/login"
+        raise HTTPException(status_code=401, detail=detail)
     # Прикрепляем к request.state — удобно для middleware логирования
     request.state.user_id = session.user_id
     request.state.user_email = session.email
