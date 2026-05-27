@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger weekly Docker prune
+Requires=cogcore-docker-prune.service
+
+[Timer]
+# Каждое воскресенье в 04:00 UTC (low-traffic window)
+OnCalendar=Sun *-*-* 04:00:00
+# Если сервер был выключен — догнать пропущенный запуск
+Persistent=true
+
+[Install]
+WantedBy=timers.target

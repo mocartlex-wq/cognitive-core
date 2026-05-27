@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Docker prune for Cognitive Core
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cognitive-core/scripts/docker-prune-weekly.sh
+StandardOutput=journal
+StandardError=journal
