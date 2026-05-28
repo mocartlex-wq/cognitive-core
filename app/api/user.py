@@ -263,6 +263,148 @@ async def delete_my_room(room_id: str, request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# GET  /user/rooms/{room_id}/detail — owner-view одной комнаты (M3 UI)
+# POST /user/rooms/{room_id}/post   — написать в комнату от своего имени
+#
+# Owner видит свою комнату через SESSION (require_user) — НЕ через X-Room-Key.
+# Owner не внешний агент: room-key нужен только агентам для room_join.
+# Direct DB (минуя rooms-service :9098) — rooms/* таблицы shared в
+# cognitive_postgres, как и остальной room-CRUD выше.
+# Вставлять ПОСЛЕ delete_my_room (перед блоком /user/agents).
+# ─────────────────────────────────────────────────────────────────────────
+class PostRoomMessageBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+@router.get("/rooms/{room_id}/detail")
+async def get_my_room_detail(room_id: str, request: Request):
+    """Полная карточка комнаты для owner-view (/ui/room?id=...).
+
+    Возвращает api_key (для приглашения агентов), список участников и
+    последние 50 сообщений треда. Только owner_user_id комнаты видит детали:
+    404 если комнаты нет, 403 если она не принадлежит этому пользователю.
+
+    room_participants / room_messages могут быть пустыми (никто ещё не
+    join'нулся / не писал) — в этом случае возвращаем [] не падая.
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        room = await conn.fetchrow(
+            """
+            SELECT id::text AS id, name, api_key,
+                   COALESCE(is_public, TRUE) AS is_public,
+                   owner_user_id::text AS owner_user_id, created_at
+              FROM rooms WHERE id = $1::uuid
+            """,
+            room_id,
+        )
+        if not room:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(room["owner_user_id"]) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+
+        participants: list[dict[str, Any]] = []
+        try:
+            prows = await conn.fetch(
+                """
+                SELECT agent_id, COALESCE(role, 'member') AS role,
+                       joined_at, last_seen_at
+                  FROM room_participants
+                 WHERE room_id = $1::uuid
+                 ORDER BY joined_at ASC NULLS LAST
+                 LIMIT 500
+                """,
+                room_id,
+            )
+            for p in prows:
+                d = dict(p)
+                for k in ("joined_at", "last_seen_at"):
+                    if isinstance(d.get(k), datetime):
+                        d[k] = d[k].isoformat()
+                participants.append(d)
+        except Exception as e:
+            logger.info("room_detail participants_skip room=%s err=%s", room_id, e)
+
+        messages: list[dict[str, Any]] = []
+        message_count = 0
+        try:
+            message_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM room_messages WHERE room_id = $1::uuid",
+                room_id,
+            ) or 0
+            # Берём последние 50 (DESC), затем разворачиваем в хронологию для UI
+            mrows = await conn.fetch(
+                """
+                SELECT id::text AS id, from_agent, text, created_at
+                  FROM room_messages
+                 WHERE room_id = $1::uuid
+                 ORDER BY created_at DESC
+                 LIMIT 50
+                """,
+                room_id,
+            )
+            for m in reversed(mrows):
+                d = dict(m)
+                if isinstance(d.get("created_at"), datetime):
+                    d["created_at"] = d["created_at"].isoformat()
+                messages.append(d)
+        except Exception as e:
+            logger.info("room_detail messages_skip room=%s err=%s", room_id, e)
+
+    created = room["created_at"]
+    return {
+        "id": room["id"],
+        "name": room["name"],
+        "api_key": room["api_key"],
+        "is_public": room["is_public"],
+        "created_at": created.isoformat() if isinstance(created, datetime) else created,
+        "message_count": message_count,
+        "participants": participants,
+        "messages": messages,
+    }
+
+
+@router.post("/rooms/{room_id}/post")
+async def post_my_room_message(room_id: str, body: PostRoomMessageBody, request: Request):
+    """Owner пишет в свою комнату от своего имени (from_agent = owner:email).
+
+    INSERT в room_messages триггерит pg_notify('room_event') → агенты в
+    комнате получают сообщение через NATS/SSE как обычное. Только
+    owner_user_id комнаты может (404 / 403 как в detail).
+    """
+    user = await require_user(request)
+    from_agent = f"owner:{user.email}"
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM rooms WHERE id = $1::uuid",
+            room_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+        try:
+            message_id = await conn.fetchval(
+                """
+                INSERT INTO room_messages (room_id, from_agent, text, msg_type)
+                VALUES ($1::uuid, $2, $3, 'message')
+                RETURNING id::text
+                """,
+                room_id, from_agent, body.text,
+            )
+        except Exception as e:
+            logger.error("post_room_message failed user=%s room=%s err=%s",
+                         user.user_id, room_id, e)
+            raise HTTPException(status_code=500, detail=f"Не удалось отправить: {e}")
+    logger.info("room_message_posted user=%s room=%s msg=%s",
+                user.user_id, room_id, message_id)
+    return {"ok": True, "message_id": message_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # /user/agents — мои помощники
 # ─────────────────────────────────────────────────────────────────────────
 @router.get("/agents")

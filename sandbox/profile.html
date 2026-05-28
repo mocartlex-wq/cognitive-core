@@ -673,7 +673,7 @@
           <div class="name">${esc(r.name || '(без названия)')}</div>
           <div class="meta">${labelOwner} · ${fmtDate(r.created_at)}${isPub}</div>
         </div>
-        <a href="/ui?id=${encodeURIComponent(r.id)}" class="btn secondary btn-sm">Открыть</a>
+        <a href="/ui/room?id=${encodeURIComponent(r.id)}" class="btn secondary btn-sm">Открыть</a>
         ${editBtns}
       </div>`;
     }).join('');
