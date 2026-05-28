@@ -274,9 +274,11 @@ app.include_router(auth_router)
 app.include_router(user_router)
 
 # Frontend error reporter (2026-05-20): /api/errors POST/GET
+from app.api.docs_serve import router as docs_serve_router
 from app.api.errors import router as errors_router
 
 app.include_router(errors_router)
+app.include_router(docs_serve_router)
 
 # Media upload + analyze (2026-05-20): /api/media/{video,image,list,frame/...}
 from app.api.media import router as media_router
