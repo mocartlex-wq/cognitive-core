@@ -31,11 +31,12 @@ __pycache__/
 Thumbs.db
 
 # Documentation (served as static via nginx, not bundled in api)
-docs/
+# docs/  — НЕ исключаем целиком: docs/*.md нужны для /docs/X.md HTTP serving (app/api/docs_serve.py)
 launch/
 sandbox/
 *.md
 !app/**/*.md
+!docs/**/*.md
 
 # Tests (not needed in production runtime)
 tests/
