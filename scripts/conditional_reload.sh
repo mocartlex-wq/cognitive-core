@@ -80,8 +80,22 @@ if [ "$worth_logging" = "0" ]; then
     exit 0
 fi
 
+# IPv6 build workaround (2026-05-28): buildkit резолвит registry-1.docker.io
+# по IPv6 → unreachable на РФ VPS → build падает. docker CLI pull use IPv4
+# fallback → primes local cache → build берёт base из cache. Idempotent.
+_prepull_base_images() {
+    # Extract FROM base images из Dockerfile + pull через CLI (IPv4 fallback)
+    local bases
+    bases=$(grep -hiE '^FROM ' "$REPO_DIR"/Dockerfile 2>/dev/null | awk '{print $2}' | grep -v '^scratch$' | sort -u)
+    for img in $bases; do
+        echo "[$(date -Iseconds)] pre-pull base $img (IPv6 build workaround)"
+        docker pull "$img" 2>&1 | tail -1 || echo "  pre-pull $img failed (build may retry)"
+    done
+}
+
 if [ "$restart_full" = "1" ]; then
     echo "[$(date -Iseconds)] full restart (compose-file or env changed)"
+    _prepull_base_images
     docker compose $COMPOSE_FILES up -d --build
     exit 0
 fi
@@ -102,6 +116,7 @@ fi
 
 if [ -n "$services_to_build" ]; then
     echo "[$(date -Iseconds)] rebuilding:$services_to_build"
+    _prepull_base_images
     docker compose $COMPOSE_FILES up -d --build $services_to_build
 elif [ "$rebuild_api" = "1" ] || [ "$rebuild_mcp" = "1" ]; then
     echo "[$(date -Iseconds)] api/mcp rebuild requested but no such services in compose ($COMPOSE_SERVICES) — skipping"
