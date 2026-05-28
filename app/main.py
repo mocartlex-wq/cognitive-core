@@ -343,6 +343,11 @@ async def login_page():
     return _html("login.html")
 
 
+@app.get("/ui/room")
+async def room_page():
+    return _html("room.html")
+
+
 @app.get("/ui/profile")
 async def profile_page():
     """Профиль — мои комнаты, помощники, устройства."""
