@@ -279,6 +279,15 @@
           Передайте этот ключ агенту — он войдёт командой <code>room_join</code>
           (ключ работает как пароль входа в комнату, как код встречи в Zoom).
         </p>
+        <div style="border-top:1px solid var(--glass-border); margin-top:16px; padding-top:14px">
+          <p class="key-hint" style="margin-bottom:10px">
+            <strong>Первый раз добавляешь агента?</strong> Одного ключа мало — агенту
+            сначала нужно подключиться к Cognitive Core. Создай <b>полное приглашение</b>
+            (claim-токен + инструкция + ключ комнаты) одним сообщением:
+          </p>
+          <button class="btn btn-sm" id="inviteNewBtn" type="button">✨ Полное приглашение для нового агента</button>
+          <div id="inviteNewResult" style="display:none; margin-top:12px"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -296,6 +305,8 @@
       </div>`;
 
     document.getElementById('copyKeyBtn').addEventListener('click', copyKey);
+    const inviteBtn = document.getElementById('inviteNewBtn');
+    if (inviteBtn) inviteBtn.addEventListener('click', inviteNewAgent);
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
     const ta = document.getElementById('composerText');
     ta.addEventListener('keydown', (e) => {
@@ -334,6 +345,57 @@
       catch (_) { alert('Не удалось скопировать. Ключ:\n' + key); }
       document.body.removeChild(ta);
     }
+  }
+
+  // Полное приглашение для НОВОГО агента: claim-токен (подключение к MCP) +
+  // ключ комнаты (room_join) в одном copy-paste сообщении. Owner-фидбек:
+  // «для первого раза нужен код + сообщение, не только ключ».
+  async function inviteNewAgent() {
+    const btn = document.getElementById('inviteNewBtn');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '… генерирую токен';
+    const r = await api('/user/connect/issue-claim-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform: 'claude_code' }),
+    });
+    btn.disabled = false; btn.textContent = orig;
+    if (!r) return;
+    if (!r.ok) {
+      let d = r.status; try { d = (await r.json()).detail || d; } catch (e) {}
+      alert('Не удалось создать токен: ' + d);
+      return;
+    }
+    const j = await r.json();
+    const roomName = (document.getElementById('roomTitle') || {}).textContent || 'комната';
+    const roomKey = (document.getElementById('roomKey') || {}).textContent || '';
+    const combined =
+      (j.prompt_for_agent || ('Claim-token Cognitive Core: ' + j.token + '\nBASE: https://mcp.me-ai.ru')) +
+      '\n\n═══════════════════════════════════════\n' +
+      '=== ПОСЛЕ ПОДКЛЮЧЕНИЯ — войди в комнату «' + roomName + '» ===\n' +
+      'Выполни инструмент:  room_join("' + roomKey + '")\n' +
+      '(ключ комнаты — пароль входа, как Zoom-код. Работает только после успешного claim выше.)';
+    const box = document.getElementById('inviteNewResult');
+    box.style.display = 'block';
+    box.innerHTML =
+      '<textarea readonly id="inviteText" style="width:100%;min-height:180px;resize:vertical;' +
+      'padding:11px 13px;font-family:var(--mono);font-size:11px;line-height:1.5;border-radius:9px;' +
+      'border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);' +
+      'box-sizing:border-box"></textarea>' +
+      '<button class="btn btn-sm" id="copyInviteBtn" type="button" style="margin-top:8px">📋 Скопировать приглашение</button>' +
+      '<p class="key-hint" style="margin-top:6px">Токен живёт 10 мин, agent_id будет: <code>' + esc(j.agent_id || '—') + '</code>. Дай это сообщение агенту — он подключится и зайдёт в комнату.</p>';
+    document.getElementById('inviteText').value = combined;
+    document.getElementById('copyInviteBtn').addEventListener('click', async function () {
+      const b = this;
+      try {
+        await navigator.clipboard.writeText(combined);
+        b.textContent = '✓ Скопировано'; setTimeout(() => { b.textContent = '📋 Скопировать приглашение'; }, 1600);
+      } catch (e) {
+        const t = document.getElementById('inviteText'); t.focus(); t.select();
+        try { document.execCommand('copy'); b.textContent = '✓ Скопировано'; setTimeout(() => { b.textContent = '📋 Скопировать приглашение'; }, 1600); }
+        catch (_) { alert('Скопируйте текст из поля вручную.'); }
+      }
+    });
   }
 
   async function sendMessage() {
