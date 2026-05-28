@@ -378,12 +378,14 @@
     const box = document.getElementById('inviteNewResult');
     box.style.display = 'block';
     box.innerHTML =
-      '<textarea readonly id="inviteText" style="width:100%;min-height:180px;resize:vertical;' +
+      '<button class="btn" id="copyInviteBtn" type="button">📋 Скопировать приглашение</button>' +
+      '<details style="margin-top:10px">' +
+      '<summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none;list-style:none">▸ Посмотреть текст (для специалиста)</summary>' +
+      '<textarea readonly id="inviteText" style="width:100%;min-height:180px;resize:vertical;margin-top:8px;' +
       'padding:11px 13px;font-family:var(--mono);font-size:11px;line-height:1.5;border-radius:9px;' +
       'border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);' +
-      'box-sizing:border-box"></textarea>' +
-      '<button class="btn btn-sm" id="copyInviteBtn" type="button" style="margin-top:8px">📋 Скопировать приглашение</button>' +
-      '<p class="key-hint" style="margin-top:6px">Токен живёт 10 мин, agent_id будет: <code>' + esc(j.agent_id || '—') + '</code>. Дай это сообщение агенту — он подключится и зайдёт в комнату.</p>';
+      'box-sizing:border-box"></textarea></details>' +
+      '<p class="key-hint" style="margin-top:8px">Токен живёт 10 мин, agent_id: <code>' + esc(j.agent_id || '—') + '</code>. Жми «Скопировать» и дай агенту — он подключится и зайдёт в комнату.</p>';
     document.getElementById('inviteText').value = combined;
     document.getElementById('copyInviteBtn').addEventListener('click', async function () {
       const b = this;
