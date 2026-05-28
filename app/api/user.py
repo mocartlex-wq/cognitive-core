@@ -109,7 +109,6 @@ async def my_rooms(request: Request):
                   LEFT JOIN room_participants p
                          ON p.room_id = r.id
                  WHERE r.owner_user_id = $1::uuid
-                    OR p.user_id = $1::uuid
                     OR p.agent_id IN (
                         SELECT agent_id FROM agent_states WHERE owner_user_id = $1::uuid
                     )
