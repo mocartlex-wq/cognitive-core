@@ -1,0 +1,34 @@
+# me-ai-edge — локальный edge-процессор медиа для Cognitive Core.
+# Запуск на машине агента:  docker compose up -d --build
+#
+# Security: порт публикуется ТОЛЬКО на 127.0.0.1 — edge недоступен из сети,
+# обращаться к нему может лишь локальный агент на этом же хосте.
+services:
+  edge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: me-ai-edge:0.1.0-stub
+    container_name: me-ai-edge
+    restart: unless-stopped
+    # localhost-only bind: "127.0.0.1:9099:9099", НЕ "9099:9099".
+    ports:
+      - "127.0.0.1:9099:9099"
+    environment:
+      # ${VAR:?msg} → docker compose упадёт с понятной ошибкой, если не задано.
+      COGCORE_SERVER_URL: ${COGCORE_SERVER_URL:?set COGCORE_SERVER_URL (e.g. https://mcp.me-ai.ru)}
+      COGCORE_API_KEY: ${COGCORE_API_KEY:?set COGCORE_API_KEY (per-agent key)}
+      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
+      ALLOWED_UPSTREAM_DOMAINS: ${ALLOWED_UPSTREAM_DOMAINS:-mcp.me-ai.ru,mcp.xn--80aiacb7adkj.xn--p1ai}
+    volumes:
+      # Кэш весов Whisper — скачиваются один раз, переиспользуются между рестартами.
+      - whisper_cache:/data/whisper
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9099/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  whisper_cache:
