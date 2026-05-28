@@ -296,10 +296,12 @@ app.include_router(video_router)
 from app.api.admin_audit import router as admin_audit_router
 from app.api.admin_slo import router as admin_slo_router
 from app.api.billing import router as billing_router  # noqa: E402
+from app.api.webhooks import router as webhooks_router
 
 app.include_router(billing_router)
 app.include_router(admin_slo_router)
 app.include_router(admin_audit_router)
+app.include_router(webhooks_router)
 
 # Unified Agent Onboarding wizard (2026-05-21): /user/connect/* + /user/agents/{id}/verify
 from app.api.connect import router as connect_router
