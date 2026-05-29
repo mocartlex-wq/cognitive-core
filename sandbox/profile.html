@@ -1122,12 +1122,15 @@
         <p style="margin: 14px 0 6px; color: #4cc960; font-weight: 600;">Готово! Ваш API key:</p>
         <div class="api-key-display">${esc(j.api_key)}</div>
         <p class="msg-line">⚠ Сохраните этот ключ — больше его показать нельзя.</p>
+        <p class="msg-line" style="margin-top:12px">⚡ Claude Code — подключите одной командой в терминале на нужной машине:</p>
+        <div class="api-key-display" id="mcpAddCmd" style="white-space:pre-wrap;word-break:break-all;user-select:all">claude mcp add --transport sse cognitive-core https://mcp.me-ai.ru/mcp/sse --header "X-API-Key: ${esc(j.api_key)}"</div>
         <div class="toolbar">
-          <button class="btn btn-sm" onclick="copyKey(this, '${esc(j.api_key)}')">Скопировать ключ</button>
-          <a class="btn btn-sm" href="/ui/connect?agent_id=${encodeURIComponent(j.agent_id)}&step=3" style="background:#ff8c42;color:#0a0e14">🔌 Подключить к платформе</a>
+          <button class="btn btn-sm" onclick="copyToClipboard(document.getElementById('mcpAddCmd').textContent, this)">Скопировать команду</button>
+          <button class="btn secondary btn-sm" onclick="copyKey(this, '${esc(j.api_key)}')">Только ключ</button>
+          <a class="btn btn-sm" href="/ui/connect?agent_id=${encodeURIComponent(j.agent_id)}&step=3" style="background:#ff8c42;color:#0a0e14">🔌 Wizard</a>
           <button class="btn secondary btn-sm" onclick="document.getElementById('newAgentDialog').close(); location.reload();">Готово</button>
         </div>
-        <p class="msg-line" style="margin-top:8px">💡 Wizard поможет вставить ключ в нужное место для Claude Code / ChatGPT / Mobile.</p>`;
+        <p class="msg-line" style="margin-top:8px">💡 Команда уже с ключом — owner запускает её сам, агент конфиг не трогает (обходит guard self-edit).</p>`;
     } else {
       result.style.display = 'block';
       result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
