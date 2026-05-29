@@ -57,6 +57,123 @@ def _wrap_html(title: str, inner_html: str, footer_html: str = "") -> str:
 # ─────────────────────────────────────────────────────────────────────────
 # 1a. OTP-CODE письмо (вход по 6-значному коду) — основной flow с 2026-05-20
 # ─────────────────────────────────────────────────────────────────────────
+# Email-safe «Liquid Glass» каркас OTP-письма (таблицы + inline CSS, без JS,
+# без backdrop-filter как load-bearing). Плейсхолдеры подставляются в otp_code().
+# НЕ f-string — поэтому CSS-фигурные скобки целы.
+_OTP_HTML = """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="ru" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>Код входа в AImail</title>
+  <!--[if mso]>
+  <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+  <![endif]-->
+  <style>
+    body { margin:0; padding:0; width:100% !important; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    table { border-collapse:collapse; mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    a { text-decoration:none; }
+    @supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))) {
+      .glass { -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px); }
+    }
+    .codegrad {
+      background:linear-gradient(135deg,#6366f1,#db2777);
+      -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    }
+    @media only screen and (max-width:620px) {
+      .container { width:100% !important; }
+      .px { padding-left:22px !important; padding-right:22px !important; }
+      .code { font-size:34px !important; letter-spacing:8px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background:#e8ecff;">
+
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all; opacity:0; color:transparent; height:0; width:0; font-size:1px; line-height:1px;">
+    Ваш код входа в AImail: __CODE__. Действует __TTL__, один раз.&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#e8ecff"
+         style="background:#e8ecff; background:radial-gradient(120% 120% at 0% 0%,#e0e7ff 0%,#fbe8f3 45%,#e6f0ff 100%);">
+    <tr>
+      <td align="center" style="padding:36px 16px;">
+
+        <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+        <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; margin:0 auto;">
+
+          <tr>
+            <td class="glass px" bgcolor="#faf9ff"
+                style="background:rgba(255,255,255,0.62); border:1px solid rgba(255,255,255,0.75); border-radius:22px; padding:36px 32px;
+                       box-shadow:0 24px 60px rgba(80,70,160,0.18); text-align:center;
+                       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color:#26203a;">
+
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 18px;">
+                <tr>
+                  <td width="48" height="48" align="center" valign="middle" bgcolor="#7c5cf0"
+                      style="width:48px; height:48px; background:linear-gradient(135deg,#6366f1,#a855f7); border-radius:13px;
+                             color:#ffffff; font-size:22px; line-height:48px; mso-line-height-rule:exactly;">&#9993;</td>
+                </tr>
+              </table>
+
+              <h1 style="margin:0 0 8px; font-size:21px; font-weight:700; color:#26203a;">Код входа в AImail</h1>
+              <p style="margin:0 0 24px; font-size:14px; line-height:1.5; color:#6b6582;">
+                Кто-то запросил вход для<br /><b style="color:#4a4360;">__EMAIL__</b>
+              </p>
+
+              <div class="code codegrad" style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;
+                          font-size:40px; font-weight:800; letter-spacing:12px; color:#6d28d9; padding:6px 0 2px;">__CODE__</div>
+              <p style="margin:6px 0 24px; font-size:12px; color:#8b85a0;">Действует __TTL__&nbsp;·&nbsp;один раз</p>
+
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
+                           href="__LOGIN_URL__"
+                           style="height:50px;v-text-anchor:middle;width:330px;" arcsize="28%" stroke="f" fillcolor="#7c5cf0">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">Войти с этим кодом &#8594;</center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-- -->
+              <a href="__LOGIN_URL__"
+                 style="display:inline-block; background:#7c5cf0; background:linear-gradient(135deg,#6366f1,#a855f7);
+                        color:#ffffff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+                        font-size:15px; font-weight:700; line-height:20px; text-decoration:none; border-radius:14px;
+                        padding:15px 34px; box-shadow:0 12px 26px rgba(124,58,237,0.35);">Войти с этим кодом &#8594;</a>
+              <!--<![endif]-->
+
+              <p style="margin:16px 0 0; font-size:12.5px; line-height:1.55; color:#7a7392;">
+                Кнопка не сработала? Введите код вручную на странице входа<br />
+                <a href="__LOGIN_URL__" style="color:#4f46e5; text-decoration:underline;">__LOGIN_HOST__</a>
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;">
+                <tr><td style="border-top:1px solid rgba(124,58,237,0.14); padding-top:18px; font-size:11.5px; line-height:1.6; color:#9089a3;">
+                  __CONTEXT__
+                </td></tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:20px 12px 4px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; font-size:11px; line-height:1.5; color:#9b95ad;">
+              AImail&nbsp;·&nbsp;me-ai.ru<br />Письмо отправлено автоматически — отвечать на него не нужно.
+            </td>
+          </tr>
+
+        </table>
+        <!--[if mso]></td></tr></table><![endif]-->
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>"""
+
+
 def otp_code(
     *,
     email: str,
@@ -65,27 +182,38 @@ def otp_code(
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> tuple[str, str, str]:
-    """Письмо с одноразовым 6-значным кодом для входа.
+    """Письмо с одноразовым 6-значным кодом для входа (дизайн «Liquid Glass»).
 
-    Возвращает: (subject, plain_text, html)
+    Возвращает: (subject, plain_text, html). Email-safe (таблицы + inline CSS,
+    без JS). Крупный код для ручного ввода + кнопка-ссылка на /ui/login с
+    префиллом (?e=&code=) — автозаполнение на странице входа.
     """
+    from urllib.parse import quote
+
+    try:
+        from app.config import settings
+
+        login_base = (settings.app_url or "https://aimail.art").rstrip("/")
+    except Exception:
+        login_base = "https://aimail.art"
+
     safe_email = escape(email)
     safe_code = escape(code)
     ttl_human = f"{ttl_minutes} минут" if ttl_minutes != 1 else "1 минуту"
 
-    context_lines: list[str] = []
+    login_url = f"{login_base}/ui/login?e={quote(email)}&code={quote(code)}"
+    safe_login_url = escape(login_url, quote=True)
+    login_host = login_base.split("//", 1)[-1].rstrip("/") + "/ui/login"
+
+    # Контекст запроса (IP / устройство) — повышает доверие
+    ctx_parts: list[str] = []
     if ip_address:
-        context_lines.append(f"Адрес запроса: {escape(ip_address)}")
+        ctx_parts.append(f"Запрос с {escape(ip_address)}")
     if user_agent:
-        ua_short = user_agent[:120] + ("…" if len(user_agent) > 120 else "")
-        context_lines.append(f"Устройство: {escape(ua_short)}")
-    context_block = ""
-    if context_lines:
-        context_block = (
-            "<p style=\"font-size:13px;color:#777;margin-top:24px;\">"
-            + "<br>".join(context_lines)
-            + "</p>"
-        )
+        ua_short = user_agent[:80] + ("…" if len(user_agent) > 80 else "")
+        ctx_parts.append(escape(ua_short))
+    ctx_prefix = ("&nbsp;·&nbsp;".join(ctx_parts) + ".<br />") if ctx_parts else ""
+    context_html = ctx_prefix + "Это не вы? Просто игнорируйте письмо — аккаунт не создан."
 
     subject = f"Код входа в AImail: {code}"
 
@@ -98,24 +226,22 @@ def otp_code(
         f"\n"
         f"    {code}\n"
         f"\n"
+        f"Или откройте ссылку (код подставится сам):\n{login_url}\n"
+        f"\n"
         f"Если это были не вы — просто проигнорируйте письмо, аккаунт не создан\n"
         f"и доступа никто не получит.\n"
         f"\n"
         f"— AImail"
     )
 
-    inner = f"""
-          <h1 style="font-size:22px;margin:0 0 16px 0;line-height:1.3;color:#1a1a1a;">Код входа в AImail</h1>
-          <p style="margin:0 0 18px 0;">Здравствуйте! Кто-то запросил вход для адреса <strong>{safe_email}</strong>.</p>
-          <p style="margin:0 0 16px 0;">Введите этот код на странице входа:</p>
-          <div style="margin:18px 0 8px 0;text-align:center;">
-            <div style="display:inline-block;padding:18px 32px;background:#f3f6fb;border:2px solid #d3dce8;border-radius:14px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:8px;color:#1a73e8;">{safe_code}</div>
-          </div>
-          <p style="margin:18px 0 6px 0;font-size:13px;color:#666;text-align:center;">Действителен {ttl_human}, работает один раз.</p>
-          {context_block}
-          <p style="margin:24px 0 0 0;font-size:13px;color:#777;">Если вы не запрашивали вход — просто игнорируйте письмо. Никаких действий не нужно.</p>
-"""
-    html = _wrap_html(subject, inner)
+    html = (
+        _OTP_HTML.replace("__CODE__", safe_code)
+        .replace("__EMAIL__", safe_email)
+        .replace("__TTL__", ttl_human)
+        .replace("__LOGIN_URL__", safe_login_url)
+        .replace("__LOGIN_HOST__", escape(login_host))
+        .replace("__CONTEXT__", context_html)
+    )
     return subject, plain, html
 
 
