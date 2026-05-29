@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -174,8 +174,47 @@ app.mount("/static", StaticFiles(directory=SANDBOX_DIR), name="static")
 _NO_CACHE_HTML = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 
 
+# Единый источник верхнего навбара для sandbox-страниц (E, 2026-05-29).
+# Раньше <nav class="top-nav"> копировался в каждый HTML → «прыжки» при рассинхроне
+# (#143). Теперь страница содержит плейсхолдер <!-- TOPNAV -->, а _html() подставляет
+# render_top_nav(). Rooms-сервис рендерит навбар сам (_ui_top_nav в cognitive-rooms.py).
+_TOPNAV_ITEMS = (
+    ("/", "Главная", "home"),
+    ("/ui/pricing", "Тарифы", "pricing"),
+    ("/ui/team", "AI-чат", "ai-chat"),
+    ("/ui", "Комнаты", "rooms"),
+    ("/ui/profile", "Профиль", "profile"),
+    ("/sandbox", "API", "api"),
+)
+_PAGE_ACTIVE = {
+    "home.html": "home",
+    "pricing.html": "pricing",
+    "index.html": "api",
+    "dashboard.html": "rooms",
+    "profile.html": "profile",
+}
+
+
+def render_top_nav(active: str = "") -> str:
+    parts = ['<nav class="top-nav">']
+    for href, label, key in _TOPNAV_ITEMS:
+        cls = ' class="active"' if key == active else ""
+        parts.append(f'<a href="{href}"{cls}>{label}</a>')
+    parts.append("</nav>")
+    return "".join(parts)
+
+
 def _html(path: str):
-    return FileResponse(os.path.join(SANDBOX_DIR, path), headers=_NO_CACHE_HTML)
+    full = os.path.join(SANDBOX_DIR, path)
+    try:
+        with open(full, encoding="utf-8") as fh:
+            content = fh.read()
+    except OSError:
+        return FileResponse(full, headers=_NO_CACHE_HTML)
+    if "<!-- TOPNAV -->" in content:
+        content = content.replace("<!-- TOPNAV -->", render_top_nav(_PAGE_ACTIVE.get(path, "")))
+        return HTMLResponse(content, headers=_NO_CACHE_HTML)
+    return FileResponse(full, headers=_NO_CACHE_HTML)
 
 
 # Favicon — браузеры автоматически запрашивают /favicon.ico на каждой странице.
