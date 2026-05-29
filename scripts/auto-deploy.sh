@@ -139,6 +139,15 @@ fi
 # уже скачанный FETCH_HEAD через merge --ff-only.
 git merge --ff-only --quiet "$NEW" 2>/dev/null || git pull --ff-only --quiet origin "$BRANCH"
 
+# [skip-deploy] аварийный рычаг: если subject HEAD-коммита содержит "[skip-deploy]",
+# код приземляется в серверный checkout (ff-merge выше), но conditional_reload +
+# smoke пропускаем — то есть в runtime НЕ выкатываем. Следующий обычный коммит
+# выкатит всё накопленное. Использовать для паузы выкатки конкретного изменения.
+if git log -1 --format=%s "$NEW" | grep -qF '[skip-deploy]'; then
+    log "[skip-deploy] marker on ${NEW:0:7} — merged into checkout, skipping reload + smoke"
+    exit 0
+fi
+
 # Применяем изменения через conditional_reload (forward direction PREV → NEW)
 "$REPO_DIR/scripts/conditional_reload.sh" "$PREV" "$NEW"
 
