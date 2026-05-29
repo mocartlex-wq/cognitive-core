@@ -387,6 +387,26 @@
   if (new URLSearchParams(location.search).get('error') === 'expired') {
     setMsg(reqMsg, 'Старая ссылка устарела. Запросите новый код.', 'err');
   }
+
+  // Префилл из ссылки письма «Войти с этим кодом»: ?e=<email>&code=<6 цифр>.
+  // Автозаполняем email + код и показываем шаг 2; вход юзер подтверждает сам
+  // (без автосабмита — чтобы открытие пересланной ссылки не логинило молча).
+  (function prefillFromEmailLink() {
+    const q = new URLSearchParams(location.search);
+    const e = (q.get('e') || q.get('email') || '').trim();
+    const c = (q.get('code') || '').replace(/\D/g, '').slice(0, 6);
+    if (!e) return;
+    emailInput.value = e;
+    if (c.length === 6) {
+      emailEcho.textContent = e;
+      document.getElementById('codeSubtitle').textContent = 'Код из письма подставлен — нажмите «Войти».';
+      goStep(2);
+      codeInputs.forEach((inp, i) => { inp.value = c[i] || ''; });
+      setTimeout(() => { try { vrfBtn.focus(); } catch (_) {} }, 150);
+    } else {
+      setTimeout(() => emailInput.focus(), 100);
+    }
+  })();
 </script>
 <script src="/static/error-reporter.js?v=20260521" defer></script>
 </body>
