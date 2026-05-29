@@ -1322,10 +1322,11 @@ function enterCreatedRoom() {
 def _ui_top_nav(active=""):
     items = [
         ("/", "Главная", "home"),
+        ("/ui/pricing", "Тарифы", "pricing"),
         ("/ui/team", "AI-чат", "ai-chat"),
         ("/ui", "Комнаты", "rooms"),
-        ("/sandbox", "API", "api"),
         ("/ui/profile", "Профиль", "profile"),
+        ("/sandbox", "API", "api"),
     ]
     links = "".join(
         f'<a href="{href}" class="{ "active" if key == active else "" }">{label}</a>'
