@@ -60,7 +60,7 @@ ORCH_SIGN_KEY = os.environ.get(
     "default-orch-key-please-set-in-env-32chars-min-ok-12345",
 )
 
-EXECUTOR_TIMEOUT_S = int(os.environ.get("ORCH_EXEC_TIMEOUT_S", "60"))
+EXECUTOR_TIMEOUT_S = int(os.environ.get("ORCH_EXEC_TIMEOUT_S", "25"))
 EXECUTOR_WAKE_WAIT_S = int(os.environ.get("ORCH_WAKE_WAIT_S", "5"))
 ROUTING_TIMEOUT_S = 12
 SYNTH_TIMEOUT_S = 25
@@ -432,7 +432,20 @@ def display_name_for(agent_id: str) -> str:
 def synthesize(request_text: str, responses: dict[str, dict], proxy_fallback: bool = False) -> str:
     """Merge executor responses into one user-friendly answer."""
     if not responses:
-        return "К сожалению, ни один из помощников сейчас не отвечает. Попробуйте, пожалуйста, позже."
+        # No executor answered (they may be offline) → answer the user directly
+        # via DeepSeek so the chat is always useful instead of a dead end.
+        direct = deepseek_chat(
+            [
+                {"role": "system", "content": "Ты — полезный ассистент Cognitive Core. Отвечай кратко, по делу, на грамотном русском языке."},
+                {"role": "user", "content": request_text[:2000]},
+            ],
+            max_tokens=1000,
+            temperature=0.5,
+            timeout_s=SYNTH_TIMEOUT_S,
+        )
+        if direct and direct.strip():
+            return direct.strip()
+        return "Сейчас не удалось получить ответ. Попробуйте, пожалуйста, ещё раз чуть позже."
 
     sanitized = []
     for agent_id, r in responses.items():
@@ -1262,6 +1275,28 @@ function addMessage(kind, text) {
   return el;
 }
 
+// Fallback when the live SSE stream drops (e.g. proxy timeout): poll the task
+// status until it's done, so the answer is still delivered.
+async function pollTaskUntilDone(taskId, placeholder) {
+  for (let n = 0; n < 80; n++) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const r = await fetch(ORCH_BASE + '/tasks/' + taskId, {headers: {'X-User-Token': token}});
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (d.status === 'completed' || d.status === 'failed') {
+        placeholder.innerHTML = '';
+        placeholder.textContent = d.final_answer || '(пустой ответ)';
+        document.getElementById('sendBtn').disabled = false;
+        return;
+      }
+      placeholder.innerHTML = '<span class="spinner"></span>Обрабатываю…';
+    } catch (e) { /* keep polling */ }
+  }
+  placeholder.textContent = 'Ответ готовится дольше обычного. Загляните чуть позже или обновите страницу.';
+  document.getElementById('sendBtn').disabled = false;
+}
+
 async function sendMessage() {
   const ta = document.getElementById('input');
   const text = ta.value.trim();
@@ -1335,10 +1370,8 @@ async function sendMessage() {
 
   evtSrc.onerror = () => {
     evtSrc.close();
-    if (placeholder.textContent.includes('Принято') || placeholder.textContent.includes('Обрабатываю')) {
-      placeholder.textContent = 'Соединение потеряно. Обновите страницу.';
-    }
-    document.getElementById('sendBtn').disabled = false;
+    // SSE dropped before completion - poll for the answer instead of giving up.
+    pollTaskUntilDone(task_id, placeholder);
   };
 }
 
