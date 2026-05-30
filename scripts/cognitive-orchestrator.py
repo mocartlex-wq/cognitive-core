@@ -302,7 +302,24 @@ def _recall_for_user(user_id, query, top_k=5):
     if not key:
         return ""
     payload = json.dumps({"context": query[:1000], "top_k": top_k}).encode("utf-8")
-    for base in (COGCORE_INTERNAL, COGCORE_BASE):
+    # The app listens only inside the docker network (not host loopback, and the
+    # public .рф domain is slow/flaky from the host). Resolve the cognitive_api
+    # container IP and try it FIRST, then fall back to the configured URLs.
+    bases = []
+    try:
+        out = subprocess.run(
+            ["docker", "inspect", "cognitive_api", "--format",
+             "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip().splitlines()
+        if out and out[0]:
+            bases.append("http://" + out[0] + ":8000")
+    except Exception:
+        pass
+    for b in (COGCORE_INTERNAL, COGCORE_BASE):
+        if b and b not in bases:
+            bases.append(b)
+    for base in bases:
         try:
             req = urllib.request.Request(
                 f"{base}/operative/recall_internal",
