@@ -919,7 +919,7 @@ def _team_call_deepseek(persona_id, user_msg, history=None, cookie=None):
         return None, "DEEPSEEK_API_KEY не установлен. Чат недоступен."
     persona = TEAM_PERSONAS.get(persona_id) or TEAM_PERSONAS["general"]
     sys_prompt = persona["system"] + "\n\nКонтекст (документация):\n\n" + _load_docs_context(max_chars=6000)
-    if persona_id == "memory_guide" and cookie:
+    if persona_id in ("memory_guide", "support") and cookie:
         _recs = _recall_memory(cookie, user_msg)
         _parts = []
         for _r in (_recs or [])[:5]:
