@@ -715,6 +715,40 @@ def extract_user(handler: BaseHTTPRequestHandler) -> str | None:
     return payload.get("user_id") if payload else None
 
 
+def cogcore_session_user(cookie_header: str | None) -> dict | None:
+    """SSO bridge: validate the main-site session cookie (cogcore_session) via
+    cognitive_api /auth/status. Returns {user_id, email, is_admin} if the visitor
+    is already logged in to the main site, else None.
+
+    This is what lets /ui/ask reuse the normal site login — no separate code.
+    The browser sends cogcore_session automatically because /ui/ask and the
+    main site share one origin (mcp.me-ai.ru).
+    """
+    if not cookie_header or "cogcore_session" not in cookie_header:
+        return None
+    for base in (COGCORE_INTERNAL, COGCORE_BASE):
+        if not base:
+            continue
+        try:
+            req = urllib.request.Request(
+                f"{base.rstrip('/')}/auth/status",
+                headers={"Cookie": cookie_header, "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=8) as r:
+                d = json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            log.warning(f"session-login check via {base} failed: {e}")
+            continue
+        if d.get("authenticated") and d.get("user_id"):
+            return {
+                "user_id": d.get("user_id"),
+                "email": d.get("email"),
+                "is_admin": bool(d.get("is_admin")),
+            }
+        return None
+    return None
+
+
 class OrchHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         # quieter logging
@@ -837,6 +871,20 @@ class OrchHandler(BaseHTTPRequestHandler):
                     token = issue_token(user_id, ttl_minutes=24 * 60)  # 24h for owner
                     return json_response(self, 200, {"token": token, "user_id": user_id, "expires_in": 86400})
                 return json_response(self, 401, {"error": "invalid code"})
+
+            if path == "/orchestrator/session-login":
+                # SSO: if the visitor already has a valid main-site session
+                # cookie, issue an orchestrator token automatically — no code.
+                u = cogcore_session_user(self.headers.get("Cookie"))
+                if u:
+                    token = issue_token(u["user_id"], ttl_minutes=24 * 60)
+                    return json_response(self, 200, {
+                        "token": token,
+                        "user_id": u["user_id"],
+                        "email": u.get("email"),
+                        "via": "session",
+                    })
+                return json_response(self, 401, {"error": "no active site session"})
 
             if path == "/orchestrator/ask":
                 user_id = extract_user(self) or body.get("user_id") or "anonymous"
@@ -1088,6 +1136,9 @@ button.send:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .login-overlay button { background: var(--accent); color: white; border: none; padding: 12px 24px; border-radius: 10px; font: inherit; cursor: pointer; }
 .login-overlay .hint { color: var(--muted); font-size: 13px; text-align: center; max-width: 340px; }
+.login-overlay a.login-primary { background: var(--accent); color:#fff; text-decoration:none; padding:13px 28px; border-radius:10px; font-weight:600; font-size:15px; }
+.login-overlay button.login-secondary { background:transparent; color:var(--muted); border:1px solid var(--border); padding:9px 16px; border-radius:10px; font-size:13px; cursor:pointer; }
+.login-overlay .codebox { display:flex; flex-direction:column; gap:10px; align-items:center; width:100%; max-width:300px; }
 
 .spinner {
   display: inline-block;
@@ -1104,11 +1155,15 @@ button.send:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
-<div class="login-overlay" id="login">
-  <h2>Вход</h2>
-  <div class="hint">Введите код доступа. Если не помните — спросите владельца.</div>
-  <input id="loginCode" placeholder="Код доступа" autocomplete="off">
-  <button onclick="doLogin()">Войти</button>
+<div class="login-overlay" id="login" style="display:none">
+  <h2>Вход в помощников</h2>
+  <div class="hint">Несколько ИИ-помощников отвечают на ваши вопросы. Войдите тем же аккаунтом, что и на сайте — отдельный код не нужен.</div>
+  <a class="login-primary" href="/ui/login?next=/ui/ask">Войти через почту</a>
+  <button class="login-secondary" type="button" onclick="toggleCodeLogin()">У меня есть код доступа владельца</button>
+  <div class="codebox" id="codeBox" style="display:none">
+    <input id="loginCode" placeholder="Код доступа" autocomplete="off">
+    <button onclick="doLogin()">Подтвердить код</button>
+  </div>
 </div>
 
 <header>
@@ -1132,8 +1187,31 @@ const ORCH_BASE = location.origin.replace(/\\/$/,'') + '/orchestrator';
 let token = localStorage.getItem('orch_token');
 let userId = localStorage.getItem('orch_user') || 'owner';
 
-if (!token) document.getElementById('login').style.display = 'flex';
-else { document.getElementById('login').style.display = 'none'; loadHistory(); }
+init();
+async function init() {
+  if (token) { hideLogin(); loadHistory(); return; }
+  // SSO: reuse the main-site session (same login as the rest of the site).
+  try {
+    const r = await fetch(ORCH_BASE + '/session-login', {method: 'POST', credentials: 'same-origin'});
+    if (r.ok) {
+      const d = await r.json();
+      token = d.token;
+      localStorage.setItem('orch_token', token);
+      if (d.user_id) { userId = d.user_id; localStorage.setItem('orch_user', userId); }
+      hideLogin();
+      loadHistory();
+      return;
+    }
+  } catch (e) { /* fall through to manual login */ }
+  showLoginForm();
+}
+function hideLogin() { document.getElementById('login').style.display = 'none'; }
+function showLoginForm() { document.getElementById('login').style.display = 'flex'; }
+function toggleCodeLogin() {
+  const b = document.getElementById('codeBox');
+  b.style.display = (b.style.display === 'none' || !b.style.display) ? 'flex' : 'none';
+  if (b.style.display === 'flex') document.getElementById('loginCode').focus();
+}
 
 async function doLogin() {
   const code = document.getElementById('loginCode').value.trim();
@@ -1148,7 +1226,8 @@ async function doLogin() {
     const d = await r.json();
     token = d.token;
     localStorage.setItem('orch_token', token);
-    document.getElementById('login').style.display = 'none';
+    if (d.user_id) { userId = d.user_id; localStorage.setItem('orch_user', userId); }
+    hideLogin();
     loadHistory();
   } catch (e) { alert('Ошибка входа: ' + e); }
 }
