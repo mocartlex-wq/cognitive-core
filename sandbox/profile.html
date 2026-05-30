@@ -772,7 +772,9 @@
       const machineDot = m.any_online
         ? '<span title="Есть онлайн агент" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4cc960;box-shadow:0 0 8px rgba(76,201,96,0.8);margin-right:8px;vertical-align:middle"></span>'
         : '<span title="Нет онлайн агентов" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#444;margin-right:8px;vertical-align:middle"></span>';
-      const fp = m.machine_fingerprint ? ` <span class="meta" style="font-family:var(--mono);font-size:11px;color:var(--glass-text-dim)">fp:${esc(m.machine_fingerprint.slice(0,8))}</span>` : '';
+      // fp-бейдж: ярче и с фоном, чтобы машины с ОДИНАКОВЫМ именем (напр. два
+      // «Chrome on Windows») были различимы. Дубль-имена встречаются, fp — уникален.
+      const fp = m.machine_fingerprint ? ` <span class="meta" style="font-family:var(--mono);font-size:11px;color:#88c5ff;background:rgba(88,166,255,0.12);border:1px solid rgba(88,166,255,0.25);border-radius:6px;padding:1px 6px">fp:${esc(m.machine_fingerprint.slice(0,8))}</span>` : '';
       const agentsHtml = m.agents.map(a => {
         const createdISO = a.updated_at || a.last_heartbeat_at || '';
         const createdFull = createdISO ? fmtFullDate(createdISO) : '—';
@@ -901,12 +903,19 @@
       else { b.onclick = onClick; }
       return b;
     };
+    // Считаем дубли имён, чтобы у одинаковых машин fp был особенно заметен.
+    const labelCounts = {};
+    machines.forEach(m => { const k = (m.machine_label || 'Машина'); labelCounts[k] = (labelCounts[k] || 0) + 1; });
     machines.forEach(m => {
       const fpShort = (m.machine_fingerprint || '').slice(0, 8);
       const isHere = (m.agents || []).some(a => a.agent_id === agentId);
+      const dup = labelCounts[(m.machine_label || 'Машина')] > 1;
+      // fp-бейдж синим/моно; у дублей — жирнее, чтобы различать одинаковые имена.
+      const fpBadge = '<span style="font-family:var(--mono);color:#88c5ff;background:rgba(88,166,255,0.12);border:1px solid rgba(88,166,255,0.25);border-radius:6px;padding:1px 6px;' + (dup ? 'font-weight:700' : '') + '">fp:' + fpShort + '</span>';
+      const sub = fpBadge + (isHere ? ' <span style="color:#4cc960">· сейчас здесь</span>' : '') + (dup ? ' <span style="opacity:.7">(одинаковое имя — смотрите fp)</span>' : '');
       list.appendChild(mkBtn(
         '🖥️ ' + esc(m.machine_label || 'Машина'),
-        'fp:' + fpShort + (isHere ? ' · сейчас здесь' : ''),
+        sub,
         () => applyMove(agentId, { move_fingerprint: m.machine_fingerprint, move_label: m.machine_label || null }),
         isHere
       ));
