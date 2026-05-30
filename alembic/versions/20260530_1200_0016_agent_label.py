@@ -5,13 +5,13 @@
 
 machine_label остаётся атрибутом ГРУППЫ машины; agent_label — индивидуальный.
 
-Revision ID: 0016_agent_label
-Revises: 0015_user_webhooks
+Revision ID: 0016
+Revises: 0015
 """
 from alembic import op
 
-revision = "0016_agent_label"
-down_revision = "0015_user_webhooks"
+revision = "0016"
+down_revision = "0015"
 branch_labels = None
 depends_on = None
 
