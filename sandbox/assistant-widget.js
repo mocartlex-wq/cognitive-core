@@ -70,8 +70,12 @@
   ".cogasst-pbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--glass-border,rgba(255,255,255,.1));}" +
   ".cogasst-pbar label{font-size:11.5px;opacity:.6;flex:0 0 auto;}" +
   ".cogasst-pbar select{flex:1;font:inherit;font-size:13px;padding:7px 10px;border-radius:10px;cursor:pointer;" +
-    "background:var(--glass-bg-light,rgba(255,255,255,.06));color:var(--glass-text,#e9edf5);" +
+    // Solid colours (NOT translucent): the native option popup renders on the
+    // browser's own background — translucent/inherited light text became
+    // white-on-white and unreadable. Explicit dark bg + light text fixes it.
+    "background:#1b1f2a;color:#e9edf5;" +
     "border:1px solid var(--glass-border,rgba(255,255,255,.14));-webkit-appearance:none;appearance:none;}" +
+  ".cogasst-pbar option{background:#1b1f2a;color:#e9edf5;}" +
   ".cogasst-pbar select:focus{outline:none;border-color:#6366f1;}" +
   ".cogasst-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}" +
   ".cogasst-msg{max-width:86%;padding:9px 12px;border-radius:13px;white-space:pre-wrap;word-wrap:break-word;}" +
