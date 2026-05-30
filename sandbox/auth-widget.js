@@ -138,10 +138,20 @@
   }
 
   function findContainer() {
-    // Предпочитаем .top-status (стандартный контейнер top-bar)
-    return document.querySelector('.top-status') ||
-           document.querySelector('.top-nav') ||
-           document.querySelector('.top-bar');
+    // Предпочитаем .top-status (стандартный контейнер top-bar).
+    const status = document.querySelector('.top-status');
+    if (status) return status;
+    // Если у страницы нет .top-status (напр. pricing) — НЕ суём аватар в .top-nav:
+    // .top-nav абсолютно центрирован, лишний ребёнок сдвигает меню («прыжок» при
+    // переходах). Вместо этого создаём .top-status внутри .top-bar.
+    const bar = document.querySelector('.top-bar');
+    if (bar) {
+      const ts = document.createElement('div');
+      ts.className = 'top-status';
+      bar.appendChild(ts);
+      return ts;
+    }
+    return document.querySelector('.top-nav') || document.body;
   }
 
   function renderLoggedOut(container) {
