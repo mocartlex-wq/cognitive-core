@@ -427,6 +427,53 @@ def list_rooms_admin():
 import urllib.request as _ureq
 import urllib.error as _uerr
 
+_MEM_HEADER = "ДОСТУП К ПАМЯТИ ПОДКЛЮЧЁН. Реальные сохранённые записи пользователя ниже — опирайся на них как на факты, не выдумывай сверх:"
+_COGCORE_API_IP = None
+
+
+def _api_base():
+    """Resolve cognitive_api container IP (rooms runs on host; same trick as PG)."""
+    global _COGCORE_API_IP
+    if _COGCORE_API_IP:
+        return "http://" + _COGCORE_API_IP + ":8000"
+    try:
+        out = subprocess.run(
+            ["docker", "inspect", "cognitive_api", "--format",
+             "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip().splitlines()
+        if out and out[0]:
+            _COGCORE_API_IP = out[0]
+            return "http://" + _COGCORE_API_IP + ":8000"
+    except Exception:
+        pass
+    return None
+
+
+def _recall_memory(cookie, query, top_k=5):
+    """Owner-scoped recall via forwarded session cookie. [] on any failure."""
+    if not cookie or not query:
+        return []
+    global _COGCORE_API_IP
+    payload = json.dumps({"context": query[:1000], "top_k": top_k}).encode()
+    for _attempt in (1, 2):
+        base = _api_base()
+        if not base:
+            return []
+        try:
+            req = _ureq.Request(
+                base + "/operative/recall_ui", data=payload, method="POST",
+                headers={"Content-Type": "application/json", "Cookie": cookie},
+            )
+            with _ureq.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            recs = data.get("results") or []
+            return recs if isinstance(recs, list) else []
+        except Exception:
+            _COGCORE_API_IP = None  # api IP may have changed (rebuild) -> re-resolve
+    return []
+
+
 _DOCS_CACHE = None
 _DOCS_CACHE_TS = 0
 
@@ -865,13 +912,30 @@ TEAM_PERSONAS = {
 }
 
 
-def _team_call_deepseek(persona_id, user_msg, history=None):
+def _team_call_deepseek(persona_id, user_msg, history=None, cookie=None):
     """Call DeepSeek with persona-specific system prompt + cached docs context."""
     api_key = get_deepseek_key()
     if not api_key:
         return None, "DEEPSEEK_API_KEY не установлен. Чат недоступен."
     persona = TEAM_PERSONAS.get(persona_id) or TEAM_PERSONAS["general"]
     sys_prompt = persona["system"] + "\n\nКонтекст (документация):\n\n" + _load_docs_context(max_chars=6000)
+    if persona_id == "memory_guide" and cookie:
+        _recs = _recall_memory(cookie, user_msg)
+        _parts = []
+        for _r in (_recs or [])[:5]:
+            _c = _r.get("content") or {}
+            if isinstance(_c, dict):
+                _txt = (_c.get("summary") or _c.get("text") or _c.get("title")
+                        or _c.get("fact") or _c.get("pattern") or "")
+                if not _txt:
+                    _vals = [str(_v) for _v in _c.values() if _v]
+                    _txt = "; ".join(_vals)[:300] if _vals else ""
+            else:
+                _txt = str(_c)[:300]
+            if _txt:
+                _parts.append("- [" + str(_r.get("domain") or "") + "] " + str(_txt)[:300])
+        if _parts:
+            sys_prompt = sys_prompt + "\n\n" + _MEM_HEADER + "\n" + "\n".join(_parts)
     messages = [{"role": "system", "content": sys_prompt}]
     if history:
         for h in history[-8:]:
@@ -1652,7 +1716,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if not msg:
                         self._send(400, {"error": "missing message"})
                         return
-                    text, err = _team_call_deepseek(persona, msg, history)
+                    text, err = _team_call_deepseek(persona, msg, history, cookie=self.headers.get("Cookie"))
                     if err:
                         self._send(200, {"error": err})
                     else:
