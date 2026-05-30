@@ -1398,8 +1398,10 @@ if ('serviceWorker' in navigator) {
 
 
 SERVICE_WORKER_JS = """// Cognitive Core PWA service worker
-const CACHE = 'cogcore-orch-v1';
-const ASSETS = ['/ui/ask', '/manifest.json'];
+// v2: navigation docs are NETWORK-FIRST. v1 cached /ui/ask cache-first at scope
+// '/', which pinned a stale page (users kept seeing old chat UI even after fixes).
+const CACHE = 'cogcore-orch-v2';
+const ASSETS = ['/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => null)));
@@ -1407,26 +1409,42 @@ self.addEventListener('install', e => {
 });
 
 self.addEventListener('activate', e => {
+  // Purge ALL old caches (incl. stale v1 /ui/ask) then take control immediately.
   e.waitUntil(
     caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // network-first for API
+  const req = e.request;
+  const url = new URL(req.url);
+  // API — always straight to network.
   if (url.pathname.startsWith('/orchestrator/')) {
-    e.respondWith(fetch(e.request).catch(() => new Response('{"error":"offline"}', {headers: {'Content-Type':'application/json'}})));
+    e.respondWith(fetch(req).catch(() => new Response('{"error":"offline"}', {headers: {'Content-Type':'application/json'}})));
     return;
   }
-  // cache-first for static UI
+  // HTML documents — NETWORK-FIRST (fixes stale page); cache is offline fallback only.
+  if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
+    e.respondWith(
+      fetch(req).then(resp => {
+        const copy = resp.clone();
+        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => null);
+        return resp;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+  // Other assets — stale-while-revalidate: fast from cache, refresh in background.
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
-      const copy = resp.clone();
-      caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => null);
-      return resp;
-    }))
+    caches.match(req).then(cached => {
+      const network = fetch(req).then(resp => {
+        const copy = resp.clone();
+        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => null);
+        return resp;
+      }).catch(() => cached);
+      return cached || network;
+    })
   );
 });
 
