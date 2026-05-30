@@ -327,6 +327,47 @@ async def _search_redis_vector(query_vec: list[float], domain: str, top_k: int =
         return []
 
 
+async def recall_any_domain(
+    query: str,
+    top_k: int = 5,
+    owner_user_id: str | None = None,
+) -> list[dict]:
+    """Domain-agnostic KNN recall over the owner's L3 knowledge (all domains).
+
+    Used by the in-product 'Pamyat' assistant, where a chat question does not
+    map to a single domain. Strictly owner-scoped; returns [] if owner unknown.
+    """
+    if not owner_user_id:
+        return []
+    query_vec = await embed_text(query)
+    qvec = _vec_to_pg(query_vec)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, domain, knowledge_type, content,
+                   (embedding <=> $1::vector) AS distance
+            FROM l3_master_knowledge
+            WHERE owner_user_id = $2::uuid AND effective_to IS NULL
+                  AND embedding IS NOT NULL
+            ORDER BY embedding <=> $1::vector
+            LIMIT $3
+            """,
+            qvec, owner_user_id, top_k,
+        )
+    out = []
+    for k in rows:
+        kd = dict(k)
+        out.append({
+            "id": str(kd["id"]),
+            "domain": kd["domain"],
+            "knowledge_type": kd.get("knowledge_type", ""),
+            "content": _parse_jsonb(kd["content"]),
+            "distance": float(kd["distance"]),
+        })
+    return out
+
+
 async def build_operative(
     query: str,
     domain: str,
