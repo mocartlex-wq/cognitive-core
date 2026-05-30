@@ -181,7 +181,9 @@ _NO_CACHE_HTML = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 _TOPNAV_ITEMS = (
     ("/", "Главная", "home"),
     ("/ui/pricing", "Тарифы", "pricing"),
-    ("/ui/team", "AI-чат", "ai-chat"),
+    # «AI-чат» (/ui/team) убран из меню 2026-05-30: личный ассистент теперь —
+    # плавающее окно (на всех страницах), а командные чаты — «Комнаты».
+    # Страница /ui/team остаётся доступной по прямой ссылке.
     ("/ui", "Комнаты", "rooms"),
     ("/ui/profile", "Профиль", "profile"),
     ("/sandbox", "API", "api"),
