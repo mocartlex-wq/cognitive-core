@@ -24,14 +24,14 @@
   var authed = false, busy = false, opened = false, greeted = false;
 
   // Выбор помощника. «auto» — оркестратор (несколько ИИ, нужен вход).
-  // Остальные — конкретные персоны через /ui/team/chat (синхронно, без входа).
+  // Остальные — персоны через /ui/team/chat (синхронно, без входа).
+  // Роли — про РАБОТУ С ПАМЯТЬЮ (продукт), не про разработку сайта.
   var PERSONAS = [
-    { id: "auto",      label: "✨ Авто (несколько ИИ)" },
-    { id: "developer", label: "💻 Разработчик" },
-    { id: "designer",  label: "🎨 UX/UI дизайнер" },
-    { id: "content",   label: "✍️ Контент-редактор" },
-    { id: "security",  label: "🔐 Безопасник" },
-    { id: "support",   label: "📖 Поддержка пользователей" },
+    { id: "auto",         label: "✨ Авто (несколько ИИ)" },
+    { id: "memory_guide", label: "🧠 По работе с памятью" },
+    { id: "memory_setup", label: "⚙️ Настройка и подключение" },
+    { id: "support",      label: "📖 Поддержка" },
+    { id: "general",      label: "💬 Общий помощник" },
   ];
   var persona = localStorage.getItem("cogasst_persona") || "auto";
   if (!PERSONAS.some(function (p) { return p.id === persona; })) persona = "auto";

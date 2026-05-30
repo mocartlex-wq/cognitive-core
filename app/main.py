@@ -223,7 +223,7 @@ def _html(path: str):
 # расширяемое под будущие инструменты. Инжектится скриптом перед </body> на
 # каждой выдаваемой странице. Сам виджет (sandbox/assistant-widget.js) скрывается
 # на /ui/ask и /ui/login, общается с оркестратором по SSO-cookie сайта.
-_ASSISTANT_WIDGET_TAG = '<script src="/static/assistant-widget.js?v=20260530c" defer></script>'
+_ASSISTANT_WIDGET_TAG = '<script src="/static/assistant-widget.js?v=20260530d" defer></script>'
 
 
 def _inject_assistant_widget(content: str) -> str:
