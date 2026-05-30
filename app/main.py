@@ -213,8 +213,23 @@ def _html(path: str):
         return FileResponse(full, headers=_NO_CACHE_HTML)
     if "<!-- TOPNAV -->" in content:
         content = content.replace("<!-- TOPNAV -->", render_top_nav(_PAGE_ACTIVE.get(path, "")))
-        return HTMLResponse(content, headers=_NO_CACHE_HTML)
-    return FileResponse(full, headers=_NO_CACHE_HTML)
+    content = _inject_assistant_widget(content)
+    return HTMLResponse(content, headers=_NO_CACHE_HTML)
+
+
+# Плавающий ассистент — компактное окно поверх любой страницы (как у Claude),
+# расширяемое под будущие инструменты. Инжектится скриптом перед </body> на
+# каждой выдаваемой странице. Сам виджет (sandbox/assistant-widget.js) скрывается
+# на /ui/ask и /ui/login, общается с оркестратором по SSO-cookie сайта.
+_ASSISTANT_WIDGET_TAG = '<script src="/static/assistant-widget.js?v=20260530" defer></script>'
+
+
+def _inject_assistant_widget(content: str) -> str:
+    if "assistant-widget.js" in content:
+        return content
+    if "</body>" in content:
+        return content.replace("</body>", _ASSISTANT_WIDGET_TAG + "</body>", 1)
+    return content
 
 
 # Favicon — браузеры автоматически запрашивают /favicon.ico на каждой странице.
