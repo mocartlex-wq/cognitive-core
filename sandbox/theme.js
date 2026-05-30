@@ -55,7 +55,7 @@
     if (document.querySelector('.top-bar, .top-status')) {
       ensureScript('/static/auth-widget.js?v=20260522', '__ccAuthWidgetLoaded');
     }
-    ensureScript('/static/error-reporter.js?v=20260521', '__ccErrorReporterLoaded');
+    ensureScript('/static/error-reporter.js?v=20260530', '__ccErrorReporterLoaded');
   });
 
   // Inject neuron background и icon sprite

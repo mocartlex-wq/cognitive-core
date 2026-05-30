@@ -1,6 +1,6 @@
 /* Cognitive Core — Frontend error reporter
  *
- * Подключение: <script src="/static/error-reporter.js?v=20260520" defer></script>
+ * Подключение: <script src="/static/error-reporter.js?v=20260530" defer></script>
  *
  * Ловит:
  *   • window.onerror — синхронные JS-ошибки (TypeError, ReferenceError, и т.д.)
@@ -145,9 +145,18 @@
       return;
     }
     const msg = String(e.message || e.error || 'unknown');
-    // Та же фильтрация AbortError что и в unhandledrejection — пропускаем
-    if (/transition was skipped|resizeobserver loop|signal is aborted/i.test(msg)) return;
+    // Та же фильтрация AbortError что и в unhandledrejection — пропускаем.
+    // "transition was aborted because of invalid state" — это View Transitions API
+    // когда быстро кликают по ссылкам подряд (by-design, не баг), вариант "skipped".
+    if (/transition was (skipped|aborted)|resizeobserver loop|signal is aborted|invalid state/i.test(msg)) return;
     if (e.error && e.error.name === 'AbortError' && /transition|aborted|signal/i.test(msg)) return;
+
+    // Пустые синтетические error-события (cross-origin "Script error.", или
+    // event без message/stack/filename) не несут полезной информации — line 0,
+    // stack null, source "" → в БД попадает бесполезный "unknown". Дропаем.
+    const hasDetail = (e.message && String(e.message).trim() && String(e.message) !== 'unknown') ||
+                      (e.error && e.error.stack) || e.filename;
+    if (!hasDetail) return;
 
     send({
       message: msg.slice(0, 1000),
@@ -166,7 +175,8 @@
   //   AbortError: signal is aborted — отмена fetch при unload страницы.
   //   ResizeObserver loop limit exceeded — известный chrome бенайн warning.
   const BENIGN_REJECTIONS = [
-    /transition was skipped/i,
+    /transition was (skipped|aborted)/i,
+    /invalid state/i,
     /aborted by the user/i,
     /resizeobserver loop/i,
     /signal is aborted/i,
