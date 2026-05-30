@@ -761,6 +761,7 @@
     }
     // v3 group by machine — collapsible cards
     const machines = j.machines || [{machine_label: 'Все', agents: j.items, any_online: false}];
+    window.__machines = machines;  // для moveAgent: список целевых машин
     const html = machines.map((m, idx) => {
       const machineDot = m.any_online
         ? '<span title="Есть онлайн агент" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4cc960;box-shadow:0 0 8px rgba(76,201,96,0.8);margin-right:8px;vertical-align:middle"></span>'
@@ -769,15 +770,25 @@
       const agentsHtml = m.agents.map(a => {
         const createdISO = a.updated_at || a.last_heartbeat_at || '';
         const createdFull = createdISO ? fmtFullDate(createdISO) : '—';
+        // Отображаемое имя: agent_label если задано, иначе agent_id. При наличии
+        // label показываем настоящий id мелким подзаголовком (он = ключ подключения).
+        const titleName = a.agent_label ? esc(a.agent_label) : esc(a.agent_id);
+        const idSub = a.agent_label
+          ? ` <span class="meta" style="font-family:var(--mono);font-size:11px;color:var(--glass-text-dim)">(${esc(a.agent_id)})</span>`
+          : '';
+        const aidJs = esc(a.agent_id).replace(/'/g, "&#39;");
+        const curLabelJs = esc(a.agent_label || '').replace(/'/g, "&#39;");
         return `
         <details style="margin-left:12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:14px;padding:0">
           <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;gap:14px;align-items:center" data-agent-id="${esc(a.agent_id)}" onclick="loadAgentEvents(event, '${esc(a.agent_id)}')">
             <div style="flex:1;min-width:0">
-              <div class="name">${agentDot(a)}${esc(a.agent_id)} ${agentChip(a)}</div>
+              <div class="name">${agentDot(a)}${titleName} ${agentChip(a)}${idSub}</div>
               <div class="meta">${esc(a.project || '—')} · ${a.total_events || 0} событий · создан ${esc(createdFull)} · ${a.last_mcp_connect_at ? 'MCP ' + fmtDate(a.last_mcp_connect_at) : 'MCP никогда'}</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
+              <button class="btn secondary btn-sm" title="Переименовать помощника (отображаемое имя)" onclick="event.stopPropagation();event.preventDefault();renameAgent('${aidJs}','${curLabelJs}')">✏️</button>
+              <button class="btn secondary btn-sm" title="Перенести помощника на другую машину" onclick="event.stopPropagation();event.preventDefault();moveAgent('${aidJs}')">⇄</button>
               <button class="btn danger btn-sm" title="Удалить помощника + revoke ключи" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc(a.agent_id)}')">🗑️</button>
               <span class="meta" style="color:var(--glass-text-dim)">▾</span>
             </div>
@@ -834,6 +845,48 @@
       const e = await r.json();
       alert(`Ошибка: ${e.detail || r.status}`);
     }
+  };
+
+  // Переименовать КОНКРЕТНОГО помощника (отображаемое имя). agent_id и api_key
+  // НЕ меняются — подключение продолжает работать.
+  window.renameAgent = async function(agentId, currentLabel) {
+    const v = prompt('Отображаемое имя помощника (например «Серверный исполнитель»).\nПусто — вернуть исходный id «' + agentId + '».', currentLabel || '');
+    if (v === null) return;
+    const r = await api(`/user/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_label: v.trim() || '' }),
+    });
+    if (!r) return;
+    if (r.ok) { loadAgents(); }
+    else { const e = await r.json().catch(()=>({})); alert(`Ошибка: ${e.detail || r.status}`); }
+  };
+
+  // Перенести помощника в другую машину-группу (метка/организация).
+  // Для РЕАЛЬНОГО переезда на другой сервер — переустановить MCP-коннектор с тем
+  // же ключом на той машине (см. инструкцию); метка обновится сама по fingerprint.
+  window.moveAgent = async function(agentId) {
+    const machines = (window.__machines || []).filter(m => m.machine_fingerprint);
+    const opts = machines.map((m, i) => `${i + 1}) ${m.machine_label || 'Машина'}  [fp:${(m.machine_fingerprint || '').slice(0,8)}]`);
+    const menu = 'Перенести «' + agentId + '» на машину:\n\n' + opts.join('\n') + '\n0) Без машины\n\nВведите номер:';
+    const ans = prompt(menu, '');
+    if (ans === null) return;
+    const n = parseInt((ans || '').trim(), 10);
+    if (Number.isNaN(n)) { alert('Нужен номер из списка.'); return; }
+    let bodyObj;
+    if (n === 0) bodyObj = { move_fingerprint: '' };
+    else if (n >= 1 && n <= machines.length) {
+      const t = machines[n - 1];
+      bodyObj = { move_fingerprint: t.machine_fingerprint, move_label: t.machine_label || null };
+    } else { alert('Нет такого номера.'); return; }
+    const r = await api(`/user/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj),
+    });
+    if (!r) return;
+    if (r.ok) { loadAgents(); }
+    else { const e = await r.json().catch(()=>({})); alert(`Ошибка: ${e.detail || r.status}`); }
   };
 
   // v3+: lazy-load событий конкретного agent при раскрытии card
