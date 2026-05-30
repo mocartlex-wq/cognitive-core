@@ -414,7 +414,7 @@ async def my_agents(request: Request):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT agent_id, current_task, project, machine, capabilities,
+            SELECT agent_id, agent_label, current_task, project, machine, capabilities,
                    last_heartbeat_at, total_events, total_checkpoints, updated_at,
                    last_mcp_connect_at, last_mcp_disconnect_at,
                    first_mcp_connect_at,
@@ -708,17 +708,26 @@ class PatchAgentBody(BaseModel):
     machine_label: str | None = Field(None, max_length=128)
     description: str | None = Field(None, max_length=300)
     project: str | None = Field(None, max_length=64)
+    # Per-agent переименование (отображаемое имя помощника, НЕ agent_id).
+    agent_label: str | None = Field(None, max_length=128)
+    # «Перенос» помощника в другую машину-группу: задаём целевые
+    # machine_fingerprint + machine_label именно этому агенту (не broadcast).
+    # move_fingerprint="" (пустая строка) → перенести в «Без машины» (NULL).
+    move_fingerprint: str | None = Field(None, max_length=32)
+    move_label: str | None = Field(None, max_length=128)
 
 
 @router.patch("/agents/{agent_id}")
 async def patch_agent(agent_id: str, body: PatchAgentBody, request: Request):
-    """Переименовать машину / описание helper-а. Только owner может.
+    """Переименовать машину / помощника / описание, или перенести в др. машину.
 
     machine_label — общий атрибут группы агентов с одинаковым machine_fingerprint
     (UI карандаш висит на шапке машины). При изменении machine_label
     обновляем ВСЕ строки этого fingerprint у этого owner-а, иначе grouping
     в /agents показывает разный label у разных агентов одной машины (race).
-    description / project — per-agent атрибуты, обновляются только текущий row.
+    agent_label / description / project — per-agent, обновляется только этот row.
+    move_fingerprint/move_label — «перенос» этого агента в другую машину-группу
+    (per-agent, не broadcast). Пустой move_fingerprint → группа «Без машины».
     """
     user = await require_user(request)
     pool = await get_pool()
@@ -735,6 +744,47 @@ async def patch_agent(agent_id: str, body: PatchAgentBody, request: Request):
         fingerprint = row["machine_fingerprint"]
 
         rows_changed = 0
+
+        # 0a) agent_label → per-agent (переименование конкретного помощника)
+        if body.agent_label is not None:
+            res = await conn.execute(
+                "UPDATE agent_states SET agent_label = $1, updated_at = NOW() "
+                "WHERE agent_id = $2",
+                body.agent_label.strip() or None, agent_id,
+            )
+            try:
+                rows_changed += int(res.split()[-1])
+            except (ValueError, IndexError):
+                pass
+
+        # 0b) перенос в другую машину-группу (per-agent)
+        if body.move_fingerprint is not None:
+            target_fp = body.move_fingerprint.strip() or None
+            if target_fp is not None:
+                # валидируем: целевая группа должна принадлежать этому owner-у
+                # (нельзя «перенести» в чужой fingerprint). Берём её label если
+                # move_label не задан явно.
+                tgt = await conn.fetchrow(
+                    "SELECT machine_label FROM agent_states "
+                    "WHERE owner_user_id = $1 AND machine_fingerprint = $2 LIMIT 1",
+                    user.user_id, target_fp,
+                )
+                target_label = (body.move_label.strip() if body.move_label else None) or (
+                    tgt["machine_label"] if tgt else None
+                ) or "Машина"
+            else:
+                target_label = None  # «Без машины»
+            res = await conn.execute(
+                "UPDATE agent_states "
+                "SET machine_fingerprint = $1, machine_label = $2, updated_at = NOW() "
+                "WHERE agent_id = $3 AND owner_user_id = $4",
+                target_fp, target_label, agent_id, user.user_id,
+            )
+            try:
+                rows_changed += int(res.split()[-1])
+            except (ValueError, IndexError):
+                pass
+
         # 1) machine_label → broadcast to entire machine group (если есть fingerprint)
         if body.machine_label is not None:
             if fingerprint:
