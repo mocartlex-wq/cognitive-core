@@ -29,9 +29,7 @@
   var PERSONAS = [
     { id: "auto",         label: "✨ Авто (несколько ИИ)" },
     { id: "memory_guide", label: "🧠 По работе с памятью" },
-    { id: "memory_setup", label: "⚙️ Настройка и подключение" },
     { id: "support",      label: "📖 Поддержка" },
-    { id: "general",      label: "💬 Общий помощник" },
   ];
   var persona = localStorage.getItem("cogasst_persona") || "auto";
   if (!PERSONAS.some(function (p) { return p.id === persona; })) persona = "auto";
