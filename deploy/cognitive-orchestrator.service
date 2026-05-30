@@ -1,0 +1,20 @@
+[Unit]
+Description=Cognitive Orchestrator (Receiver/Executors/Synthesizer, port 9099)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/cognitive-core
+# Real env file (secrets) lives at /etc/cognitive-orchestrator.env (chmod 600, NOT in git).
+# Template: deploy/cognitive-orchestrator.env.example
+EnvironmentFile=/etc/cognitive-orchestrator.env
+ExecStart=/opt/cognitive-core/deploy/cognitive-orchestrator-launch.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
