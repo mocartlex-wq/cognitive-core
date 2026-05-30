@@ -293,6 +293,48 @@ def route_task(request_text: str, available: list[dict]) -> tuple[list[str], str
 
 
 # ─── Stage 1.3: Dispatch to executors ─────────────────────────────────────
+def _recall_for_user(user_id, query, top_k=5):
+    """Owner-scoped memory recall for the Auto path. Returns a formatted snippet
+    block (str) or empty string. Trusted internal call: agent key + X-Owner-User-Id."""
+    if not user_id or user_id == "anonymous" or not query:
+        return ""
+    key = os.environ.get("ORCH_KEY") or get_agent_key("cognitive-core-laptop")
+    if not key:
+        return ""
+    payload = json.dumps({"context": query[:1000], "top_k": top_k}).encode("utf-8")
+    for base in (COGCORE_INTERNAL, COGCORE_BASE):
+        try:
+            req = urllib.request.Request(
+                f"{base}/operative/recall_internal",
+                data=payload,
+                headers={
+                    "X-API-Key": key,
+                    "X-Owner-User-Id": user_id,
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as r:
+                d = json.loads(r.read().decode("utf-8"))
+            recs = d.get("results") or []
+            parts = []
+            for rec in recs[:top_k]:
+                c = rec.get("content") or {}
+                if isinstance(c, dict):
+                    txt = (c.get("summary") or c.get("text") or c.get("title")
+                           or c.get("fact") or c.get("pattern") or "")
+                    if not txt:
+                        vals = [str(v) for v in c.values() if v]
+                        txt = "; ".join(vals)[:300] if vals else ""
+                else:
+                    txt = str(c)[:300]
+                if txt:
+                    parts.append("- [" + str(rec.get("domain") or "") + "] " + str(txt)[:300])
+            return "\n".join(parts)
+        except Exception as e:
+            log.warning(f"recall_for_user via {base} failed: {e}")
+    return ""
+
+
 def get_agent_key(agent_id: str) -> str:
     """Look up agent's API key for sending DMs as orchestrator-on-behalf.
 
@@ -429,14 +471,14 @@ def display_name_for(agent_id: str) -> str:
     return NAMES.get(agent_id, agent_id)
 
 
-def synthesize(request_text: str, responses: dict[str, dict], proxy_fallback: bool = False) -> str:
+def synthesize(request_text: str, responses: dict[str, dict], proxy_fallback: bool = False, memory_context: str = "") -> str:
     """Merge executor responses into one user-friendly answer."""
     if not responses:
         # No executor answered (they may be offline) → answer the user directly
         # via DeepSeek so the chat is always useful instead of a dead end.
         direct = deepseek_chat(
             [
-                {"role": "system", "content": "Ты — полезный ассистент Cognitive Core. Отвечай кратко, по делу, на грамотном русском языке."},
+                {"role": "system", "content": "Ты — полезный ассистент Cognitive Core. Отвечай кратко, по делу, на грамотном русском языке." + (("\n\nСОХРАНЁННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ (используй как факты):\n" + memory_context) if memory_context else "")},
                 {"role": "user", "content": request_text[:2000]},
             ],
             max_tokens=1000,
@@ -463,7 +505,7 @@ def synthesize(request_text: str, responses: dict[str, dict], proxy_fallback: bo
 
     raw = deepseek_chat(
         [
-            {"role": "system", "content": SYNTH_SYS_PROMPT},
+            {"role": "system", "content": SYNTH_SYS_PROMPT + (("\n\nСОХРАНЁННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ (используй как факты, не выдумывай сверх):\n" + memory_context) if memory_context else "")},
             {"role": "user", "content": user_msg},
         ],
         max_tokens=1500,
@@ -486,7 +528,7 @@ def run_orchestration(task_id: str) -> None:
     try:
         with db() as conn:
             row = conn.execute(
-                "SELECT request_text, context, cascading_depth FROM orchestrator_tasks WHERE task_id = %s",
+                "SELECT request_text, context, cascading_depth, user_id FROM orchestrator_tasks WHERE task_id = %s",
                 (task_id,),
             ).fetchone()
         if not row:
@@ -496,6 +538,7 @@ def run_orchestration(task_id: str) -> None:
         request_text = row["request_text"]
         context = row["context"] or {}
         depth = row["cascading_depth"] or 0
+        task_user_id = row["user_id"]
 
         publish_event(task_id, {"type": "started", "request_preview": request_text[:80]})
         _set_status(task_id, "routing")
@@ -553,7 +596,10 @@ def run_orchestration(task_id: str) -> None:
 
         # 4) Synthesize
         publish_event(task_id, {"type": "synthesizing", "response_count": len(responses)})
-        final = synthesize(request_text, responses, proxy_fallback=proxy_used)
+        memory_context = _recall_for_user(task_user_id, request_text)
+        if memory_context:
+            publish_event(task_id, {"type": "memory_injected", "chars": len(memory_context)})
+        final = synthesize(request_text, responses, proxy_fallback=proxy_used, memory_context=memory_context)
 
         # 5) Complete
         _complete(task_id, final, proxy=proxy_used)
