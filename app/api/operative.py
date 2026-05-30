@@ -113,6 +113,29 @@ async def recall_ui(body: OperativeRecallUI, request: Request):
     return {"results": rows, "count": len(rows)}
 
 
+@router.post("/recall_internal")
+async def recall_internal(body: OperativeRecallUI, request: Request):
+    """Server-to-server recall for trusted internal callers (e.g. the orchestrator).
+
+    Auth: a valid agent API key (verify_api_key) PLUS an explicit X-Owner-User-Id
+    header naming whose memory to read. This is the same internal-trust header the
+    MCP dispatcher already uses; it is only reachable on the internal docker network
+    (never exposed publicly via nginx), so the caller must already hold an agent key.
+    """
+    await verify_api_key(request)
+    owner_user_id = request.headers.get("x-owner-user-id")
+    if not owner_user_id:
+        raise HTTPException(status_code=400, detail="X-Owner-User-Id required")
+    top_k = body.top_k if isinstance(body.top_k, int) else 5
+    top_k = max(1, min(top_k, 8))
+    rows = await recall_any_domain(
+        query=body.context or "",
+        top_k=top_k,
+        owner_user_id=owner_user_id,
+    )
+    return {"results": rows, "count": len(rows)}
+
+
 @router.post("/sessions/{session_id}/close")
 async def close_operative_session(session_id: str, body: OperativeClose, request: Request):
     """Закрытие OP-сессии с опциональной обратной связью."""
