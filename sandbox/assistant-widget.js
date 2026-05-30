@@ -23,6 +23,20 @@
   var token = localStorage.getItem("orch_token") || "";
   var authed = false, busy = false, opened = false, greeted = false;
 
+  // Выбор помощника. «auto» — оркестратор (несколько ИИ, нужен вход).
+  // Остальные — конкретные персоны через /ui/team/chat (синхронно, без входа).
+  var PERSONAS = [
+    { id: "auto",      label: "✨ Авто (несколько ИИ)" },
+    { id: "developer", label: "💻 Разработчик" },
+    { id: "designer",  label: "🎨 UX/UI дизайнер" },
+    { id: "content",   label: "✍️ Контент-редактор" },
+    { id: "security",  label: "🔐 Безопасник" },
+    { id: "support",   label: "📖 Поддержка пользователей" },
+  ];
+  var persona = localStorage.getItem("cogasst_persona") || "auto";
+  if (!PERSONAS.some(function (p) { return p.id === persona; })) persona = "auto";
+  var convo = [];  // [{role:'user'|'assistant', content}]  — общий контекст диалога
+
   // ─── styles ──────────────────────────────────────────────────────────────
   var CSS =
   "#cogasst-fab{position:fixed;right:24px;bottom:24px;width:58px;height:58px;border:0;border-radius:50%;" +
@@ -53,6 +67,12 @@
     "background:transparent;color:var(--glass-text,#e9edf5);opacity:.65;}" +
   ".cogasst-tab.cogasst-act{opacity:1;background:var(--glass-bg-light,rgba(255,255,255,.06));}" +
   ".cogasst-tab.cogasst-soon{opacity:.4;cursor:default;}" +
+  ".cogasst-pbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--glass-border,rgba(255,255,255,.1));}" +
+  ".cogasst-pbar label{font-size:11.5px;opacity:.6;flex:0 0 auto;}" +
+  ".cogasst-pbar select{flex:1;font:inherit;font-size:13px;padding:7px 10px;border-radius:10px;cursor:pointer;" +
+    "background:var(--glass-bg-light,rgba(255,255,255,.06));color:var(--glass-text,#e9edf5);" +
+    "border:1px solid var(--glass-border,rgba(255,255,255,.14));-webkit-appearance:none;appearance:none;}" +
+  ".cogasst-pbar select:focus{outline:none;border-color:#6366f1;}" +
   ".cogasst-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}" +
   ".cogasst-msg{max-width:86%;padding:9px 12px;border-radius:13px;white-space:pre-wrap;word-wrap:break-word;}" +
   ".cogasst-msg.u{align-self:flex-end;background:#2f6fed;color:#fff;border-bottom-right-radius:4px;}" +
@@ -95,6 +115,14 @@
       '<button class="cogasst-tab cogasst-act" data-tab="chat">Чат</button>' +
       '<button class="cogasst-tab cogasst-soon" title="Скоро: новые инструменты">+ инструменты</button>' +
     "</div>" +
+    '<div class="cogasst-pbar">' +
+      '<label for="cogasst-persona">Помощник:</label>' +
+      '<select id="cogasst-persona">' +
+        PERSONAS.map(function (p) {
+          return '<option value="' + p.id + '"' + (p.id === persona ? " selected" : "") + ">" + p.label + "</option>";
+        }).join("") +
+      "</select>" +
+    "</div>" +
     '<div class="cogasst-body" id="cogasst-body"></div>' +
     '<div class="cogasst-foot">' +
       '<textarea id="cogasst-input" rows="1" placeholder="Спросите помощников…"></textarea>' +
@@ -113,15 +141,17 @@
   }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-  function showGate() {
-    bodyEl.innerHTML = "";
+  // Подсказка про вход — только для режима «Авто» (оркестратор). Не затирает
+  // диалог: добавляется как сообщение, селектор персон остаётся рабочим.
+  function gateHint() {
     var g = document.createElement("div"); g.className = "cogasst-gate";
     var p = document.createElement("div");
-    p.textContent = "Войдите тем же аккаунтом, что и на сайте — и помощники ответят прямо здесь.";
+    p.textContent = "Режим «Авто» требует входа. Войдите аккаунтом сайта — или выберите конкретного помощника выше, он ответит без входа.";
     var a = document.createElement("a");
     a.href = "/ui/login?next=" + encodeURIComponent(location.pathname);
     a.textContent = "Войти через почту";
     g.appendChild(p); g.appendChild(a); bodyEl.appendChild(g);
+    bodyEl.scrollTop = bodyEl.scrollHeight;
   }
 
   async function ensureAuth() {
@@ -138,53 +168,85 @@
     return false;
   }
 
+  function greet() {
+    if (greeted) return;
+    greeted = true; bodyEl.innerHTML = "";
+    addMsg("sys", "Здравствуйте! Выберите помощника выше или оставьте «Авто» — и задайте вопрос.");
+  }
+
   async function openPanel() {
     opened = true; panel.classList.add("cogasst-on"); fab.style.display = "none";
-    var ok = await ensureAuth();
-    if (!ok) { showGate(); return; }
-    if (!greeted) {
-      greeted = true; bodyEl.innerHTML = "";
-      addMsg("sys", "Здравствуйте! Задайте вопрос — система передаст его подходящему помощнику и пришлёт ответ.");
-    }
+    greet();
+    // Тихо пробуем SSO для режима «Авто» — не блокируем, персоны работают и без входа.
+    ensureAuth();
     setTimeout(function () { try { inputEl.focus(); } catch (e) {} }, 50);
   }
   function closePanel() { opened = false; panel.classList.remove("cogasst-on"); fab.style.display = "flex"; }
 
+  function finish(ph, answer) {
+    ph.innerHTML = ""; ph.textContent = answer;
+    convo.push({ role: "assistant", content: answer });
+    if (convo.length > 40) convo = convo.slice(-40);
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+    busy = false; sendEl.disabled = false;
+  }
+
   async function send() {
     var text = (inputEl.value || "").trim();
     if (!text || busy) return;
-    if (!(await ensureAuth())) { showGate(); return; }
-    inputEl.value = ""; inputEl.style.height = "auto"; busy = true; sendEl.disabled = true;
+    greet();
+    inputEl.value = ""; inputEl.style.height = "auto";
     addMsg("u", text);
-    var ph = addMsg("a", ""); ph.innerHTML = '<span class="cogasst-spin"></span>Обрабатываю…';
 
-    var taskId = "";
-    try {
-      var r = await fetch(ORCH + "/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-User-Token": token },
-        body: JSON.stringify({ request: text }),
-      });
-      if (r.status === 401) { token = ""; authed = false; localStorage.removeItem("orch_token"); ph.remove(); showGate(); busy = false; sendEl.disabled = false; return; }
-      taskId = (await r.json()).task_id || "";
-    } catch (e) {
-      ph.textContent = "Не удалось отправить запрос. Проверьте интернет."; busy = false; sendEl.disabled = false; return;
-    }
-    if (!taskId) { ph.textContent = "Сервис временно недоступен. Попробуйте позже."; busy = false; sendEl.disabled = false; return; }
-
-    for (var i = 0; i < 80; i++) {
-      await sleep(2500);
+    if (persona === "auto") {
+      // Режим «Авто» → оркестратор (нужен вход).
+      if (!(await ensureAuth())) { gateHint(); return; }
+      busy = true; sendEl.disabled = true;
+      convo.push({ role: "user", content: text });
+      var ph = addMsg("a", ""); ph.innerHTML = '<span class="cogasst-spin"></span>Обрабатываю…';
+      var taskId = "";
       try {
-        var r2 = await fetch(ORCH + "/tasks/" + taskId, { headers: { "X-User-Token": token } });
-        if (!r2.ok) continue;
-        var d = await r2.json();
-        if (d.status === "completed" || d.status === "failed") {
-          ph.innerHTML = ""; ph.textContent = d.final_answer || "(пустой ответ)";
-          bodyEl.scrollTop = bodyEl.scrollHeight; busy = false; sendEl.disabled = false; return;
-        }
-      } catch (e) { /* keep polling */ }
+        var r = await fetch(ORCH + "/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-User-Token": token },
+          body: JSON.stringify({ request: text }),
+        });
+        if (r.status === 401) { token = ""; authed = false; localStorage.removeItem("orch_token"); ph.remove(); busy = false; sendEl.disabled = false; gateHint(); return; }
+        taskId = (await r.json()).task_id || "";
+      } catch (e) {
+        ph.textContent = "Не удалось отправить запрос. Проверьте интернет."; busy = false; sendEl.disabled = false; return;
+      }
+      if (!taskId) { ph.textContent = "Сервис временно недоступен. Попробуйте позже."; busy = false; sendEl.disabled = false; return; }
+      for (var i = 0; i < 80; i++) {
+        await sleep(2500);
+        try {
+          var r2 = await fetch(ORCH + "/tasks/" + taskId, { headers: { "X-User-Token": token } });
+          if (!r2.ok) continue;
+          var d = await r2.json();
+          if (d.status === "completed" || d.status === "failed") { finish(ph, d.final_answer || "(пустой ответ)"); return; }
+        } catch (e) { /* keep polling */ }
+      }
+      ph.textContent = "Ответ готовится дольше обычного. Загляните чуть позже."; busy = false; sendEl.disabled = false;
+      return;
     }
-    ph.textContent = "Ответ готовится дольше обычного. Загляните чуть позже."; busy = false; sendEl.disabled = false;
+
+    // Конкретная персона → /ui/team/chat (синхронно, без входа).
+    busy = true; sendEl.disabled = true;
+    var hist = convo.slice(-8);
+    convo.push({ role: "user", content: text });
+    var ph2 = addMsg("a", ""); ph2.innerHTML = '<span class="cogasst-spin"></span>Печатает…';
+    try {
+      var rp = await fetch("/ui/team/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ persona: persona, message: text, history: hist }),
+      });
+      var dp = await rp.json().catch(function () { return {}; });
+      if (rp.ok && dp.reply) { finish(ph2, dp.reply); }
+      else { ph2.textContent = dp.error || "Помощник сейчас недоступен. Попробуйте позже."; busy = false; sendEl.disabled = false; }
+    } catch (e) {
+      ph2.textContent = "Не удалось отправить запрос. Проверьте интернет."; busy = false; sendEl.disabled = false;
+    }
   }
 
   function wire() {
@@ -194,6 +256,12 @@
     fab.addEventListener("click", openPanel);
     panel.querySelector(".cogasst-x").addEventListener("click", closePanel);
     sendEl.addEventListener("click", send);
+    var sel = panel.querySelector("#cogasst-persona");
+    if (sel) sel.addEventListener("change", function () {
+      persona = this.value; localStorage.setItem("cogasst_persona", persona);
+      var label = (PERSONAS.find(function (p) { return p.id === persona; }) || {}).label || persona;
+      addMsg("sys", persona === "auto" ? "Режим «Авто»: вопрос уйдёт подходящему помощнику." : "Теперь отвечает: " + label);
+    });
     inputEl.addEventListener("input", function () { this.style.height = "auto"; this.style.height = Math.min(this.scrollHeight, 120) + "px"; });
     inputEl.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && opened) closePanel(); });
