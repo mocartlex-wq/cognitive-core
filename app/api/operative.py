@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.models.operative import OperativeClose, OperativeFeedback, OperativeQuery
+from app.models.operative import OperativeClose, OperativeFeedback, OperativeQuery, OperativeRecallUI
 from app.security.auth import verify_api_key
 from app.security.owner import resolve_owner_user_id
 from app.services.operative import (
@@ -8,6 +8,7 @@ from app.services.operative import (
     close_session,
     create_session,
     feedback_record,
+    recall_any_domain,
 )
 
 router = APIRouter(prefix="/operative", tags=["operative"])
@@ -86,6 +87,29 @@ async def query_operative(
         }
 
     return session
+
+
+@router.post("/recall_ui")
+async def recall_ui(body: OperativeRecallUI, request: Request):
+    """Session-cookie-authed recall for the in-product assistant (no API key).
+
+    Owner is taken STRICTLY from the validated cogcore_session cookie via
+    get_current_user. The spoofable X-Owner-User-Id header is deliberately
+    not consulted here, so a caller can only ever read its own memory.
+    """
+    from app.security.session import get_current_user
+    user = await get_current_user(request)
+    owner_user_id = str(user.id) if user and getattr(user, "id", None) else None
+    if not owner_user_id:
+        raise HTTPException(status_code=401, detail="session required")
+    top_k = body.top_k if isinstance(body.top_k, int) else 5
+    top_k = max(1, min(top_k, 8))
+    rows = await recall_any_domain(
+        query=body.context or "",
+        top_k=top_k,
+        owner_user_id=owner_user_id,
+    )
+    return {"results": rows, "count": len(rows)}
 
 
 @router.post("/sessions/{session_id}/close")

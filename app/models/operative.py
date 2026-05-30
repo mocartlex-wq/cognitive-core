@@ -23,6 +23,11 @@ class OperativeQuery(BaseModel):
     include_tools: bool = True
 
 
+class OperativeRecallUI(BaseModel):
+    context: str | None = None
+    top_k: int = 5
+
+
 class OperativeSession(BaseModel):
     session_id: UUID
     domain: str
