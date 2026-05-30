@@ -94,12 +94,13 @@ async def recall_ui(body: OperativeRecallUI, request: Request):
     """Session-cookie-authed recall for the in-product assistant (no API key).
 
     Owner is taken STRICTLY from the validated cogcore_session cookie via
-    get_current_user. The spoofable X-Owner-User-Id header is deliberately
+    verify_session. The spoofable X-Owner-User-Id header is deliberately
     not consulted here, so a caller can only ever read its own memory.
     """
-    from app.security.session import get_current_user
-    user = await get_current_user(request)
-    owner_user_id = str(user.id) if user and getattr(user, "id", None) else None
+    from app.security.session import SESSION_COOKIE_NAME, verify_session
+    sid = request.cookies.get(SESSION_COOKIE_NAME) or request.headers.get("X-Session-Id")
+    session = await verify_session(sid)
+    owner_user_id = session.user_id if session else None
     if not owner_user_id:
         raise HTTPException(status_code=401, detail="session required")
     top_k = body.top_k if isinstance(body.top_k, int) else 5
