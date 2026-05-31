@@ -386,7 +386,7 @@
     <div class="api-key-box">
       <div class="lbl">🔑 API-ключ (показывается один раз)</div>
       <div class="key" id="apiKeyDisplay">…</div>
-      <div class="warn">Сохраните сейчас — больше показать нельзя. После закрытия страницы — придётся создавать новый helping.</div>
+      <div class="warn">Сохраните сейчас — больше показать нельзя. После закрытия страницы — придётся создавать нового помощника.</div>
     </div>
 
     <div id="installTabs" style="display:none">
@@ -509,6 +509,10 @@ function track(channel, action, detail) {
 }
 
 function goStep(n) {
+  // Guard: шаги 3–5 показывают данные созданного помощника (ключ/конфиг/инструкция).
+  // Без state.agent (прямой ?step=3, перезагрузка вкладки, мёртвая ссылка) они
+  // отрисуют пустые «…» вместо ключа — поэтому откатываем на шаг 1.
+  if (n >= 3 && !state.agent) n = 1;
   document.querySelectorAll('.step-card').forEach(c => c.style.display = 'none');
   $(`step${n}`).style.display = '';
   document.querySelectorAll('.stepper .step').forEach(el => {
