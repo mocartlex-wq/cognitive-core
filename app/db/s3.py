@@ -1,3 +1,4 @@
+import urllib3
 from minio import Minio
 
 from app.config import settings
@@ -8,11 +9,20 @@ _client: Minio | None = None
 def get_s3() -> Minio:
     global _client
     if _client is None:
+        # Bounded HTTP client: when MinIO is unreachable, fail fast (a few
+        # seconds) instead of urllib3's long default retries — a sync minio
+        # call on the async event loop would otherwise block the whole worker.
+        _http = urllib3.PoolManager(
+            timeout=urllib3.Timeout(connect=2.0, read=5.0),
+            retries=urllib3.Retry(total=1, connect=1, read=1, backoff_factor=0.2),
+            maxsize=10,
+        )
         _client = Minio(
             settings.s3_endpoint.replace("http://", "").replace("https://", ""),
             access_key=settings.s3_access_key,
             secret_key=settings.s3_secret_key,
             secure=settings.s3_secure,
+            http_client=_http,
         )
     return _client
 

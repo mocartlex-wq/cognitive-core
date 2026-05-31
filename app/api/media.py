@@ -139,10 +139,24 @@ async def _check_admin_or_owner(request: Request):
 
 
 def _ensure_bucket():
-    """Создать MEDIA_BUCKET если не существует."""
-    s3 = get_s3()
-    if not s3.bucket_exists(MEDIA_BUCKET):
-        s3.make_bucket(MEDIA_BUCKET)
+    """Создать MEDIA_BUCKET если не существует.
+
+    Object store недоступен -> 503 (а не сырое исключение/зависание воркера).
+    Раньше минио-клиент без таймаута ретраил долго на синхронном вызове внутри
+    async-хендлера и блокировал весь uvicorn-воркер при упавшем MinIO.
+    """
+    try:
+        s3 = get_s3()
+        if not s3.bucket_exists(MEDIA_BUCKET):
+            s3.make_bucket(MEDIA_BUCKET)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("media: object store unavailable: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="object store (MinIO) недоступен — попробуйте позже",
+        )
         logger.info("media bucket created: %s", MEDIA_BUCKET)
 
 
