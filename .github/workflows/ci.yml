@@ -40,6 +40,7 @@ jobs:
   # проверял лишь ~35 no-DB тестов. Теперь весь tests/ гоняется на каждый PR.
   db-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -84,7 +85,7 @@ jobs:
           python -m pip install --upgrade pip
           # requirements.txt уже включает alembic/sqlalchemy/psycopg2-binary (для миграций).
           pip install -r requirements.txt
-          pip install pytest==8.* pytest-asyncio==1.* asyncpg
+          pip install pytest==8.* pytest-asyncio==1.* pytest-timeout==2.* asyncpg
 
       - name: Apply DB schema (init_db base tables, then alembic alterations)
         run: |
@@ -117,7 +118,11 @@ jobs:
 
       - name: Run full test suite (postgres + redis + live API)
         run: |
-          python -m pytest tests/ -p no:cacheprovider --tb=short -q -rN
+          # --timeout fails any single hanging test at 90s with a traceback
+          # (pinpoints tests that block on an external call) instead of hanging
+          # the whole job; the suite itself runs in ~2-3 min.
+          python -m pytest tests/ -p no:cacheprovider --tb=short -q -rN \
+                 --timeout=90 --timeout-method=thread
 
       - name: Dump API log on failure
         if: failure()
