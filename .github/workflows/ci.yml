@@ -35,6 +35,75 @@ jobs:
                            -v --tb=short -p no:cacheprovider || \
             echo "Some unit tests skipped (require infra) — non-fatal in CI"
 
+  # Full integration suite против реальных postgres+redis (service containers).
+  # Закрывает gap: раньше ~270 DB/API тестов в CI НЕ запускались — «зелёный CI»
+  # проверял лишь ~35 no-DB тестов. Теперь весь tests/ гоняется на каждый PR.
+  db-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: cognitive
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: cognitive_core
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U cognitive -d cognitive_core"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        # redis-stack-server даёт RediSearch (FT.SEARCH) для operative KNN тестов.
+        image: redis/redis-stack-server:latest
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://cognitive:test@localhost:5432/cognitive_core
+      COGCORE_TEST_DB_URL: postgresql://cognitive:test@localhost:5432/cognitive_core
+      # RediSearch FT.SEARCH работает ТОЛЬКО на db 0 ("Cannot create index on db != 0").
+      REDIS_URL: redis://localhost:6379/0
+      DEEPSEEK_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (app + test)
+        run: |
+          python -m pip install --upgrade pip
+          # requirements.txt уже включает alembic/sqlalchemy/psycopg2-binary (для миграций).
+          pip install -r requirements.txt
+          pip install pytest==8.* pytest-asyncio==1.* asyncpg
+
+      - name: Apply DB schema (alembic migrations)
+        run: alembic upgrade head
+
+      - name: Start API in background + wait for /health
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/uvicorn.log 2>&1 &
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
+            if [ "$code" = "200" ]; then echo "API up after $((i*2))s"; break; fi
+            sleep 2
+          done
+          final=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
+          if [ "$final" != "200" ]; then
+            echo "::error::uvicorn failed to become healthy"
+            echo "=== uvicorn.log ==="; cat /tmp/uvicorn.log; exit 1
+          fi
+
+      - name: Run full test suite (postgres + redis + live API)
+        run: |
+          python -m pytest tests/ -p no:cacheprovider --tb=short -q -rN
+
+      - name: Dump API log on failure
+        if: failure()
+        run: cat /tmp/uvicorn.log || true
+
   # Lint — централизованный config в pyproject.toml (2026-05-26)
   lint:
     runs-on: ubuntu-latest
