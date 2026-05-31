@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 
 import pytest
@@ -87,51 +88,33 @@ class TestEventIngest:
             assert r.status_code == 200
 
 
-@pytest.fixture
-async def _daily_llm_available(client, headers):
-    """Probe: доступен ли LLM для daily-консолидации на этом раннере.
+def _deepseek_key_present() -> bool:
+    """Collection-safe predicate: есть ли непустой DeepSeek API-ключ?
 
-    ПРИЧИНА (из реального CI-лога db_cur.txt, server-side traceback):
-    предыдущие тесты этого файла (TestEventIngest.test_ingest / test_bulk_ingest)
-    кладут события в domain=test_api. Поэтому daily для test_api НЕ уходит в
-    "no_events" — `_daily_consolidate_impl` находит события и вызывает
-    `analyze_daily_events` -> LLM (`llm_client._try_call`). На CI db-tests
-    DEEPSEEK_API_KEY пуст, поэтому LLM возвращает 500:
-        openai.AuthenticationError: Authentication Fails (governor)
-    Эндпоинт consolidate/daily это не ловит (см. PRODUCT BUG в triage_final.md) и
-    отдаёт голый 500. Это env-gap раннера (нет рабочего LLM-ключа), не баг логики.
+    daily-консолидация для непустого domain вызывает реальный LLM
+    (`analyze_daily_events` -> `llm_client._try_call`). На CI db-tests
+    DEEPSEEK_API_KEY пуст -> LLM отдаёт openai.AuthenticationError, эндпоинт
+    это не маппит и возвращает голый 500 -> `assert 500 == 200`. Это env-gap
+    раннера (нет рабочего LLM-ключа), не баг логики тестов.
 
-    Probe делает один реальный POST daily. Если 500 с сигнатурой
-    LLM-аутентификации - skip. ЛЮБОЙ другой исход (200, либо 500 иной природы =
-    настоящая регрессия) probe пропускает дальше -> тест исполняется/честно падает.
+    ПОЧЕМУ skipif на os.getenv, а НЕ probe-фикстура (как было раньше):
+    skipif вычисляется на этапе collection, когда pytest-фикстуры ещё НЕ
+    существуют. Поэтому условие обязано быть само-достаточным: обычная функция,
+    не зависящая от фикстур и не способная упасть. Прошлый probe делал реальный
+    POST и скипал по сигнатуре LLM-auth в теле 500 — но эндпоинт отдаёт ROOT
+    500 без LLM-строки в body, маркеры не совпали, skip не сработал -> тест
+    падал. os.getenv даёт детерминированное, честное условие без сетевого
+    вызова.
     """
-    r = await client.post(
-        "/memory/consolidate/daily",
-        json={"domain": "test_api"},
-        headers=headers,
-    )
-    if r.status_code == 500:
-        body = r.text.lower()
-        llm_auth_markers = (
-            "authenticationerror",
-            "authentication fails",
-            "governor",
-            "api key",
-            "invalid_api_key",
-            "incorrect api key",
-        )
-        if any(m in body for m in llm_auth_markers):
-            pytest.skip(
-                "daily-консолидация недоступна: LLM возвращает auth-ошибку "
-                "(DEEPSEEK_API_KEY пуст на CI db-tests) -> 500 'Authentication "
-                "Fails (governor)'. Env-gap раннера, не баг продукта. "
-                "Эндпоинт не маппит LLM-auth в 503 - см. triage_final.md."
-            )
-    return True
+    return bool((os.getenv("DEEPSEEK_API_KEY") or "").strip())
 
 
 class TestConsolidation:
-    async def test_daily(self, client, headers, _daily_llm_available):
+    @pytest.mark.skipif(
+        not _deepseek_key_present(),
+        reason="daily-консолидация вызывает реальный LLM; DEEPSEEK_API_KEY пуст/не задан (CI db-tests)",
+    )
+    async def test_daily(self, client, headers):
         r = await client.post("/memory/consolidate/daily", json={"domain": "test_api"}, headers=headers)
         assert r.status_code == 200
         data = r.json()
