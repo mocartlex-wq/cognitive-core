@@ -89,14 +89,21 @@ TYPICAL_COMMANDS = [
 
 
 def make_mock_parser(action, args):
-    """Возвращает mock parser который вернёт validated action."""
-    m = MagicMock()
-    m.parse = AsyncMock(return_value=validate_action({
+    """Возвращает mock parser который вернёт validated action.
+
+    handle_message() (после multi-step planning PR #49) вызывает parser.parse_raw(),
+    а НЕ parser.parse() — поэтому мокаем ОБА метода тем же validated-dict'ом. Без
+    parse_raw bare-MagicMock возвращал не-awaitable → TypeError на каждом тесте.
+    """
+    validated = validate_action({
         "action": action,
         "args": args,
         "reasoning": "mocked",
         "confidence": 0.95,
-    }))
+    })
+    m = MagicMock()
+    m.parse = AsyncMock(return_value=dict(validated))
+    m.parse_raw = AsyncMock(return_value=dict(validated))
     m.close = AsyncMock()
     return m
 
@@ -315,14 +322,17 @@ async def test_unknown_action_from_llm_becomes_refuse(cfg, mocked_client):
     """Если LLM вернул что-то вне whitelist — validate подменит на refuse."""
     daemon = daemon_mod.OrchestratorDaemon(cfg)
     daemon.client = mocked_client
-    # Mock parse возвращает invalid result (validate уже превратил в refuse)
-    daemon.parser = MagicMock()
-    daemon.parser.parse = AsyncMock(return_value={
+    # Mock parse/parse_raw возвращает invalid result (validate уже превратил в refuse).
+    # handle_message вызывает parse_raw — мокаем оба метода одинаково.
+    refuse_raw = {
         "action": "refuse",
         "args": {"reason": "Unknown action 'evil' — нет в whitelist."},
         "valid": False, "error": "unknown_action:evil",
         "reasoning": "test", "confidence": 0.1,
-    })
+    }
+    daemon.parser = MagicMock()
+    daemon.parser.parse = AsyncMock(return_value=dict(refuse_raw))
+    daemon.parser.parse_raw = AsyncMock(return_value=dict(refuse_raw))
     daemon.executor.client = mocked_client
     daemon.log_decision = AsyncMock()
 

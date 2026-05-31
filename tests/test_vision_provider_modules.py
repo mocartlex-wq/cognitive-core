@@ -1,8 +1,8 @@
 """Smoke-тесты vision_providers — без реальных API вызовов.
 
 Проверяем:
-  - Все 6 провайдеров импортируются + exposed analyze + test_connection
-  - PROVIDER_REGISTRY содержит все 6
+  - Все 7 провайдеров импортируются + exposed analyze + test_connection
+  - PROVIDER_REGISTRY содержит все 7 (incl. yandexgpt — РФ-резидентный, PR #84)
   - PROVIDER_ORDER корректный
   - is_valid_provider() работает
   - analyze() с empty api_key → fallback_recommended=True
@@ -20,7 +20,7 @@ from app.services.vision_providers import (
     is_valid_provider,
 )
 
-EXPECTED_PROVIDERS = {"qwen", "minimax", "gigachat", "claude", "openai", "gemini"}
+EXPECTED_PROVIDERS = {"qwen", "minimax", "gigachat", "claude", "openai", "gemini", "yandexgpt"}
 
 
 def test_all_providers_registered():

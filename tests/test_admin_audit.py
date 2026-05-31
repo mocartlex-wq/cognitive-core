@@ -25,7 +25,7 @@ import pytest
 
 from app.api.admin_audit import _mask_email, _mask_owner
 
-pytestmark = pytest.mark.anyio
+pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture

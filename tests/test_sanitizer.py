@@ -40,13 +40,18 @@ class TestCountKeys:
 
 
 class TestCleanString:
-    def test_sql_injection(self):
-        with pytest.raises(ValueError, match="SQL injection"):
-            _clean_string("DROP TABLE users", [], "test.field")
+    def test_sql_passthrough(self):
+        # SQL filtering intentionally removed 2026-05-26: все queries параметризованы
+        # (asyncpg $1/$2), поэтому SQL-подобный текст — валидные ДАННЫЕ, не атака.
+        # Прошлый filter ломал em-dash, "pytest -- -k", lessons про SQL. См. sanitizer.py.
+        w = []
+        result = _clean_string("DROP TABLE users", w, "test.field")
+        assert result == "DROP TABLE users"
 
-    def test_sql_select(self):
-        with pytest.raises(ValueError, match="SQL injection"):
-            _clean_string("SELECT * FROM users", [], "query")
+    def test_sql_select_passthrough(self):
+        w = []
+        result = _clean_string("SELECT * FROM users", w, "query")
+        assert result == "SELECT * FROM users"
 
     def test_js_eval(self):
         with pytest.raises(ValueError, match="JavaScript"):
@@ -77,9 +82,10 @@ class TestSanitizePayload:
         assert r.payload == {"user": "alice", "score": 42}
         assert r.warnings == []
 
-    def test_sql_rejected(self):
-        with pytest.raises(ValueError, match="SQL injection"):
-            sanitize_payload({"query": "DROP TABLE users"})
+    def test_sql_passthrough_payload(self):
+        # SQL no longer filtered (parameterized queries) — passes through as data.
+        r = sanitize_payload({"query": "DROP TABLE users"})
+        assert r.payload["query"] == "DROP TABLE users"
 
     def test_js_rejected(self):
         with pytest.raises(ValueError, match="JavaScript"):

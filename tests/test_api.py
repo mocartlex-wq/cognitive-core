@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 
 import pytest
@@ -8,17 +9,22 @@ class TestHealth:
         r = await client.get("/health")
         assert r.status_code == 200
         data = r.json()
-        assert data["healthy"] is True
+        # postgres + redis — обязательные сервисы (есть в любом окружении).
         assert data["services"]["postgres"] == "ok"
         assert data["services"]["redis"] == "ok"
-        assert data["services"]["minio"] == "ok"
+        # MinIO/S3 теперь optional: init сделан non-fatal (app/main.py), и в
+        # окружениях без объектного хранилища (напр. CI db-tests) /health честно
+        # репортит minio как down → data["healthy"] становится False. Проверяем
+        # только что ключ присутствует, не требуя "ok".
+        assert "minio" in data["services"]
+        assert "healthy" in data
 
     async def test_health_details(self, client):
         """New health fields: version, uptime, db_size, llm stats, system info."""
         r = await client.get("/health")
         data = r.json()
         assert "version" in data
-        assert data["version"] == "0.2.0"
+        assert data["version"] == "0.6.0"
         assert "uptime_seconds" in data
         assert data["uptime_seconds"] > 0
         assert "db_size_mb" in data
@@ -82,7 +88,32 @@ class TestEventIngest:
             assert r.status_code == 200
 
 
+def _deepseek_key_present() -> bool:
+    """Collection-safe predicate: есть ли непустой DeepSeek API-ключ?
+
+    daily-консолидация для непустого domain вызывает реальный LLM
+    (`analyze_daily_events` -> `llm_client._try_call`). На CI db-tests
+    DEEPSEEK_API_KEY пуст -> LLM отдаёт openai.AuthenticationError, эндпоинт
+    это не маппит и возвращает голый 500 -> `assert 500 == 200`. Это env-gap
+    раннера (нет рабочего LLM-ключа), не баг логики тестов.
+
+    ПОЧЕМУ skipif на os.getenv, а НЕ probe-фикстура (как было раньше):
+    skipif вычисляется на этапе collection, когда pytest-фикстуры ещё НЕ
+    существуют. Поэтому условие обязано быть само-достаточным: обычная функция,
+    не зависящая от фикстур и не способная упасть. Прошлый probe делал реальный
+    POST и скипал по сигнатуре LLM-auth в теле 500 — но эндпоинт отдаёт ROOT
+    500 без LLM-строки в body, маркеры не совпали, skip не сработал -> тест
+    падал. os.getenv даёт детерминированное, честное условие без сетевого
+    вызова.
+    """
+    return bool((os.getenv("DEEPSEEK_API_KEY") or "").strip())
+
+
 class TestConsolidation:
+    @pytest.mark.skipif(
+        not _deepseek_key_present(),
+        reason="daily-консолидация вызывает реальный LLM; DEEPSEEK_API_KEY пуст/не задан (CI db-tests)",
+    )
     async def test_daily(self, client, headers):
         r = await client.post("/memory/consolidate/daily", json={"domain": "test_api"}, headers=headers)
         assert r.status_code == 200

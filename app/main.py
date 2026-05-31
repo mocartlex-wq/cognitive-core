@@ -42,7 +42,14 @@ async def lifespan(app: FastAPI):
     log_event("info", "Starting Cognitive Core", version=__version__)
     await init_db()
     await init_redis()
-    init_s3()
+    # S3/MinIO init is best-effort: a missing/unreachable object store must NOT
+    # abort API startup (media endpoints will surface the error lazily). Without
+    # this guard the app crashes at boot if MinIO is down — and the CI db-tests
+    # env has no MinIO service, so eager bucket-ensure raised ConnectionRefused.
+    try:
+        init_s3()
+    except Exception as e:
+        log_event("warn", "S3/MinIO init skipped (object store unreachable)", error=str(e)[:200])
 
     from app.worker import scheduler_loop
     _scheduler_task = asyncio.create_task(scheduler_loop())

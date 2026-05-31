@@ -20,8 +20,12 @@ class TestRawEventInput:
             RawEventInput(source_agent="a", domain="coding", payload={"x": 1})
 
     def test_invalid_domain(self):
+        # Domain pattern ^[\w][\w.-]*$ намеренно разрешает Uppercase + Unicode
+        # (PR #32: lowercase-требование снято, Cyrillic не имеет case). Поэтому
+        # "BadDomain" теперь ВАЛИДЕН. Невалидное имя — начинающееся с дефиса
+        # или с пробелом/слешем внутри.
         with pytest.raises(ValidationError):
-            RawEventInput(source_agent="agent1", domain="BadDomain", payload={"x": 1})
+            RawEventInput(source_agent="agent1", domain="-bad/domain name", payload={"x": 1})
 
     def test_extra_fields_forbidden(self):
         with pytest.raises(ValidationError):
