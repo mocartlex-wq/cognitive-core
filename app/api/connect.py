@@ -681,6 +681,37 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
         except Exception as e:
             logger.warning("Redis SETEX failed, falling back to memory: %s", e)
             _CLAIM_TOKENS[token] = entry_data
+
+    # Inject FACTS into the agent prompt (вместо «сходи узнай сам»): сервер уже
+    # знает кого создаёт токен, кто владелец и какие агенты уже подключены.
+    # Раньше агент рассуждал по тексту инструкции и галлюцинировал устаревший
+    # совет; теперь факты лежат прямо в промпте — выдумывать нечего.
+    owner_masked = "?"
+    _em = (getattr(user, "email", "") or "")
+    if "@" in _em:
+        _local, _domain = _em.split("@", 1)
+        owner_masked = f"{(_local[:3] + '***') if len(_local) > 3 else '***'}@{_domain}"
+    machine_part = f", машина «{body.machine_hint}»" if body.machine_hint else ""
+    existing_agents: list[tuple[str, str | None]] = []
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT agent_id, machine_label FROM agent_states "
+                "WHERE owner_user_id = $1::uuid AND status = 'active' "
+                "AND agent_id <> $2 ORDER BY created_at DESC LIMIT 10",
+                str(user.user_id), default_id,
+            )
+            existing_agents = [(r["agent_id"], r["machine_label"]) for r in rows]
+    except Exception as e:
+        logger.warning("issue_claim_token: existing-agents lookup failed: %s", e)
+    if existing_agents:
+        existing_list = "; ".join(
+            aid + (f" ({label})" if label else "") for aid, label in existing_agents
+        )
+    else:
+        existing_list = "(пока никого — это твой первый агент)"
+
     return {
         "token": token,
         "expires_in_seconds": CLAIM_TTL_SECONDS,
@@ -692,9 +723,19 @@ async def issue_claim_token(body: IssueClaimBody, request: Request):
             f"Cognitive Core claim-token (10 мин, one-shot):\n\n"
             f"  TOKEN: {token}\n"
             f"  BASE:  https://mcp.me-ai.ru\n\n"
-            f"=== CANARY (читаешь это сейчас?) ===\n"
-            f"Начни свой первый ответ owner\'у с эмодзи 🟢 — это сигнал что инструкцию увидел и распарсил.\n"
-            f"Если ты пропустил canary — owner поймёт что галлюцинируешь.\n\n"
+            f"=== ФАКТЫ (проверены сервером — НЕ выдумывай, опирайся на них) ===\n"
+            f"• Этот токен создаёт НОВОГО агента: {default_id!r}{machine_part}.\n"
+            f"• Владелец: {owner_masked}.\n"
+            f"• У владельца уже подключены: {existing_list}.\n"
+            f"  Если ты — один из них, этот токен НЕ твой (он для нового {default_id!r}).\n\n"
+            f"=== СНАЧАЛА ПРОВЕРЬ — потом отвечай ===\n"
+            f"Чтобы понять «мой ли токен», надо знать свой agent_id. НЕ угадывай по чату:\n"
+            f"• Есть инструменты cognitive_* → вызови cognitive_agent_manifest(), возьми СВОЙ agent_id.\n"
+            f"• Нет ни инструментов, ни config cognitive-core → ты не подключён → ШАГ 1.\n"
+            f"• Есть config, но инструментов нет → попроси рестарт Claude Code, потом проверь снова.\n\n"
+            f"=== CANARY ===\n"
+            f"Начни ответ владельцу с 🟢 ТОЛЬКО после реального вызова cognitive_agent_manifest()\n"
+            f"(или когда точно установил, что инструментов нет). 🟢 без проверки = галлюцинация.\n\n"
             f"=== TL;DR ===\n"
             f"• Если у тебя УЖЕ есть cognitive_* tools — игнорируй токен (он для другого агента).\n"
             f"• Если config есть но tools нет — попроси рестарт Claude Code.\n"
