@@ -33,10 +33,12 @@ class TestUploadInit:
         assert "не поддерживается" in r.text or "не поддер" in r.text
 
     async def test_init_rejects_oversize(self, client, headers):
-        # 3 GB > MAX_UPLOAD_SIZE_MB (обычно 200 MB)
+        # 500 MB > MAX_UPLOAD_SIZE_MB (200 MB) → endpoint 413.
+        # Must stay <= pydantic hard cap (size_bytes le=2GB), иначе сработает 422
+        # на валидации pydantic РАНЬШЕ, чем endpoint вернёт 413. 3GB давал 422.
         r = await client.post(
             "/api/media/upload-init",
-            json={"filename": "huge.mp4", "size_bytes": 3 * 1024 * 1024 * 1024},
+            json={"filename": "huge.mp4", "size_bytes": 500 * 1024 * 1024},
             headers=headers,
         )
         assert r.status_code == 413, f"expected 413, got {r.status_code}: {r.text}"

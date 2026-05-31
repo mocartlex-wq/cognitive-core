@@ -12,7 +12,7 @@ import os
 import httpx
 import pytest
 
-pytestmark = pytest.mark.anyio
+pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture

@@ -8,17 +8,22 @@ class TestHealth:
         r = await client.get("/health")
         assert r.status_code == 200
         data = r.json()
-        assert data["healthy"] is True
+        # postgres + redis — обязательные сервисы (есть в любом окружении).
         assert data["services"]["postgres"] == "ok"
         assert data["services"]["redis"] == "ok"
-        assert data["services"]["minio"] == "ok"
+        # MinIO/S3 теперь optional: init сделан non-fatal (app/main.py), и в
+        # окружениях без объектного хранилища (напр. CI db-tests) /health честно
+        # репортит minio как down → data["healthy"] становится False. Проверяем
+        # только что ключ присутствует, не требуя "ok".
+        assert "minio" in data["services"]
+        assert "healthy" in data
 
     async def test_health_details(self, client):
         """New health fields: version, uptime, db_size, llm stats, system info."""
         r = await client.get("/health")
         data = r.json()
         assert "version" in data
-        assert data["version"] == "0.2.0"
+        assert data["version"] == "0.6.0"
         assert "uptime_seconds" in data
         assert data["uptime_seconds"] > 0
         assert "db_size_mb" in data

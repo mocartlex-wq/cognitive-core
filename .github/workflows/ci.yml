@@ -66,6 +66,13 @@ jobs:
       # RediSearch FT.SEARCH работает ТОЛЬКО на db 0 ("Cannot create index on db != 0").
       REDIS_URL: redis://localhost:6379/0
       DEEPSEEK_API_KEY: ""
+      # Legacy agent key used by the integration test fixtures (tests/conftest.py,
+      # tests/test_api.py send `X-API-Key: key-design-001`). In prod/dev this key lives
+      # in the deployed .env; a bare CI DB has only the built-in default, so
+      # verify_api_key() 401s on every authed endpoint. Registering it here via the
+      # legacy env-key path makes resolve_owner_user_id() return None (admin mode,
+      # no owner filter) — exactly what these suite-wide tests assume.
+      AGENT_API_KEYS: '{"agent_default":"default-key","key-design-001-agent":"key-design-001"}'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -87,6 +94,12 @@ jobs:
           # alembic 0003+ fails ("relation agent_states does not exist").
           python -c "import asyncio; from app.db.postgres import init_db; asyncio.run(init_db())"
           alembic upgrade head
+          # The `rooms` tables are owned by the separate cognitive-rooms service and are
+          # NOT part of the app's alembic migrations. In prod they're created from this
+          # same idempotent SQL (mounted into postgres initdb). Without it, /user/rooms
+          # handlers hit `relation "rooms" does not exist` → 500 (see test_user_rooms_crud
+          # expecting 404). Apply it here so the rooms-backed endpoints work in CI.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f launch/extras/init/01-rooms-schema.sql
 
       - name: Start API in background + wait for /health
         run: |
