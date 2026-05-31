@@ -79,8 +79,14 @@ jobs:
           pip install -r requirements.txt
           pip install pytest==8.* pytest-asyncio==1.* asyncpg
 
-      - name: Apply DB schema (alembic migrations)
-        run: alembic upgrade head
+      - name: Apply DB schema (init_db base tables, then alembic alterations)
+        run: |
+          # Prod bootstraps in this order: the app's init_db() creates the base
+          # L0-L4 + agent_states/accounts tables on startup, THEN migrations
+          # ALTER/index them. A bare CI DB must replicate that order, otherwise
+          # alembic 0003+ fails ("relation agent_states does not exist").
+          python -c "import asyncio; from app.db.postgres import init_db; asyncio.run(init_db())"
+          alembic upgrade head
 
       - name: Start API in background + wait for /health
         run: |
