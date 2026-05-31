@@ -74,10 +74,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     revoked BOOLEAN NOT NULL DEFAULT FALSE,
     revoked_at TIMESTAMPTZ
 );
+-- NB: partial-index predicates must be IMMUTABLE — NOW() is only STABLE, so
+-- "WHERE expires_at > NOW()" is rejected by Postgres ("functions in index
+-- predicate must be marked IMMUTABLE"). Keep the immutable part of the predicate
+-- (revoked flag) and index expires_at plainly; the planner still uses these for
+-- the active-session lookup and the expiry-cleanup scan.
 CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id, last_used_at DESC)
-    WHERE NOT revoked AND expires_at > NOW();
-CREATE INDEX IF NOT EXISTS idx_sessions_cleanup ON sessions(expires_at)
-    WHERE revoked OR expires_at < NOW();
+    WHERE NOT revoked;
+CREATE INDEX IF NOT EXISTS idx_sessions_cleanup ON sessions(expires_at);
 
 -- ─── OWNER_USER_ID: привязка существующих объектов к user ──────────────
 ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS owner_user_id UUID
