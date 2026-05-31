@@ -47,6 +47,38 @@ _PG_CONN = None
 _PG_CONN_LOCK = threading.Lock()
 
 
+def _get_pg_password():
+    """Resolve the Postgres password from a single source of truth.
+
+    Order: POSTGRES_PASSWORD env var -> POSTGRES_PASSWORD line in the deploy
+    .env file (COGCORE_ENV_FILE or /opt/cognitive-core/.env) -> live
+    `docker exec cognitive_postgres printenv` (legacy fallback). Reading from
+    .env means a password rotation needs no postgres recreate — rooms picks up
+    the new value on its next (re)connect.
+    """
+    pw = os.environ.get("POSTGRES_PASSWORD")
+    if pw:
+        return pw.strip()
+    env_path = os.environ.get("COGCORE_ENV_FILE", "/opt/cognitive-core/.env")
+    try:
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("POSTGRES_PASSWORD="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        return val
+    except Exception:
+        pass
+    try:
+        return subprocess.run(
+            ["docker", "exec", "cognitive_postgres", "printenv", "POSTGRES_PASSWORD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        return ""
+
+
 def _get_pg_conn():
     """Get or create psycopg connection (auto-reconnect)."""
     global _PG_CONN
@@ -63,10 +95,7 @@ def _get_pg_conn():
                     pass
                 _PG_CONN = None
         # Build DSN from container
-        pwd = subprocess.run(
-            ["docker", "exec", "cognitive_postgres", "printenv", "POSTGRES_PASSWORD"],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
+        pwd = _get_pg_password()
         ip = subprocess.run(
             ["docker", "inspect", "cognitive_postgres",
              "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
