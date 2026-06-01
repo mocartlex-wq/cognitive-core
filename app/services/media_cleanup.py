@@ -120,13 +120,27 @@ async def cleanup_stale_pending_agents() -> int:
 
     Если owner нажал «Передать ключ» но никто не сделал claim — pending row
     висит. Через 10 мин (CLAIM_TTL_SECONDS из connect.py) удаляем.
+
+    P0-1 fix (orphaned-key incident, 2x за 4 дня): agent_keys.agent_id —
+    FK ON DELETE CASCADE на agent_states. Если claim-handshake не успел
+    перевести агента в status='active' (guardrails блокируют curl, MCP
+    переподключается), но ключ уже создан — этот DELETE сносил agent_states
+    И каскадом убивал РАБОЧИЙ ключ → агент терял доступ и всю память.
+    Защита: НЕ трогаем pending, у которого есть активный (не отозванный)
+    ключ — наличие ключа значит, что claim фактически прошёл. Висящий
+    мусор без ключа по-прежнему чистится.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM agent_states "
-            "WHERE status = 'pending_claim' "
-            "  AND created_at < NOW() - INTERVAL '10 minutes'"
+            "DELETE FROM agent_states ast "
+            "WHERE ast.status = 'pending_claim' "
+            "  AND ast.created_at < NOW() - INTERVAL '10 minutes' "
+            "  AND NOT EXISTS ("
+            "        SELECT 1 FROM agent_keys ak "
+            "         WHERE ak.agent_id = ast.agent_id "
+            "           AND ak.revoked_at IS NULL"
+            "  )"
         )
     # Result format: "DELETE N"
     try:
