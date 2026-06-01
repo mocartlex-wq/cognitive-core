@@ -165,6 +165,206 @@ PLATFORMS: list[dict[str, Any]] = [
 # ─────────────────────────────────────────────────────────────────────────
 # Artifact builders — по одному на платформу
 # ─────────────────────────────────────────────────────────────────────────
+
+# Key-baked installers for the MCP-client platforms. The OWNER downloads and
+# runs these THEMSELVES (outside any agent sandbox) — so we don't ask an
+# interactive agent to curl + rewrite ~/.claude.json, which its guardrails
+# correctly block (that path is what hung onboarding sessions). The script
+# registers the REMOTE cognitive-core MCP (SSE + X-API-Key) into every detected
+# client. Plain inspectable text, no .exe. Placeholders filled by _render_installers.
+_INSTALLER_PS1_TEMPLATE = r'''# Cognitive Core — установщик для Windows (помощник @@AGENT_ID@@)
+# Прописывает УДАЛЁННЫЙ MCP-сервер cognitive-core (ключ уже внутри) во все
+# найденные клиенты: Claude Code, Claude Desktop, Cursor. Запускайте ЭТОТ файл
+# САМИ в PowerShell — НЕ давайте агенту (агенты в песочнице не правят конфиги):
+#   powershell -ExecutionPolicy Bypass -File .\connect-cognitive-core.ps1
+$ErrorActionPreference = 'Continue'
+$ApiKey  = '@@API_KEY@@'
+$AgentId = '@@AGENT_ID@@'
+$McpUrl  = '@@MCP_URL@@'
+$BaseUrl = '@@BASE_URL@@'
+$Header  = "X-API-Key: $ApiKey"
+$done = @()
+
+Write-Host ""
+Write-Host "Cognitive Core — подключение помощника '$AgentId'" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+
+function Merge-CcConfig($path) {
+  $dir = Split-Path $path -Parent
+  if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  $block = @{ command = 'npx'; args = @('-y', 'mcp-remote', $McpUrl, '--header', $Header) }
+  if (Test-Path $path) {
+    $supportsHashtable = (Get-Command ConvertFrom-Json).Parameters.ContainsKey('AsHashtable')
+    if (-not $supportsHashtable) {
+      throw "нужен PowerShell 7+ чтобы безопасно дополнить существующий $path (или добавьте cognitive-core вручную)"
+    }
+    $cfg = Get-Content $path -Raw | ConvertFrom-Json -AsHashtable
+    if ($null -eq $cfg) { $cfg = @{} }
+    if (-not $cfg.ContainsKey('mcpServers')) { $cfg['mcpServers'] = @{} }
+    $cfg['mcpServers']['cognitive-core'] = $block
+  } else {
+    $cfg = @{ mcpServers = @{ 'cognitive-core' = $block } }
+  }
+  $json = $cfg | ConvertTo-Json -Depth 12
+  [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
+}
+
+# 1) Claude Code (CLI) — проверенный путь
+if (Get-Command claude -ErrorAction SilentlyContinue) {
+  claude mcp remove cognitive-core *> $null
+  claude mcp add --transport sse cognitive-core $McpUrl --header $Header *> $null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "  OK  Claude Code (claude mcp add --transport sse)" -ForegroundColor Green
+    $done += 'Claude Code'
+  } else {
+    claude mcp add cognitive-core -- npx -y mcp-remote $McpUrl --header $Header *> $null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "  OK  Claude Code (mcp-remote fallback)" -ForegroundColor Green
+      $done += 'Claude Code'
+    } else {
+      Write-Host "  !   Claude Code CLI не смог добавить сервер (код $LASTEXITCODE)" -ForegroundColor Yellow
+    }
+  }
+}
+
+# 2) Claude Desktop
+$desktop = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'
+if (Test-Path (Split-Path $desktop -Parent)) {
+  try { Merge-CcConfig $desktop; Write-Host "  OK  Claude Desktop (конфиг обновлён)" -ForegroundColor Green; $done += 'Claude Desktop' }
+  catch { Write-Host "  !   Claude Desktop: $_" -ForegroundColor Yellow }
+}
+
+# 3) Cursor
+if (Test-Path (Join-Path $env:USERPROFILE '.cursor')) {
+  try { Merge-CcConfig (Join-Path $env:USERPROFILE '.cursor\mcp.json'); Write-Host "  OK  Cursor (.cursor/mcp.json обновлён)" -ForegroundColor Green; $done += 'Cursor' }
+  catch { Write-Host "  !   Cursor: $_" -ForegroundColor Yellow }
+}
+
+# Smoke test
+try {
+  $resp = Invoke-RestMethod -Uri "$BaseUrl/health" -TimeoutSec 8
+  Write-Host ""
+  Write-Host "  health: healthy=$($resp.healthy) version=$($resp.version)" -ForegroundColor Green
+} catch { Write-Host "  !   health check недоступен (не критично)" -ForegroundColor Yellow }
+
+Write-Host ""
+if ($done.Count -gt 0) {
+  Write-Host ("Готово: " + ($done -join ', ') + ". ПЕРЕЗАПУСТИТЕ клиент(ы)!") -ForegroundColor Green
+  Write-Host "После рестарта спросите помощника: cognitive_my_team"
+} else {
+  Write-Host "Не найдено ни одного клиента (Claude Code / Desktop / Cursor)." -ForegroundColor Yellow
+  Write-Host "Установите Claude Code и запустите установщик снова."
+}
+Write-Host "agent_id: $AgentId"
+'''
+
+_INSTALLER_SH_TEMPLATE = r'''#!/usr/bin/env bash
+# Cognitive Core — установщик для Linux/macOS (помощник @@AGENT_ID@@)
+# Прописывает УДАЛЁННЫЙ MCP-сервер cognitive-core (ключ уже внутри) во все
+# найденные клиенты: Claude Code, Claude Desktop (macOS), Cursor. Запускайте
+# ЭТОТ файл САМИ — НЕ давайте агенту (агенты в песочнице не правят конфиги):
+#   bash ./connect-cognitive-core.sh
+set -uo pipefail
+
+API_KEY='@@API_KEY@@'
+AGENT_ID='@@AGENT_ID@@'
+MCP_URL='@@MCP_URL@@'
+BASE_URL='@@BASE_URL@@'
+HEADER="X-API-Key: ${API_KEY}"
+DONE=()
+
+echo ""
+echo "Cognitive Core — подключение помощника '${AGENT_ID}'"
+echo "======================================================="
+
+merge_config() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  python3 - "$path" "$MCP_URL" "$API_KEY" <<'PYEOF'
+import json, sys, os
+path, url, key = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg = {}
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+    except Exception:
+        cfg = {}
+cfg.setdefault("mcpServers", {})["cognitive-core"] = {
+    "command": "npx",
+    "args": ["-y", "mcp-remote", url, "--header", f"X-API-Key: {key}"],
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+PYEOF
+}
+
+# 1) Claude Code (CLI) — проверенный путь
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove cognitive-core >/dev/null 2>&1 || true
+  if claude mcp add --transport sse cognitive-core "$MCP_URL" --header "$HEADER" >/dev/null 2>&1; then
+    echo "  OK  Claude Code (claude mcp add --transport sse)"
+    DONE+=("Claude Code")
+  elif claude mcp add cognitive-core -- npx -y mcp-remote "$MCP_URL" --header "$HEADER" >/dev/null 2>&1; then
+    echo "  OK  Claude Code (mcp-remote fallback)"
+    DONE+=("Claude Code")
+  else
+    echo "  !   Claude Code CLI не смог добавить сервер"
+  fi
+fi
+
+# 2) Claude Desktop (macOS)
+if [ -d "$HOME/Library/Application Support/Claude" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    if merge_config "$HOME/Library/Application Support/Claude/claude_desktop_config.json"; then
+      echo "  OK  Claude Desktop (конфиг обновлён)"; DONE+=("Claude Desktop")
+    else echo "  !   Claude Desktop: не удалось обновить конфиг"; fi
+  else echo "  !   Claude Desktop найден, но нет python3 для правки конфига"; fi
+fi
+
+# 3) Cursor
+if [ -d "$HOME/.cursor" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    if merge_config "$HOME/.cursor/mcp.json"; then
+      echo "  OK  Cursor (.cursor/mcp.json обновлён)"; DONE+=("Cursor")
+    else echo "  !   Cursor: не удалось обновить конфиг"; fi
+  fi
+fi
+
+# Smoke test
+if curl -fsS "$BASE_URL/health" --max-time 8 >/dev/null 2>&1; then
+  echo ""; echo "  health: OK"
+else echo "  !   health check недоступен (не критично)"; fi
+
+echo ""
+if [ ${#DONE[@]} -gt 0 ]; then
+  echo "Готово: ${DONE[*]}. ПЕРЕЗАПУСТИТЕ клиент(ы)!"
+  echo "После рестарта спросите помощника: cognitive_my_team"
+else
+  echo "Не найдено ни одного клиента (Claude Code / Desktop / Cursor)."
+  echo "Установите Claude Code и запустите установщик снова."
+fi
+echo "agent_id: ${AGENT_ID}"
+'''
+
+
+def _render_installers(agent_id: str, api_key: str) -> dict[str, str]:
+    """Fill the key-baked installer templates for the current agent.
+
+    Returned scripts register the REMOTE cognitive-core MCP into the user's
+    MCP clients when the OWNER runs them locally (outside the agent sandbox).
+    """
+    def _fill(tpl: str) -> str:
+        return (
+            tpl.replace("@@API_KEY@@", api_key)
+            .replace("@@AGENT_ID@@", agent_id)
+            .replace("@@MCP_URL@@", MCP_SSE_URL)
+            .replace("@@BASE_URL@@", BASE_URL)
+        )
+
+    return {"ps1": _fill(_INSTALLER_PS1_TEMPLATE), "sh": _fill(_INSTALLER_SH_TEMPLATE)}
+
+
 def _build_mcp_json(agent_id: str, api_key: str) -> dict[str, Any]:
     """Конфиг для Claude Code / Claude Desktop / Cursor mcpServers.
 
@@ -205,12 +405,24 @@ def _build_mcp_json(agent_id: str, api_key: str) -> dict[str, Any]:
 
 Подтверди что конфиг сохранён и я могу рестартить."""
 
+    installers = _render_installers(agent_id, api_key)
+
     return {
         "kind": "mcp_json",
         "filename": "claude_mcp_config.json",
         "mime": "application/json",
         "content": raw_json,
         "agent_prompt": agent_prompt,  # NEW — для табы «🤖 Поручить помощнику»
+        # Key-baked installers (owner runs locally → registers remote MCP into
+        # Claude Code / Desktop / Cursor). Recommended path: zero guardrail fight.
+        "installer_ps1": installers["ps1"],
+        "installer_sh": installers["sh"],
+        "installer_hint": (
+            "Скачайте установщик под вашу ОС и запустите ЕГО САМИ (не давайте агенту): "
+            "Windows — `powershell -ExecutionPolicy Bypass -File .\\connect-cognitive-core.ps1`; "
+            "Linux/macOS — `bash ./connect-cognitive-core.sh`. "
+            "Он пропишет cognitive-core во все найденные клиенты. После — перезапустите клиент."
+        ),
         "instructions": (
             f"📌 Два способа подключения (выберите один):\n\n"
             f"🤖 СПОСОБ A (рекомендуется): просто скопируйте промпт «Поручить помощнику» "
