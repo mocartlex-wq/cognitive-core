@@ -200,10 +200,12 @@
     } catch (e) { return iso; }
   }
   function isOwnerSender(from) { return String(from || '').startsWith('owner:'); }
-  function senderLabel(from) {
+  function senderLabel(from, display) {
     const s = String(from || '');
     if (s.startsWith('owner:')) return 'Вы (' + s.slice(6) + ')';
-    return s || '(аноним)';
+    // display_name = красивое имя агента (agent_label) если задано на сервере,
+    // иначе сырой from_agent. Чинит «профиль: Растр, комната: dsdsd».
+    return display || s || '(аноним)';
   }
 
   // ── state ─────────────────────────────────────────────────────────────
@@ -233,7 +235,7 @@
     const rows = parts.map(p => `
       <div class="item">
         <div style="min-width:0">
-          <div class="name">${esc(p.agent_id)} <span class="chip">${esc(p.role || 'member')}</span></div>
+          <div class="name">${esc(p.display_name || p.agent_id)} <span class="chip">${esc(p.role || 'member')}</span></div>
           <div class="meta">присоединился ${esc(fmtDate(p.joined_at))} · активность ${esc(fmtDate(p.last_seen_at))}</div>
         </div>
       </div>`).join('');
@@ -249,7 +251,7 @@
       return `
       <div class="msg${own ? ' is-owner' : ''}">
         <div class="msg-head">
-          <span class="msg-from">${esc(senderLabel(m.from_agent))}</span>
+          <span class="msg-from">${esc(senderLabel(m.from_agent, m.display_name))}</span>
           <span class="msg-time" title="${esc(fmtFullDate(m.created_at))}">${esc(fmtDate(m.created_at))}</span>
         </div>
         <div class="msg-text">${esc(m.text)}</div>

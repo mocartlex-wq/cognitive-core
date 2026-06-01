@@ -230,25 +230,34 @@ def list_messages(room_id, since=None, limit=50):
         since_e = since.replace("'", "''")
         where = f"AND created_at > '{since_e}'::timestamptz"
     rows, _ = pg(
-        f"SELECT id::text, from_agent, text, msg_type, parent_id::text, created_at::text "
-        f"FROM room_messages WHERE room_id = '{room_id}'::uuid {where} "
-        f"ORDER BY created_at DESC LIMIT {int(limit)};"
+        f"SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, m.created_at::text, "
+        f"       s.agent_label "
+        f"FROM room_messages m "
+        f"LEFT JOIN agent_states s ON s.agent_id = m.from_agent "
+        f"WHERE m.room_id = '{room_id}'::uuid {where} "
+        f"ORDER BY m.created_at DESC LIMIT {int(limit)};"
     )
+    # display_name: красивое имя (agent_label) если задано, иначе сырой agent_id.
+    # Чинит рассогласование «профиль показывает Растр, комната — dsdsd».
     return [
-        {"id": r[0], "from_agent": r[1], "text": r[2], "msg_type": r[3], "parent_id": r[4], "created_at": r[5]}
-        for r in rows if len(r) >= 6
+        {"id": r[0], "from_agent": r[1], "text": r[2], "msg_type": r[3], "parent_id": r[4],
+         "created_at": r[5], "display_name": (r[6] or r[1])}
+        for r in rows if len(r) >= 7
     ]
 
 
 def list_participants(room_id):
     rows, _ = pg(
-        "SELECT agent_id, platform, joined_at::text, last_seen_at::text "
-        "FROM room_participants WHERE room_id = %s::uuid;",
+        "SELECT p.agent_id, p.platform, p.joined_at::text, p.last_seen_at::text, s.agent_label "
+        "FROM room_participants p "
+        "LEFT JOIN agent_states s ON s.agent_id = p.agent_id "
+        "WHERE p.room_id = %s::uuid;",
         [room_id],
     )
     return [
-        {"agent_id": r[0], "platform": r[1], "joined_at": r[2], "last_seen_at": r[3]}
-        for r in rows if len(r) >= 4
+        {"agent_id": r[0], "platform": r[1], "joined_at": r[2], "last_seen_at": r[3],
+         "display_name": (r[4] or r[0])}
+        for r in rows if len(r) >= 5
     ]
 
 
