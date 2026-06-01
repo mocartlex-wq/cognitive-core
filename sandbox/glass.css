@@ -157,9 +157,10 @@ body.glass-mode .orb-3 {
   opacity: 0.28;
   mix-blend-mode: multiply;
 }
-.neuron-bg svg, .neuron-bg object {
+.neuron-bg svg, .neuron-bg object, .neuron-bg img {
   width: 100%; height: 100%;
   display: block;
+  object-fit: cover;
 }
 
 @keyframes orb-float-1 {

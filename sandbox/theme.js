@@ -63,11 +63,14 @@
     if (!document.querySelector('.neuron-bg')) {
       const wrap = document.createElement('div');
       wrap.className = 'neuron-bg';
-      const obj = document.createElement('object');
-      obj.type = 'image/svg+xml';
-      obj.data = '/static/neurons.svg';
-      obj.setAttribute('aria-hidden', 'true');
-      wrap.appendChild(obj);
+      // <img> instead of <object>: the global nginx header X-Frame-Options: DENY
+      // blocks <object data> embedding (ERR_BLOCKED_BY_RESPONSE, noise in console
+      // + /api/errors). An <img> renders the same decorative SVG without framing.
+      const img = document.createElement('img');
+      img.src = '/static/neurons.svg';
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      wrap.appendChild(img);
       document.body.insertBefore(wrap, document.body.firstChild);
     }
     // Inline icon sprite (для <use href="#name">)
