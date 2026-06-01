@@ -309,11 +309,12 @@ async def get_my_room_detail(room_id: str, request: Request):
         try:
             prows = await conn.fetch(
                 """
-                SELECT agent_id, COALESCE(role, 'member') AS role,
-                       joined_at, last_seen_at
-                  FROM room_participants
-                 WHERE room_id = $1::uuid
-                 ORDER BY joined_at ASC NULLS LAST
+                SELECT p.agent_id, COALESCE(p.role, 'member') AS role,
+                       p.joined_at, p.last_seen_at, s.agent_label
+                  FROM room_participants p
+                  LEFT JOIN agent_states s ON s.agent_id = p.agent_id
+                 WHERE p.room_id = $1::uuid
+                 ORDER BY p.joined_at ASC NULLS LAST
                  LIMIT 500
                 """,
                 room_id,
@@ -323,6 +324,9 @@ async def get_my_room_detail(room_id: str, request: Request):
                 for k in ("joined_at", "last_seen_at"):
                     if isinstance(d.get(k), datetime):
                         d[k] = d[k].isoformat()
+                # display_name: красивое имя (agent_label) если задано, иначе agent_id.
+                # Чинит рассогласование «профиль: Растр, комната: dsdsd».
+                d["display_name"] = d.get("agent_label") or d.get("agent_id")
                 participants.append(d)
         except Exception as e:
             logger.info("room_detail participants_skip room=%s err=%s", room_id, e)
@@ -337,10 +341,12 @@ async def get_my_room_detail(room_id: str, request: Request):
             # Берём последние 50 (DESC), затем разворачиваем в хронологию для UI
             mrows = await conn.fetch(
                 """
-                SELECT id::text AS id, from_agent, text, created_at
-                  FROM room_messages
-                 WHERE room_id = $1::uuid
-                 ORDER BY created_at DESC
+                SELECT m.id::text AS id, m.from_agent, m.text, m.created_at,
+                       s.agent_label
+                  FROM room_messages m
+                  LEFT JOIN agent_states s ON s.agent_id = m.from_agent
+                 WHERE m.room_id = $1::uuid
+                 ORDER BY m.created_at DESC
                  LIMIT 50
                 """,
                 room_id,
@@ -349,6 +355,10 @@ async def get_my_room_detail(room_id: str, request: Request):
                 d = dict(m)
                 if isinstance(d.get("created_at"), datetime):
                     d["created_at"] = d["created_at"].isoformat()
+                # display_name: agent_label если есть; для owner:email оставляем как есть
+                # (фронт сам форматирует «Вы (email)»), для агентов — красивое имя.
+                fa = d.get("from_agent") or ""
+                d["display_name"] = d.get("agent_label") or fa
                 messages.append(d)
         except Exception as e:
             logger.info("room_detail messages_skip room=%s err=%s", room_id, e)
