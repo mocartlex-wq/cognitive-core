@@ -63,15 +63,19 @@
     if (!document.querySelector('.neuron-bg')) {
       const wrap = document.createElement('div');
       wrap.className = 'neuron-bg';
-      // <img> instead of <object>: the global nginx header X-Frame-Options: DENY
-      // blocks <object data> embedding (ERR_BLOCKED_BY_RESPONSE, noise in console
-      // + /api/errors). An <img> renders the same decorative SVG without framing.
-      const img = document.createElement('img');
-      img.src = '/static/neurons.svg';
-      img.alt = '';
-      img.setAttribute('aria-hidden', 'true');
-      wrap.appendChild(img);
+      wrap.setAttribute('aria-hidden', 'true');
       document.body.insertBefore(wrap, document.body.firstChild);
+      // INLINE the SVG (fetch + innerHTML) — НЕ <object>/<img>:
+      //  • <object data> блокируется глобальным nginx X-Frame-Options: DENY
+      //    (ERR_BLOCKED_BY_RESPONSE — шум в консоли и /api/errors);
+      //  • <img> рендерит SVG статично — SMIL-анимации (<animate>, импульсы)
+      //    НЕ играют → фон «замер» (регрессия PR #180).
+      // Инлайн в DOM: анимации работают, фрейминга нет. Тот же приём, что
+      // ниже для icons.svg sprite.
+      fetch('/static/neurons.svg')
+        .then(r => r.text())
+        .then(svg => { wrap.innerHTML = svg; })
+        .catch(() => {});
     }
     // Inline icon sprite (для <use href="#name">)
     if (!document.getElementById('cc-icons-sprite')) {
