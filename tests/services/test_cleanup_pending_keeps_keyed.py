@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from app.services.media_cleanup import cleanup_stale_pending_agents
 
 
