@@ -11,10 +11,11 @@ key. This test pins that behaviour:
   - pending + NO key, older than TTL     → deleted
   - pending + active key, older than TTL → KEPT (this is the orphan guard)
   - pending + NO key, younger than TTL   → kept (not stale yet)
+
+Self-contained: creates its own throwaway account so it behaves identically
+on a freshly-bootstrapped CI database and on a populated prod database.
 """
 from __future__ import annotations
-
-import pytest
 
 from app.db.postgres import get_pool
 from app.services.media_cleanup import cleanup_stale_pending_agents
@@ -25,9 +26,11 @@ A_KEYLESS_OLD = "test_cleanup_keyless_old"
 A_KEYED_OLD = "test_cleanup_keyed_old"
 A_KEYLESS_NEW = "test_cleanup_keyless_new"
 _ALL = (A_KEYLESS_OLD, A_KEYED_OLD, A_KEYLESS_NEW)
+_TEST_EMAIL = "cleanup-guard-test@example.invalid"
+_TEST_KEY = "test-key-cleanup-guard-001"
 
 
-async def _cleanup_rows(conn):
+async def _purge(conn):
     await conn.execute("DELETE FROM agent_keys WHERE agent_id = ANY($1::text[])", list(_ALL))
     await conn.execute("DELETE FROM agent_states WHERE agent_id = ANY($1::text[])", list(_ALL))
 
@@ -35,12 +38,15 @@ async def _cleanup_rows(conn):
 async def test_cleanup_keeps_pending_with_active_key():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # agent_states.owner_user_id FK → accounts(user_id): use a real account.
-        owner = await conn.fetchval("SELECT user_id::text FROM accounts ORDER BY created_at LIMIT 1")
-        if not owner:
-            pytest.skip("no accounts in DB to satisfy owner_user_id FK")
-
-        await _cleanup_rows(conn)
+        # Own throwaway account → agent_states.owner_user_id FK is satisfied
+        # regardless of whether the DB already has accounts (CI vs prod parity).
+        owner = await conn.fetchval(
+            "INSERT INTO accounts (email, email_verified) VALUES ($1, true) "
+            "ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email "
+            "RETURNING user_id::text",
+            _TEST_EMAIL,
+        )
+        await _purge(conn)
         try:
             # 1) stale pending, NO key → should be deleted
             await conn.execute(
@@ -57,7 +63,7 @@ async def test_cleanup_keeps_pending_with_active_key():
             await conn.execute(
                 "INSERT INTO agent_keys (api_key, agent_id, owner_user_id) "
                 "VALUES ($1, $2, $3::uuid)",
-                "test-key-cleanup-guard-001", A_KEYED_OLD, owner,
+                _TEST_KEY, A_KEYED_OLD, owner,
             )
             # 3) fresh pending, NO key → not stale yet, kept
             await conn.execute(
@@ -78,11 +84,11 @@ async def test_cleanup_keeps_pending_with_active_key():
             assert A_KEYED_OLD in survivors, "stale pending WITH active key must be kept (orphan guard)"
             assert A_KEYLESS_NEW in survivors, "fresh pending should not be touched"
 
-            # And the key must still be alive (not cascade-killed)
             key_alive = await conn.fetchval(
                 "SELECT count(*) FROM agent_keys WHERE agent_id = $1 AND revoked_at IS NULL",
                 A_KEYED_OLD,
             )
             assert key_alive == 1, "active key of kept agent must survive cleanup"
         finally:
-            await _cleanup_rows(conn)
+            await _purge(conn)
+            await conn.execute("DELETE FROM accounts WHERE email = $1", _TEST_EMAIL)
