@@ -218,7 +218,10 @@ body {
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 16px; border-radius: 6px;
-  background: var(--accent); color: #fff;
+  /* CTA bg darker than the --accent brand color so white text passes WCAG AA
+     (white on #58a6ff = 2.53:1 < 4.5; white on #2563eb = 5.17:1). --accent
+     stays bright for accent-as-text / icons / borders / charts. */
+  background: var(--btn-bg, #2563eb); color: #fff;
   border: none; cursor: pointer;
   font-size: 13px; font-weight: 500;
   font-family: inherit;
