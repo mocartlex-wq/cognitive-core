@@ -389,6 +389,20 @@
       <div class="warn">Сохраните сейчас — больше показать нельзя. После закрытия страницы — придётся создавать нового помощника.</div>
     </div>
 
+    <!-- Recommended: key-baked installer (owner runs it; registers remote MCP) -->
+    <div id="installerBox" style="display:none; margin:18px 0; padding:16px; border:1px solid var(--glass-border, rgba(255,255,255,0.12)); border-radius:14px; background:rgba(120,170,255,0.07)">
+      <div style="font-weight:600; margin-bottom:6px">⬇️ Установщик (рекомендуется)</div>
+      <p style="font-size:12.5px; color:var(--glass-text-dim); margin:0 0 12px">
+        Скачайте файл и запустите <b>сами</b> — он пропишет cognitive-core во все найденные клиенты
+        (Claude Code / Desktop / Cursor). Не передавайте его агенту: агенты в песочнице не правят конфиги.
+      </p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button class="btn" id="dlPs1Btn" type="button" onclick="downloadInstaller('ps1')">🪟 Windows (.ps1)</button>
+        <button class="btn" id="dlShBtn" type="button" onclick="downloadInstaller('sh')">🐧 Linux / macOS (.sh)</button>
+      </div>
+      <p id="installerRunHint" style="font-size:12px; color:var(--glass-text-dim); margin:12px 0 0; font-family:monospace; white-space:pre-wrap; word-break:break-all"></p>
+    </div>
+
     <div id="installTabs" style="display:none">
       <div style="display:flex; gap:8px; margin-bottom:14px;">
         <button class="btn" id="tabAgentBtn" onclick="switchTab('agent')">🤖 Поручить помощнику</button>
@@ -679,7 +693,23 @@ let activeTab = 'agent';  // 'agent' or 'manual'
 function renderStep3() {
   $('step3PlatformName').textContent = `${state.selectedPlatform.icon} ${state.selectedPlatform.name}`;
   $('apiKeyDisplay').textContent = state.agent.api_key;
-  // Если артефакт имеет agent_prompt — показываем табы (recommended path)
+  // Key-baked installer (recommended): owner runs it locally → регистрирует
+  // удалённый MCP в Claude Code / Desktop / Cursor. Не упирается в guardrails
+  // агента (в отличие от «поручить помощнику»). Показываем, если backend прислал.
+  const hasInstaller = !!(state.artifact.installer_ps1 || state.artifact.installer_sh);
+  if (hasInstaller) {
+    $('installerBox').style.display = '';
+    // OS-detect: подсветить «родную» кнопку и показать команду запуска.
+    const isWin = /win/i.test(navigator.platform || navigator.userAgent || '');
+    $('dlPs1Btn').classList.toggle('secondary', !isWin);
+    $('dlShBtn').classList.toggle('secondary', isWin);
+    $('installerRunHint').textContent = isWin
+      ? 'После скачивания в PowerShell:\n  powershell -ExecutionPolicy Bypass -File .\\connect-cognitive-core.ps1'
+      : 'После скачивания в терминале:\n  bash ./connect-cognitive-core.sh';
+  } else {
+    $('installerBox').style.display = 'none';
+  }
+  // Если артефакт имеет agent_prompt — показываем табы (alternative path)
   if (state.artifact.agent_prompt) {
     $('installTabs').style.display = '';
     activeTab = 'agent';
@@ -689,6 +719,21 @@ function renderStep3() {
     $('artifactCode').textContent = state.artifact.content;
   }
   $('artifactInstructions').textContent = state.artifact.instructions;
+}
+
+function downloadInstaller(os) {
+  const content = os === 'ps1' ? state.artifact.installer_ps1 : state.artifact.installer_sh;
+  if (!content) return;
+  const filename = os === 'ps1' ? 'connect-cognitive-core.ps1' : 'connect-cognitive-core.sh';
+  const mime = os === 'ps1' ? 'text/x-powershell' : 'text/x-shellscript';
+  const blob = new Blob([content], {type: mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  track(state.selectedPlatform.id, 'copied', `installer=${os}`);
 }
 
 function switchTab(tab) {
