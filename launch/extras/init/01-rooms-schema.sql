@@ -20,8 +20,17 @@ CREATE TABLE IF NOT EXISTS public.rooms (
     status      text        DEFAULT 'active',
     metadata    jsonb       DEFAULT '{}'::jsonb,
     created_at  timestamptz DEFAULT now(),
-    closed_at   timestamptz
+    closed_at   timestamptz,
+    -- Conductor V1: пользователь > дирижёр > агенты. conductor_agent_id —
+    -- агент-дирижёр комнаты (получает безадресные сообщения + копии @-адресованных).
+    -- room_mode: 'plain' (нет дирижёра) | 'conductor_v1' (дирижёр назначен).
+    conductor_agent_id text,
+    room_mode          text NOT NULL DEFAULT 'plain'
 );
+-- Idempotent guards для уже существующих инсталляций (init SQL гоняется только на
+-- пустой БД, но эти ALTER безопасны и при ручном применении к живой схеме).
+ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS conductor_agent_id text;
+ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS room_mode text NOT NULL DEFAULT 'plain';
 
 CREATE TABLE IF NOT EXISTS public.room_participants (
     room_id      uuid        NOT NULL REFERENCES public.rooms(id) ON DELETE CASCADE,
