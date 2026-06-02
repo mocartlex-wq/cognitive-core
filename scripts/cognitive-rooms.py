@@ -235,7 +235,12 @@ def list_messages(room_id, since=None, limit=50):
     where = ""
     if since:
         since_e = since.replace("'", "''")
-        where = f"AND created_at > '{since_e}'::timestamptz"
+        # Qualify as m.created_at: agent_states also has a created_at column, so
+        # an unqualified `created_at` binds to the LEFT-JOINed agent_states row,
+        # which is NULL for any from_agent without an agent_states entry -> the
+        # `NULL > ts` predicate silently drops those messages. This broke the
+        # /wait long-poll and /messages?since= for agents lacking a state row.
+        where = f"AND m.created_at > '{since_e}'::timestamptz"
     rows, _ = pg(
         f"SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, m.created_at::text, "
         f"       s.agent_label "
