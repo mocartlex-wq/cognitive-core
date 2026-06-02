@@ -10,6 +10,7 @@
 #   POST   /rooms/<id>/ask            ask question + wait_for=[agents] + timeout
 #                                     LONG-POLL until answered or timeout
 #   POST   /rooms/<id>/answer/<qid>   answer pending question
+#   POST   /rooms/<id>/conductor      set/clear conductor {"agent_id": id|null}
 #   GET    /rooms/<id>/messages       list messages (since=ts)
 #   GET    /rooms/<id>/pending        pending questions
 #   GET    /rooms/<id>/participants   list participants
@@ -203,12 +204,19 @@ def create_room(name, description, created_by):
 
 def get_room_by_key(api_key):
     rows, err = pg(
-        "SELECT id::text, name, status FROM rooms WHERE api_key = %s;",
+        "SELECT id::text, name, status, conductor_agent_id, room_mode "
+        "FROM rooms WHERE api_key = %s;",
         [api_key],
     )
     if err or not rows:
         return None
-    return {"room_id": rows[0][0], "name": rows[0][1], "status": rows[0][2]}
+    r = rows[0]
+    return {
+        "room_id": r[0], "name": r[1], "status": r[2],
+        # pg() maps SQL NULL -> "" ; normalize conductor to None for the API.
+        "conductor_agent_id": (r[3] or None),
+        "room_mode": (r[4] or "plain"),
+    }
 
 
 def join_room(room_id, agent_id, platform="unknown"):
@@ -218,6 +226,68 @@ def join_room(room_id, agent_id, platform="unknown"):
         [room_id, agent_id, platform],
     )
     return err is None
+
+
+# ---------------------------------------------------------------------------
+# Conductor V1 — пользователь > дирижёр > агенты.
+# ---------------------------------------------------------------------------
+def get_conductor(room_id):
+    """Return the room's conductor agent_id or None (empty/missing => None)."""
+    rows, err = pg(
+        "SELECT conductor_agent_id FROM rooms WHERE id = %s::uuid;",
+        [room_id],
+    )
+    if err or not rows:
+        return None
+    val = rows[0][0]
+    # pg() maps SQL NULL to "" — treat empty string as "no conductor".
+    return val if val else None
+
+
+def set_conductor(room_id, agent_id):
+    """Assign (or clear, when agent_id is None) the room's conductor.
+
+    room_mode follows: 'conductor_v1' when a conductor is set, 'plain' otherwise.
+    Returns (mode_str, error_str_or_None).
+    """
+    mode = "conductor_v1" if agent_id else "plain"
+    _rows, err = pg(
+        "UPDATE rooms SET conductor_agent_id = %s, room_mode = %s WHERE id = %s::uuid;",
+        [agent_id, mode, room_id],
+    )
+    if err:
+        return None, err
+    return mode, None
+
+
+def _is_registered_agent(agent_id):
+    """True if agent_id is a real runtime agent (row in agent_states).
+
+    Anti-loop guard for unaddressed→conductor bridging: only messages from
+    NON-agents (owner / owner-test / a human) are bridged to the conductor.
+    Agent replies and the synthetic 'system' author must never be bridged,
+    otherwise conductor reply -> agent -> conductor would loop forever.
+    """
+    if not agent_id or agent_id == "system":
+        return True  # treat 'system' as "do not bridge" (same as a real agent)
+    rows, err = pg(
+        "SELECT 1 FROM agent_states WHERE agent_id = %s LIMIT 1;",
+        [agent_id],
+    )
+    if err:
+        # Fail safe: on a lookup error, assume registered => do NOT bridge
+        # (prefer dropping a possible owner message over risking a loop).
+        sys.stderr.write(f"[rooms] conductor agent-check failed for {agent_id}: {err}\n")
+        return True
+    return bool(rows)
+
+
+# Localized instruction posted by the system when an unaddressed message lands
+# in a room with no conductor. Kept short; no @mention so it is not re-bridged.
+CONDUCTOR_HINT_TEXT = (
+    "В этой комнате не назначен дирижёр. Назначьте дирижёра "
+    "или адресуйте сообщение конкретному агенту через @имя."
+)
 
 
 # Matches @mentions: @agent_id or @Label. \w is Unicode-aware in Python 3 re,
@@ -280,40 +350,96 @@ def _resolve_mentions_to_agents(room_id, text):
     return resolved
 
 
+def _inbox_insert(room_id, from_agent, to_agent, text, extra_ctx=None):
+    """Write one L1 agent_inbox event (same shape as a direct DM). Best-effort:
+    a failure is logged and swallowed so the room post itself always succeeds."""
+    ctx = {"via": "room", "room_id": room_id}
+    if extra_ctx:
+        ctx.update(extra_ctx)
+    payload = {"from": from_agent, "to": to_agent, "text": text, "context": ctx}
+    _rows, ierr = pg(
+        "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) "
+        "VALUES (%s, %s, %s::jsonb);",
+        [from_agent, "agent_inbox", json.dumps(payload, ensure_ascii=False)],
+    )
+    if ierr:
+        sys.stderr.write(f"[rooms] bridge inbox insert failed to={to_agent}: {ierr}\n")
+        return False
+    tag = "+".join(k for k in (extra_ctx or {}).keys()) or "addr"
+    sys.stderr.write(
+        f"[rooms] bridge[{tag}]: room {room_id} {from_agent} -> inbox {to_agent}\n"
+    )
+    return True
+
+
 def _bridge_to_inbox(room_id, from_agent, text):
-    """Dual-write @-addressed room messages into L1 agent_inbox (same shape as
-    a direct DM) so the 24/7 server daemon — which polls /agents/inbox only —
-    wakes up and replies. Only @-mentioned agents are bridged (one inbox event
-    per unique recipient); a message with no resolvable @mention is NOT bridged
-    (otherwise the daemon would react to every room line = noise). The author is
-    never sent a copy of their own message (anti-self-loop). Best-effort: any
+    """Dual-write room messages into L1 agent_inbox (same shape as a direct DM)
+    so the 24/7 server daemon — which polls /agents/inbox only — wakes up and
+    replies. Two routing modes coexist:
+
+    1. @-addressed messages -> bridged to each unique @mention recipient (as
+       before). PLUS, in Conductor V1, the conductor gets a control COPY of any
+       @-addressed line it is not already a recipient/author of (context
+       copy:true, text prefixed "[копия дирижёру] "), so it can supervise.
+
+    2. Unaddressed messages (no resolvable @mention):
+         - conductor set  -> bridged to the conductor (context unaddressed:true)
+           BUT ONLY when the author is a NON-agent (owner / owner-test / human).
+           Agent replies and the synthetic 'system' author are never bridged —
+           this is the железная anti-loop guard (conductor reply -> agent ->
+           conductor would otherwise loop forever).
+         - no conductor   -> a one-line 'system' hint is posted into the room
+           ("назначьте дирижёра или пишите @имя"); nothing is bridged.
+
+    The author is never sent a copy of their own message. Best-effort: any
     failure here is swallowed so the room post itself always succeeds.
     """
     try:
+        conductor = get_conductor(room_id)
         recipients = _resolve_mentions_to_agents(room_id, text)
         recipients = [a for a in recipients if a != from_agent]  # no self-DM
-        if not recipients:
-            return
-        for to_agent in recipients:
-            payload = {
-                "from": from_agent,
-                "to": to_agent,
-                "text": text,
-                "context": {"via": "room", "room_id": room_id},
-            }
-            _rows, ierr = pg(
-                "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) "
-                "VALUES (%s, %s, %s::jsonb);",
-                [from_agent, "agent_inbox", json.dumps(payload, ensure_ascii=False)],
-            )
-            if ierr:
-                sys.stderr.write(f"[rooms] mention-bridge inbox insert failed to={to_agent}: {ierr}\n")
-            else:
-                sys.stderr.write(
-                    f"[rooms] mention-bridge: room {room_id} {from_agent} -> inbox {to_agent}\n"
+
+        if recipients:
+            # --- Case 1: @-addressed -> direct recipients (unchanged behavior).
+            for to_agent in recipients:
+                _inbox_insert(room_id, from_agent, to_agent, text)
+            # Conductor control-copy: only if a conductor is set, it is neither
+            # the author nor already an addressed recipient.
+            if conductor and conductor != from_agent and conductor not in recipients:
+                _inbox_insert(
+                    room_id, from_agent, conductor,
+                    "[копия дирижёру] " + text,
+                    extra_ctx={"copy": True},
                 )
+            return
+
+        # --- Case 2: unaddressed message (no resolvable @mention).
+        if conductor:
+            # Anti-loop: bridge to conductor ONLY from non-agent authors
+            # (owner/human). Agent + 'system' authors are dropped.
+            if _is_registered_agent(from_agent):
+                sys.stderr.write(
+                    f"[rooms] conductor: drop unaddressed from agent/system "
+                    f"'{from_agent}' (anti-loop), room {room_id}\n"
+                )
+                return
+            if conductor == from_agent:
+                return  # conductor's own unaddressed line — nothing to bridge
+            _inbox_insert(
+                room_id, from_agent, conductor, text,
+                extra_ctx={"unaddressed": True},
+            )
+            return
+
+        # No conductor + unaddressed: post a one-line system hint. The hint has
+        # no @mention and author 'system' (excluded), so the nested bridge call
+        # from post_message() is a no-op -> no recursion/loop. Skip the hint for
+        # agent/system authors so agent chatter doesn't spam the room.
+        if _is_registered_agent(from_agent):
+            return
+        post_message(room_id, "system", CONDUCTOR_HINT_TEXT, msg_type="system")
     except Exception as e:
-        sys.stderr.write(f"[rooms] mention-bridge unexpected error: {type(e).__name__}: {e}\n")
+        sys.stderr.write(f"[rooms] bridge unexpected error: {type(e).__name__}: {e}\n")
 
 
 def post_message(room_id, from_agent, text, msg_type="message", parent_id=None):
@@ -1879,7 +2005,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not room:
                     self._send(404, {"error": "room not found or wrong key"})
                     return
-                self._send(200, {"room_id": room["room_id"], "name": room["name"], "status": room.get("status", "active")})
+                self._send(200, {"room_id": room["room_id"], "name": room["name"],
+                                 "status": room.get("status", "active"),
+                                 "conductor_agent_id": room.get("conductor_agent_id"),
+                                 "room_mode": room.get("room_mode", "plain")})
             elif path == "/rooms" and self.headers.get("X-Admin-Key") == os.environ.get("ROOMS_ADMIN_KEY", "admin-default"):
                 self._send(200, {"rooms": list_rooms_admin()})
             elif path.startswith("/rooms/") and path.endswith("/wait"):
@@ -2034,6 +2163,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(500, {"error": err})
                 else:
                     self._send(200, {"ok": True, "message_id": msg_id, "from_agent": from_agent})
+            elif path.startswith("/rooms/") and path.endswith("/conductor"):
+                # Conductor V1: назначить/снять дирижёра комнаты.
+                # body {"agent_id": "<id>"} назначает, {"agent_id": null} (или
+                # пустая строка / отсутствие поля) снимает. Auth: X-Room-Key.
+                room_id = path.split("/")[2]
+                room = self._auth_room(room_id)
+                if not room:
+                    return
+                raw = body.get("agent_id")
+                agent_id = raw.strip() if isinstance(raw, str) and raw.strip() else None
+                mode, err = set_conductor(room_id, agent_id)
+                if err:
+                    self._send(500, {"error": err})
+                    return
+                resp = {"ok": True, "room_id": room_id,
+                        "conductor_agent_id": agent_id, "room_mode": mode}
+                # Helpful hint when назначаем неизвестного агента (не блокируем).
+                if agent_id and not _is_registered_agent(agent_id):
+                    resp["warning"] = "agent_id not found in agent_states (set anyway)"
+                self._send(200, resp)
             elif path.startswith("/rooms/") and path.endswith("/ask"):
                 room_id = path.split("/")[2]
                 room = self._auth_room(room_id)
