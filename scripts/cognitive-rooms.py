@@ -25,7 +25,7 @@
 #   - Sleeping agents subscribed via NATS WS get push
 #   - Asker waits via long-poll (up to timeout) — does NOT sleep
 
-import os, sys, json, time, secrets, threading, subprocess, http.server
+import os, sys, json, time, re, secrets, threading, subprocess, http.server
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -220,6 +220,102 @@ def join_room(room_id, agent_id, platform="unknown"):
     return err is None
 
 
+# Matches @mentions: @agent_id or @Label. \w is Unicode-aware in Python 3 re,
+# so it captures Cyrillic labels (@Растр, @Аналитик) and ASCII ids (@analyst-1).
+_MENTION_RE = re.compile(r"@([\w\-]+)", re.UNICODE)
+
+
+def _resolve_mentions_to_agents(room_id, text):
+    """Parse @mentions from `text` and resolve each to a real agent_id.
+
+    Resolution is room-scoped first (an @mention should address a participant
+    of THIS room), then falls back to a global agent_states lookup. A mention
+    resolves if it matches a participant's agent_id OR that participant's
+    agent_label (case-insensitive). Returns a de-duplicated list of agent_ids.
+    Mentions that don't map to a real agent are dropped (no inbox copy).
+    """
+    mentions = _MENTION_RE.findall(text or "")
+    if not mentions:
+        return []
+    # Load this room's participants joined to their agent_states label once.
+    rows, err = pg(
+        "SELECT p.agent_id, COALESCE(s.agent_label, '') "
+        "FROM room_participants p "
+        "LEFT JOIN agent_states s ON s.agent_id = p.agent_id "
+        "WHERE p.room_id = %s::uuid;",
+        [room_id],
+    )
+    if err:
+        sys.stderr.write(f"[rooms] mention-bridge participant query failed: {err}\n")
+        rows = []
+    by_id = {}        # lower(agent_id)    -> agent_id
+    by_label = {}     # lower(agent_label) -> agent_id
+    for r in rows:
+        aid, label = r[0], (r[1] or "")
+        if aid:
+            by_id[aid.lower()] = aid
+            if label:
+                by_label.setdefault(label.lower(), aid)
+    resolved = []
+    seen = set()
+    for m in mentions:
+        key = m.lower()
+        aid = by_id.get(key) or by_label.get(key)
+        if not aid:
+            # Fallback: global agent_states (mention may target an agent that
+            # exists but hasn't joined this room yet). First match wins.
+            g, gerr = pg(
+                "SELECT agent_id FROM agent_states "
+                "WHERE agent_id = %s OR lower(agent_label) = lower(%s) LIMIT 1;",
+                [m, m],
+            )
+            if gerr:
+                sys.stderr.write(f"[rooms] mention-bridge global resolve failed for @{m}: {gerr}\n")
+                continue
+            if g and g[0] and g[0][0]:
+                aid = g[0][0]
+        if aid and aid not in seen:
+            seen.add(aid)
+            resolved.append(aid)
+    return resolved
+
+
+def _bridge_to_inbox(room_id, from_agent, text):
+    """Dual-write @-addressed room messages into L1 agent_inbox (same shape as
+    a direct DM) so the 24/7 server daemon — which polls /agents/inbox only —
+    wakes up and replies. Only @-mentioned agents are bridged (one inbox event
+    per unique recipient); a message with no resolvable @mention is NOT bridged
+    (otherwise the daemon would react to every room line = noise). The author is
+    never sent a copy of their own message (anti-self-loop). Best-effort: any
+    failure here is swallowed so the room post itself always succeeds.
+    """
+    try:
+        recipients = _resolve_mentions_to_agents(room_id, text)
+        recipients = [a for a in recipients if a != from_agent]  # no self-DM
+        if not recipients:
+            return
+        for to_agent in recipients:
+            payload = {
+                "from": from_agent,
+                "to": to_agent,
+                "text": text,
+                "context": {"via": "room", "room_id": room_id},
+            }
+            _rows, ierr = pg(
+                "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) "
+                "VALUES (%s, %s, %s::jsonb);",
+                [from_agent, "agent_inbox", json.dumps(payload, ensure_ascii=False)],
+            )
+            if ierr:
+                sys.stderr.write(f"[rooms] mention-bridge inbox insert failed to={to_agent}: {ierr}\n")
+            else:
+                sys.stderr.write(
+                    f"[rooms] mention-bridge: room {room_id} {from_agent} -> inbox {to_agent}\n"
+                )
+    except Exception as e:
+        sys.stderr.write(f"[rooms] mention-bridge unexpected error: {type(e).__name__}: {e}\n")
+
+
 def post_message(room_id, from_agent, text, msg_type="message", parent_id=None):
     rows, err = pg(
         "INSERT INTO room_messages (room_id, from_agent, text, msg_type, parent_id) "
@@ -228,6 +324,10 @@ def post_message(room_id, from_agent, text, msg_type="message", parent_id=None):
     )
     if err or not rows:
         return None, err
+    # Bridge @-mentions into agent_inbox so the server daemon answers in rooms
+    # 24/7 (room_messages alone is not polled by the runtime). Best-effort: the
+    # room write above has already succeeded regardless of bridge outcome.
+    _bridge_to_inbox(room_id, from_agent, text)
     return rows[0][0], None
 
 
