@@ -79,6 +79,21 @@ def _get_pg_password():
         return ""
 
 
+def _build_pg_dsn():
+    """Build a Postgres DSN from the live container IP + resolved password.
+
+    Shared by the pooled pg() connection and by the dedicated LISTEN connection
+    used by the /wait long-poll endpoint.
+    """
+    pwd = _get_pg_password()
+    ip = subprocess.run(
+        ["docker", "inspect", "cognitive_postgres",
+         "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip().splitlines()[0]
+    return f"postgresql://cognitive:{pwd}@{ip}:5432/cognitive_core"
+
+
 def _get_pg_conn():
     """Get or create psycopg connection (auto-reconnect)."""
     global _PG_CONN
@@ -94,15 +109,7 @@ def _get_pg_conn():
                 except Exception:
                     pass
                 _PG_CONN = None
-        # Build DSN from container
-        pwd = _get_pg_password()
-        ip = subprocess.run(
-            ["docker", "inspect", "cognitive_postgres",
-             "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip().splitlines()[0]
-        dsn = f"postgresql://cognitive:{pwd}@{ip}:5432/cognitive_core"
-        _PG_CONN = psycopg.connect(dsn, autocommit=True)
+        _PG_CONN = psycopg.connect(_build_pg_dsn(), autocommit=True)
         return _PG_CONN
 
 
@@ -244,6 +251,109 @@ def list_messages(room_id, since=None, limit=50):
          "created_at": r[5], "display_name": (r[6] or r[1])}
         for r in rows if len(r) >= 7
     ]
+
+
+# Cap on how long a single /wait request may block, regardless of client ask.
+WAIT_MAX_TIMEOUT = 30
+
+
+def wait_for_room_message(room_id, since_seconds=10, timeout=25):
+    """Server-side long-poll: block until a new message lands in `room_id`.
+
+    Returns (result_dict, error_str_or_None) where result_dict is
+    {"messages": [...], "timeout": bool}.
+
+    Strategy (psycopg3 NOTIFY):
+      1. Fast path — if messages already exist newer than (now - since_seconds),
+         return them immediately without blocking.
+      2. Otherwise open a DEDICATED autocommit connection, LISTEN room_event,
+         and wait on conn.notifies(timeout=...) until a notification whose
+         payload room_id matches arrives, or the deadline passes. The Postgres
+         trigger notify_room_message fires pg_notify('room_event', ...) on every
+         insert into room_messages, so latency is sub-second vs a 6s client poll.
+      3. On a matching notify, re-query list_messages() since the cutoff so the
+         caller gets the same enriched shape (display_name etc.) as /messages.
+
+    The LISTEN connection is always closed in finally (never reuses the shared
+    pg() pool connection).
+    """
+    try:
+        timeout = max(1, min(int(timeout), WAIT_MAX_TIMEOUT))
+        since_seconds = max(1, int(since_seconds))
+    except (TypeError, ValueError):
+        timeout, since_seconds = 25, 10
+
+    # Cutoff timestamp computed server-side in Postgres so clocks always agree.
+    cutoff_rows, err = pg(
+        "SELECT (NOW() - INTERVAL '%s seconds')::text;", [since_seconds]
+    )
+    if err or not cutoff_rows:
+        return {"messages": [], "timeout": False}, (err or "cutoff failed")
+    cutoff = cutoff_rows[0][0]
+
+    # Fast path: something already newer than the cutoff -> return now.
+    existing = list_messages(room_id, since=cutoff, limit=50)
+    if existing:
+        return {"messages": existing, "timeout": False}, None
+
+    if not _HAVE_PSYCOPG:
+        # No psycopg -> fall back to internal polling on the shared pg() path.
+        return _wait_poll_fallback(room_id, cutoff, timeout), None
+
+    listen_conn = None
+    try:
+        listen_conn = psycopg.connect(_build_pg_dsn(), autocommit=True)
+        listen_conn.execute("LISTEN room_event;")
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            got_match = False
+            # notifies() yields until the timeout window elapses; we keep
+            # draining so a notify for ANOTHER room doesn't end our wait early.
+            for n in listen_conn.notifies(timeout=remaining):
+                try:
+                    payload = json.loads(n.payload)
+                except (ValueError, TypeError):
+                    continue
+                if str(payload.get("room_id")) == str(room_id):
+                    got_match = True
+                    break
+            if got_match:
+                msgs = list_messages(room_id, since=cutoff, limit=50)
+                if msgs:
+                    return {"messages": msgs, "timeout": False}, None
+                # Edge: notify seen but row not visible yet — loop and retry
+                # within the remaining budget instead of returning empty.
+                continue
+        # Deadline reached with no matching notify.
+        return {"messages": [], "timeout": True}, None
+    except Exception as e:
+        # LISTEN path broke — degrade to polling rather than 500.
+        try:
+            return _wait_poll_fallback(room_id, cutoff, timeout), None
+        except Exception:
+            return {"messages": [], "timeout": False}, str(e)
+    finally:
+        if listen_conn is not None:
+            try:
+                listen_conn.close()
+            except Exception:
+                pass
+
+
+def _wait_poll_fallback(room_id, cutoff, timeout):
+    """Fallback long-poll using the shared pg() path: poll every 0.5s until a
+    new message appears or the timeout elapses. Still far better than a 6s
+    client poll, and needs no dedicated LISTEN connection."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        msgs = list_messages(room_id, since=cutoff, limit=50)
+        if msgs:
+            return {"messages": msgs, "timeout": False}
+        time.sleep(0.5)
+    return {"messages": [], "timeout": True}
 
 
 def list_participants(room_id):
@@ -1667,6 +1777,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, {"room_id": room["room_id"], "name": room["name"], "status": room.get("status", "active")})
             elif path == "/rooms" and self.headers.get("X-Admin-Key") == os.environ.get("ROOMS_ADMIN_KEY", "admin-default"):
                 self._send(200, {"rooms": list_rooms_admin()})
+            elif path.startswith("/rooms/") and path.endswith("/wait"):
+                # Server-side long-poll: block (via PG LISTEN) until a new message
+                # lands in the room, then return immediately. Replaces 6s client
+                # polling with sub-second push latency.
+                room_id = path.split("/")[2]
+                room = self._auth_room(room_id)
+                if not room:
+                    return
+                since_seconds = params.get("since_seconds", ["10"])[0]
+                timeout = params.get("timeout", ["25"])[0]
+                result, err = wait_for_room_message(room_id, since_seconds=since_seconds, timeout=timeout)
+                if err:
+                    self._send(500, {"error": err})
+                    return
+                self._send(200, result)
             elif path.startswith("/rooms/") and path.endswith("/messages"):
                 room_id = path.split("/")[2]
                 room = self._auth_room(room_id)
