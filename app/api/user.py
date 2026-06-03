@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 from datetime import datetime
@@ -860,11 +861,29 @@ async def set_agent_standin(agent_id: str, body: StandinBody, request: Request):
 
 
 class ChannelBody(BaseModel):
-    channel: str  # 'deepseek' | 'claude_routine' | 'managed'
-    config: dict[str, Any] | None = None  # routine: {fire_url, token}; managed: {key}
+    channel: str  # deepseek | claude_routine | managed | custom_llm
+    config: dict[str, Any] | None = None  # routine:{fire_url,token} managed:{api_key} custom_llm:{base_url,api_key,model}
 
 
-_VALID_CHANNELS = {"deepseek", "claude_routine", "managed"}
+_VALID_CHANNELS = {"deepseek", "claude_routine", "managed", "custom_llm"}
+
+
+def _encrypt_config(d: dict) -> dict:
+    """Encrypt per-agent channel config (provider API keys) at rest with Fernet
+    (COGCORE_CONFIG_KEY env). Stored as {'_enc': <token>}; the daemon decrypts on
+    read. If no key is configured, fall back to plaintext so the feature still
+    works (logged) rather than hard-failing."""
+    key = os.environ.get("COGCORE_CONFIG_KEY")
+    if not key:
+        logger.warning("COGCORE_CONFIG_KEY unset — storing channel config UNENCRYPTED")
+        return d
+    try:
+        from cryptography.fernet import Fernet
+        token = Fernet(key.encode()).encrypt(json.dumps(d).encode()).decode()
+        return {"_enc": token}
+    except Exception as e:  # noqa: BLE001
+        logger.error("channel config encrypt failed: %s — storing plaintext", e)
+        return d
 
 
 @router.post("/agents/{agent_id}/channel")
@@ -892,7 +911,7 @@ async def set_agent_channel(agent_id: str, body: ChannelBody, request: Request):
                 "INSERT INTO agent_channel_config (agent_id, config, updated_at) "
                 "VALUES ($1, $2::jsonb, NOW()) "
                 "ON CONFLICT (agent_id) DO UPDATE SET config = $2::jsonb, updated_at = NOW()",
-                agent_id, json.dumps(body.config),
+                agent_id, json.dumps(_encrypt_config(body.config)),
             )
     logger.info("channel_set user=%s agent=%s channel=%s has_config=%s",
                 user.user_id, agent_id, body.channel, body.config is not None)
