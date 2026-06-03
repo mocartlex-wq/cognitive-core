@@ -54,18 +54,34 @@ def load_deepseek_env():
 DS_ENV = load_deepseek_env()
 
 
+def _urlopen_retry(req, timeout, attempts=3):
+    """urlopen with retry on TRANSIENT network/DNS errors (URLError such as the
+    intermittent '.рф' "No address associated with hostname" flap from the host).
+    HTTPError (real 4xx/5xx responses) is NOT retried. Backoff 0.8s, 1.6s."""
+    last = None
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError:
+            raise  # a real HTTP response — do not retry
+        except urllib.error.URLError as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(0.8 * (i + 1))
+    raise last
+
+
 def http_get(url, headers=None, timeout=10):
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    return _urlopen_retry(req, timeout)
 
 
 def http_post(url, payload, headers=None, timeout=15):
     data = json.dumps(payload).encode()
     h = {"Content-Type": "application/json", **(headers or {})}
     req = urllib.request.Request(url, data=data, headers=h, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    return _urlopen_retry(req, timeout)
 
 
 # === TOOLS (whitelisted) ===
