@@ -704,6 +704,36 @@ def load_standin_agents():
         return {}
 
 
+_CONFIG_KEY_CACHE = {}
+
+
+def _decrypt_config(cfg):
+    """Decrypt a per-agent channel config the app encrypted ({'_enc': token},
+    Fernet/COGCORE_CONFIG_KEY). Plaintext configs (no '_enc') pass through. The key
+    is read once from the api container env (where the app keeps it)."""
+    if not isinstance(cfg, dict) or "_enc" not in cfg:
+        return cfg
+    key = _CONFIG_KEY_CACHE.get("k")
+    if key is None:
+        try:
+            r = subprocess.run(
+                ["docker", "exec", "cognitive_api", "printenv", "COGCORE_CONFIG_KEY"],
+                capture_output=True, text=True, timeout=5)
+            key = (r.stdout or "").strip()
+        except Exception:
+            key = ""
+        _CONFIG_KEY_CACHE["k"] = key
+    if not key:
+        log.warning("no COGCORE_CONFIG_KEY -> cannot decrypt channel config")
+        return {}
+    try:
+        from cryptography.fernet import Fernet
+        return json.loads(Fernet(key.encode()).decrypt(cfg["_enc"].encode()).decode())
+    except Exception as e:
+        log.error(f"channel config decrypt failed: {e}")
+        return {}
+
+
 def load_agent_channel(agent_id):
     """Return (wake_channel, config_dict) for an agent: channel from agent_states,
     secret config (routine fire_url+token / managed key) from agent_channel_config.
@@ -732,6 +762,7 @@ def load_agent_channel(agent_id):
             if cout:
                 try:
                     cfg = json.loads(cout.splitlines()[0])
+                    cfg = _decrypt_config(cfg)
                 except Exception:
                     cfg = {}
     except Exception as e:
@@ -1286,6 +1317,62 @@ def handle_managed(persona, msg, history):
         return None
 
 
+def handle_custom_llm(persona, msg, history):
+    """Channel 'custom_llm': answer via ANY OpenAI-compatible provider the owner
+    configured (config {base_url, api_key, model}) — POST {base_url}/chat/completions.
+    Covers OpenAI / DeepSeek / Mistral / Groq / OpenRouter / Ollama / etc. The daemon
+    posts the reply back to the room. Returns reply id, or None -> fallback to the
+    built-in DeepSeek persona (no config / API error / empty reply)."""
+    pid = persona["persona_id"]
+    cfg = persona.get("channel_config") or {}
+    base_url = (cfg.get("base_url") or "").rstrip("/")
+    api_key = cfg.get("api_key") or cfg.get("key")
+    model = cfg.get("model")
+    if not base_url or not model:
+        log.warning(f"[{pid}] custom_llm: no base_url/model -> fallback deepseek")
+        return None
+    url = base_url if base_url.endswith("/chat/completions") else base_url + "/chat/completions"
+    text = msg.get("text", "")
+    sender = extract_real_sender(msg) or "owner"
+    sys_prompt = (persona.get("llm_settings") or {}).get(
+        "system_prompt", "Ты ассистент владельца. Ответь кратко и по делу на русском.")
+    try:
+        body = json.dumps({
+            "model": model,
+            "max_tokens": 800,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": text},
+            ],
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="POST")
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            d = json.loads(resp.read().decode())
+        reply = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        if not reply:
+            log.warning(f"[{pid}] custom_llm: empty reply -> fallback deepseek")
+            return None
+        reply += "\n\n— автоматический ответ помощника проекта."
+        room_id = room_ctx(msg)
+        if room_id:
+            sid = post_to_room(room_id, pid, reply)
+            log.info(f"[{pid}] CUSTOM_LLM(room) -> {room_id} model={model} ({len(reply)}ch) reply={sid[:8] if sid else '?'}")
+            return sid
+        sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
+        log.info(f"[{pid}] CUSTOM_LLM(dm) -> {sender} model={model} reply={sid[:8] if sid else '?'}")
+        return sid
+    except urllib.error.HTTPError as e:
+        b = e.read().decode()[:200] if e.fp else ""
+        log.error(f"[{pid}] custom_llm HTTP {e.code} {b} -> fallback deepseek")
+        return None
+    except Exception as e:
+        log.error(f"[{pid}] custom_llm failed: {e} -> fallback deepseek")
+        return None
+
+
 ACTION_HANDLERS = {
     "silent": handle_silent,
     "auto_ack": handle_auto_ack,
@@ -1339,6 +1426,11 @@ def process_persona(persona):
             # Real Claude via Anthropic Messages API; fall back to DeepSeek if no
             # key / API error so the owner still gets an answer.
             sent_id = handle_managed(persona, msg, history)
+            if sent_id is None:
+                sent_id = handle_llm_reply(persona, msg, history)
+        elif action == "llm_reply" and channel == "custom_llm":
+            # Any OpenAI-compatible provider the owner configured; DeepSeek fallback.
+            sent_id = handle_custom_llm(persona, msg, history)
             if sent_id is None:
                 sent_id = handle_llm_reply(persona, msg, history)
         else:
