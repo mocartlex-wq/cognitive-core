@@ -11,7 +11,9 @@
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import secrets
 from datetime import datetime
 from typing import Any
@@ -376,6 +378,100 @@ async def get_my_room_detail(room_id: str, request: Request):
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# @mention → agent_inbox bridge для OWNER-постов в комнату.
+#
+# /user/rooms/{id}/post пишет room_messages НАПРЯМУЮ (см. ниже) и потому минует
+# мост, который живёт в rooms-сервисе (scripts/cognitive-rooms.py post_message →
+# _bridge_to_inbox). Без этого «@Агент …» от владельца НЕ доходит до суточного
+# демона (он поллит только agent_inbox) → агент не отвечает. Зеркалим Case 1 из
+# _bridge_to_inbox: резолвим @-упоминания room-scoped и дублируем по одному
+# событию agent_inbox на получателя с тем же payload (context.via=room), на
+# который завязан reverse-мост демона, постящий ответ обратно в комнату.
+# Best-effort: ошибка моста НИКОГДА не ломает сам пост в комнату.
+# ─────────────────────────────────────────────────────────────────────────
+_MENTION_RE = re.compile(r"@([\w\-]+)", re.UNICODE)
+
+
+async def _resolve_room_mentions(conn, room_id: str, text: str) -> list[str]:
+    """Распарсить @-упоминания и резолвить каждое в реальный agent_id.
+
+    Room-scoped first (совпадение по agent_id ИЛИ agent_label участника комнаты,
+    регистронезависимо), fallback на глобальный agent_states. Дедуп. Нерезолвимые
+    @ — отбрасываются. Зеркало _resolve_mentions_to_agents из cognitive-rooms.py.
+    """
+    mentions = _MENTION_RE.findall(text or "")
+    if not mentions:
+        return []
+    rows = await conn.fetch(
+        """
+        SELECT p.agent_id, COALESCE(s.agent_label, '') AS label
+          FROM room_participants p
+          LEFT JOIN agent_states s ON s.agent_id = p.agent_id
+         WHERE p.room_id = $1::uuid
+        """,
+        room_id,
+    )
+    by_id: dict[str, str] = {}
+    by_label: dict[str, str] = {}
+    for r in rows:
+        aid = r["agent_id"]
+        label = r["label"] or ""
+        if aid:
+            by_id[aid.lower()] = aid
+            if label:
+                by_label.setdefault(label.lower(), aid)
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for m in mentions:
+        key = m.lower()
+        aid = by_id.get(key) or by_label.get(key)
+        if not aid:
+            g = await conn.fetchrow(
+                "SELECT agent_id FROM agent_states "
+                "WHERE agent_id = $1 OR lower(agent_label) = lower($1) LIMIT 1",
+                m,
+            )
+            if g and g["agent_id"]:
+                aid = g["agent_id"]
+        if aid and aid not in seen:
+            seen.add(aid)
+            resolved.append(aid)
+    return resolved
+
+
+async def _bridge_owner_mentions_to_inbox(
+    conn, room_id: str, from_agent: str, text: str
+) -> int:
+    """Мост @-адресованных owner-постов в L1 agent_inbox. Возвращает #получателей.
+
+    Payload идентичен прямому DM ({from,to,text,context}). context.via=room +
+    room_id — то, на что завязан reverse-мост демона (ответ постится в комнату).
+    Триггер notify_agent_inbox_after_insert на l1_raw_events сам делает NOTIFY →
+    демон просыпается. Best-effort: любая ошибка глотается."""
+    try:
+        recipients = await _resolve_room_mentions(conn, room_id, text)
+        recipients = [a for a in recipients if a != from_agent]  # no self-DM
+        for to_agent in recipients:
+            payload = {
+                "from": from_agent,
+                "to": to_agent,
+                "text": text,
+                "context": {"via": "room", "room_id": room_id},
+            }
+            await conn.execute(
+                "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) "
+                "VALUES ($1, $2, $3::jsonb)",
+                from_agent,
+                "agent_inbox",
+                json.dumps(payload, ensure_ascii=False),
+            )
+        return len(recipients)
+    except Exception as e:  # noqa: BLE001 — best-effort, не должен ломать пост
+        logger.warning("owner mention-bridge failed room=%s err=%s", room_id, e)
+        return 0
+
+
 @router.post("/rooms/{room_id}/post")
 async def post_my_room_message(room_id: str, body: PostRoomMessageBody, request: Request):
     """Owner пишет в свою комнату от своего имени (from_agent = owner:email).
@@ -409,8 +505,13 @@ async def post_my_room_message(room_id: str, body: PostRoomMessageBody, request:
             logger.error("post_room_message failed user=%s room=%s err=%s",
                          user.user_id, room_id, e)
             raise HTTPException(status_code=500, detail=f"Не удалось отправить: {e}")
-    logger.info("room_message_posted user=%s room=%s msg=%s",
-                user.user_id, room_id, message_id)
+        # Мост @-упоминаний в agent_inbox (внутри того же conn) — будит демона,
+        # чтобы агент ответил В КОМНАТЕ. Best-effort, не ломает пост.
+        bridged = await _bridge_owner_mentions_to_inbox(
+            conn, room_id, from_agent, body.text
+        )
+    logger.info("room_message_posted user=%s room=%s msg=%s mention_bridged=%s",
+                user.user_id, room_id, message_id, bridged)
     return {"ok": True, "message_id": message_id}
 
 

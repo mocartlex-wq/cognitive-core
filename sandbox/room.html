@@ -117,6 +117,19 @@
     box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
   }
 
+  /* === Кому писать: чипы-получатели над полем ввода === */
+  .rcp-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+  .rcp-label { font-size: 12.5px; color: var(--glass-text-dim); margin-right: 2px; }
+  .rcp-chip {
+    font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+    cursor: pointer; font-family: var(--font); line-height: 1.2;
+    background: rgba(88,166,255,0.12); color: var(--glass-orb-1);
+    border: 1px solid rgba(88,166,255,0.28);
+    transition: background 0.15s, filter 0.15s;
+  }
+  .rcp-chip:hover { background: rgba(88,166,255,0.22); }
+  .rcp-chip:active { filter: brightness(0.95); }
+
   :root[data-theme="light"] .btn { color: #fff; background: #1d4cd9; }
   :root[data-theme="light"] .item, :root[data-theme="light"] .msg { background: rgba(0,0,0,0.03); }
 
@@ -260,6 +273,21 @@
     return `<div class="thread" id="threadScroll">${rows}</div>`;
   }
 
+  // Чипы «кому писать»: по одному на каждого участника-агента. Клик —
+  // подставляет @имя в начало поля (insertMention). Backend резолвит @ по
+  // agent_label ИЛИ agent_id (room-scoped), поэтому шлём @display_name; если в
+  // имени пробел (regex @([\w-]+) его не возьмёт) — fallback на agent_id.
+  function recipientBarHtml(parts) {
+    const agents = (parts || []).filter(p => p && p.agent_id);
+    if (!agents.length) return '';
+    const chips = agents.map(p => {
+      const disp = p.display_name || p.agent_id;
+      const token = /\s/.test(disp) ? p.agent_id : disp;
+      return `<button type="button" class="rcp-chip" data-token="${esc(token)}">@${esc(disp)}</button>`;
+    }).join('');
+    return `<div class="rcp-bar"><span class="rcp-label">Кому:</span>${chips}</div>`;
+  }
+
   function render(detail) {
     document.getElementById('roomTitle').textContent = detail.name || 'Комната';
     document.title = (detail.name || 'Комната') + ' — Cognitive Core';
@@ -294,8 +322,9 @@
       <div class="card">
         <h2>Сообщения <span class="chip">${detail.message_count || 0}</span></h2>
         <div id="messagesBlock">${messagesHtml(detail.messages)}</div>
+        ${recipientBarHtml(detail.participants)}
         <div class="composer">
-          <textarea id="composerText" placeholder="Написать от своего имени…" maxlength="4000" rows="1"></textarea>
+          <textarea id="composerText" placeholder="Напишите агенту… (нажмите @имя выше, чтобы адресовать)" maxlength="4000" rows="1"></textarea>
           <button class="btn" id="sendBtn" type="button">Отправить</button>
         </div>
       </div>`;
@@ -304,6 +333,9 @@
     const inviteBtn = document.getElementById('inviteNewBtn');
     if (inviteBtn) inviteBtn.addEventListener('click', inviteNewAgent);
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
+    document.querySelectorAll('.rcp-chip').forEach(ch => {
+      ch.addEventListener('click', () => insertMention(ch.getAttribute('data-token')));
+    });
     const ta = document.getElementById('composerText');
     ta.addEventListener('keydown', (e) => {
       // Ctrl/Cmd+Enter — быстрая отправка
@@ -394,6 +426,19 @@
         catch (_) { alert('Скопируйте текст из поля вручную.'); }
       }
     });
+  }
+
+  // Подставить @упоминание агента в начало поля. Клик по другому чипу заменяет
+  // уже стоящее в начале @имя (не накапливает). \p{L} — чтобы ловить кириллицу.
+  function insertMention(token) {
+    if (!token) return;
+    const ta = document.getElementById('composerText');
+    if (!ta) return;
+    const rest = (ta.value || '').replace(/^\s*@[\p{L}\p{N}_\-]+\s*/u, '');
+    ta.value = '@' + token + ' ' + rest;
+    ta.focus();
+    const end = ta.value.length;
+    ta.setSelectionRange(end, end);
   }
 
   async function sendMessage() {
