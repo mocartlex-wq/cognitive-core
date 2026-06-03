@@ -765,7 +765,9 @@
       if (token === null) { loadAgents(); return; }
       config = { fire_url: (url || '').trim(), token: (token || '').trim() };
     } else if (channel === 'managed') {
-      alert('🏢 Managed Agents — фаза 2 (нужен Platform-ключ). Пока агент будет отвечать через DeepSeek-дублёр.');
+      const key = prompt('Anthropic API-ключ (sk-ant-...)\nАгент будет отвечать НАСТОЯЩИМ Claude через Anthropic API (демон постит ответ в комнату):');
+      if (key === null) { loadAgents(); return; }
+      config = { api_key: (key || '').trim() };
     }
     const r = await api(`/user/agents/${encodeURIComponent(agentId)}/channel`, {
       method: 'POST',
@@ -829,8 +831,8 @@
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
               <select title="Способ связи — кто отвечает за агента" onclick="event.stopPropagation()" onchange="event.stopPropagation();event.preventDefault();setChannel('${aidJs}', this.value)" style="font-size:12px;padding:5px 7px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font);cursor:pointer">
                 <option value="deepseek"${(a.wake_channel || 'deepseek') === 'deepseek' ? ' selected' : ''}>🤖 DeepSeek-дублёр</option>
-                <option value="claude_routine"${a.wake_channel === 'claude_routine' ? ' selected' : ''}>☁️ Облачный Claude</option>
-                <option value="managed"${a.wake_channel === 'managed' ? ' selected' : ''}>🏢 Managed (скоро)</option>
+                <option value="claude_routine"${a.wake_channel === 'claude_routine' ? ' selected' : ''}>☁️ Облачный Claude (Routine)</option>
+                <option value="managed"${a.wake_channel === 'managed' ? ' selected' : ''}>🏢 Claude API (прямой)</option>
               </select>
               <button class="btn ${a.standin_enabled ? '' : 'secondary'} btn-sm" title="24/7-дублёр: отвечает вместо Claude, когда он офлайн (контекстно, из вашей памяти). ${a.standin_enabled ? 'ВКЛ — нажми, чтобы выключить' : 'выкл — нажми, чтобы включить'}" onclick="event.stopPropagation();event.preventDefault();toggleStandin('${aidJs}', ${a.standin_enabled ? 'false' : 'true'})">${a.standin_enabled ? '🟢 24/7' : '⚪ 24/7'}</button>
               <button class="btn secondary btn-sm" title="Переименовать помощника (отображаемое имя)" onclick="event.stopPropagation();event.preventDefault();renameAgent('${aidJs}','${curLabelJs}')">✏️</button>
