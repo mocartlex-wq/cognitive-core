@@ -1227,6 +1227,65 @@ def handle_cloud_routine(persona, msg, history):
         return None
 
 
+def handle_managed(persona, msg, history):
+    """Channel 'managed': answer with the REAL Claude via the Anthropic Messages API
+    (owner's sk-ant key from config) and post the reply back into the room — the
+    daemon mediates the round-trip, so no MCP connector is required. Per DeepSeek
+    this practical 'Claude API direct' fits the rooms use-case better than full
+    Managed Agents (sessions/agent/environment): same real Claude, far less owner
+    setup. config: {api_key, model?}. Returns the reply id, or None to fall back
+    to the DeepSeek persona (no key / API error / empty reply)."""
+    pid = persona["persona_id"]
+    cfg = persona.get("channel_config") or {}
+    api_key = cfg.get("api_key") or cfg.get("key")
+    if not api_key:
+        log.warning(f"[{pid}] managed: no api_key -> fallback deepseek")
+        return None
+    model = cfg.get("model", "claude-3-5-sonnet-20241022")
+    sender = extract_real_sender(msg) or "owner"
+    text = msg.get("text", "")
+    sys_prompt = (persona.get("llm_settings") or {}).get(
+        "system_prompt", "Ты ассистент владельца. Ответь кратко и по делу на русском.")
+    try:
+        body = json.dumps({
+            "model": model,
+            "max_tokens": 1024,
+            "system": sys_prompt,
+            "messages": [{"role": "user", "content": text}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages", data=body, method="POST")
+        req.add_header("x-api-key", api_key)
+        req.add_header("anthropic-version", "2023-06-01")
+        req.add_header("content-type", "application/json")
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            d = json.loads(resp.read().decode())
+        parts = d.get("content") or []
+        reply = "".join(
+            p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        if not reply:
+            log.warning(f"[{pid}] managed: empty reply -> fallback deepseek")
+            return None
+        # Reuse the auto-reply marker so the reply is anti-loop-safe (matches
+        # AUTO_REPLY_MARKER_RE), with a Claude tag for transparency.
+        reply += "\n\n— автоматический ответ помощника проекта. (Claude API)"
+        room_id = room_ctx(msg)
+        if room_id:
+            sid = post_to_room(room_id, pid, reply)
+            log.info(f"[{pid}] MANAGED(room) -> {room_id} ({len(reply)} chars) reply={sid[:8] if sid else '?'}")
+            return sid
+        sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
+        log.info(f"[{pid}] MANAGED(dm) -> {sender} reply={sid[:8] if sid else '?'}")
+        return sid
+    except urllib.error.HTTPError as e:
+        b = e.read().decode()[:200] if e.fp else ""
+        log.error(f"[{pid}] managed Claude API HTTP {e.code} {b} -> fallback deepseek")
+        return None
+    except Exception as e:
+        log.error(f"[{pid}] managed failed: {e} -> fallback deepseek")
+        return None
+
+
 ACTION_HANDLERS = {
     "silent": handle_silent,
     "auto_ack": handle_auto_ack,
@@ -1277,8 +1336,11 @@ def process_persona(persona):
             if sent_id is None:
                 sent_id = handle_llm_reply(persona, msg, history)
         elif action == "llm_reply" and channel == "managed":
-            log.info(f"[{pid}] managed channel not implemented (phase 2) -> fallback deepseek")
-            sent_id = handle_llm_reply(persona, msg, history)
+            # Real Claude via Anthropic Messages API; fall back to DeepSeek if no
+            # key / API error so the owner still gets an answer.
+            sent_id = handle_managed(persona, msg, history)
+            if sent_id is None:
+                sent_id = handle_llm_reply(persona, msg, history)
         else:
             handler = ACTION_HANDLERS.get(action, handle_silent)
             sent_id = handler(persona, msg, history)
