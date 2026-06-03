@@ -704,6 +704,41 @@ def load_standin_agents():
         return {}
 
 
+def load_agent_channel(agent_id):
+    """Return (wake_channel, config_dict) for an agent: channel from agent_states,
+    secret config (routine fire_url+token / managed key) from agent_channel_config.
+    Defaults to ('deepseek', {}). agent_id is format-validated (no SQL injection)."""
+    if not agent_id or not re.match(r"^[\w\-]+$", agent_id):
+        return "deepseek", {}
+    channel, cfg = "deepseek", {}
+    try:
+        r = subprocess.run(
+            ["docker", "exec", "cognitive_postgres", "psql", "-U", "cognitive",
+             "-d", "cognitive_core", "-t", "-A", "-c",
+             "SELECT wake_channel FROM agent_states WHERE agent_id='" + agent_id + "'"],
+            capture_output=True, text=True, timeout=10,
+        )
+        out = (r.stdout or "").strip()
+        if out:
+            channel = out.splitlines()[0].strip() or "deepseek"
+        if channel and channel != "deepseek":
+            rc = subprocess.run(
+                ["docker", "exec", "cognitive_postgres", "psql", "-U", "cognitive",
+                 "-d", "cognitive_core", "-t", "-A", "-c",
+                 "SELECT config::text FROM agent_channel_config WHERE agent_id='" + agent_id + "'"],
+                capture_output=True, text=True, timeout=10,
+            )
+            cout = (rc.stdout or "").strip()
+            if cout:
+                try:
+                    cfg = json.loads(cout.splitlines()[0])
+                except Exception:
+                    cfg = {}
+    except Exception as e:
+        log.warning(f"load_agent_channel failed for {agent_id}: {e}")
+    return channel, cfg
+
+
 def default_persona(agent_id, label):
     """Context-aware default stand-in persona for an opted-in agent that has no
     custom agent_persona config. Replies via DeepSeek and MAY call cognitive_recall
@@ -1146,6 +1181,52 @@ def handle_llm_reply(persona, msg, history):
     return sent_id
 
 
+ROUTINE_BETA_HEADER = "experimental-cc-routine-2026-04-01"
+
+
+def handle_cloud_routine(persona, msg, history):
+    """Wake a REAL cloud Claude via the agent's Routine API trigger (POST /fire).
+    The cloud session is expected to post its reply BACK into the room via the
+    Cognitive Core MCP connector (room_id is passed in the fired text). Returns the
+    cloud session id on success, or None to signal fallback to the DeepSeek persona
+    (e.g. no token configured, or the fire call failed)."""
+    pid = persona["persona_id"]
+    cfg = persona.get("channel_config") or {}
+    fire_url = cfg.get("fire_url") or cfg.get("url")
+    token = cfg.get("token")
+    if not fire_url or not token:
+        log.warning(f"[{pid}] claude_routine: no fire_url/token -> fallback deepseek")
+        return None
+    room_id = room_ctx(msg)
+    sender = extract_real_sender(msg) or "owner"
+    text = msg.get("text", "")
+    fired_text = (
+        f"Тебе ({pid}) написал {sender} в комнате Cognitive Core (room_id={room_id}). "
+        f"Ответь по делу на русском. Нужен контекст про дела владельца — вызови "
+        f"cognitive_recall. ОБЯЗАТЕЛЬНО отправь ответ обратно в эту комнату через "
+        f"room_post с room_id={room_id}. Текст сообщения:\n\n{text}"
+    )
+    try:
+        body = json.dumps({"text": fired_text}, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(fire_url, data=body, method="POST")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("anthropic-beta", ROUTINE_BETA_HEADER)
+        req.add_header("anthropic-version", "2023-06-01")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            d = json.loads(resp.read().decode())
+        sid = d.get("claude_code_session_id") or d.get("session_id") or "fired"
+        log.info(f"[{pid}] CLOUD_ROUTINE fired -> session={sid} room={room_id}")
+        return sid
+    except urllib.error.HTTPError as e:
+        b = e.read().decode()[:200] if e.fp else ""
+        log.error(f"[{pid}] claude_routine fire HTTP {e.code} {b} -> fallback deepseek")
+        return None
+    except Exception as e:
+        log.error(f"[{pid}] claude_routine fire failed: {e} -> fallback deepseek")
+        return None
+
+
 ACTION_HANDLERS = {
     "silent": handle_silent,
     "auto_ack": handle_auto_ack,
@@ -1186,8 +1267,21 @@ def process_persona(persona):
             if depth >= max_depth:
                 log.warning(f"[{pid}] LOOP_BLOCKED depth={depth}>={max_depth}")
                 continue
-        handler = ACTION_HANDLERS.get(action, handle_silent)
-        sent_id = handler(persona, msg, history)
+        channel = persona.get("wake_channel", "deepseek")
+        if action == "llm_reply" and channel == "claude_routine":
+            # Route to the REAL cloud Claude via Routine /fire; if it can't fire
+            # (no token / error) fall back to the DeepSeek persona so the owner
+            # still gets an answer. No dup: the cloud posts back as the agent, which
+            # the daemon skips as a self-message.
+            sent_id = handle_cloud_routine(persona, msg, history)
+            if sent_id is None:
+                sent_id = handle_llm_reply(persona, msg, history)
+        elif action == "llm_reply" and channel == "managed":
+            log.info(f"[{pid}] managed channel not implemented (phase 2) -> fallback deepseek")
+            sent_id = handle_llm_reply(persona, msg, history)
+        else:
+            handler = ACTION_HANDLERS.get(action, handle_silent)
+            sent_id = handler(persona, msg, history)
         if action in ("auto_ack", "llm_reply") and sent_id:
             history.record_reply(sent_id, parent_id=msg_id)
     if new_count:
@@ -1211,6 +1305,10 @@ def main():
                     aid: (custom.get(aid) or default_persona(aid, label))
                     for aid, label in standin.items()
                 }
+                # Attach per-agent connection channel + (secret) config so the
+                # dispatcher in process_persona can route deepseek/claude_routine/managed.
+                for _aid, _p in personas.items():
+                    _p["wake_channel"], _p["channel_config"] = load_agent_channel(_aid)
                 n_custom = sum(1 for a in personas if a in custom)
                 log.info(
                     f"loaded {len(personas)} stand-in personas "
