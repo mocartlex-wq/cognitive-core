@@ -443,21 +443,51 @@ async def _resolve_room_mentions(conn, room_id: str, text: str) -> list[str]:
 async def _bridge_owner_mentions_to_inbox(
     conn, room_id: str, from_agent: str, text: str
 ) -> int:
-    """Мост @-адресованных owner-постов в L1 agent_inbox. Возвращает #получателей.
+    """Мост owner-постов в L1 agent_inbox. Возвращает число получателей.
 
-    Payload идентичен прямому DM ({from,to,text,context}). context.via=room +
+    Case 1: @-адресованное → каждому упомянутому агенту. Case 2: безадресное →
+    дирижёру комнаты (conductor_agent_id), если назначен — чтобы owner получил
+    ответ и без @. Payload идентичен прямому DM ({from,to,text,context}). context.via=room +
     room_id — то, на что завязан reverse-мост демона (ответ постится в комнату).
     Триггер notify_agent_inbox_after_insert на l1_raw_events сам делает NOTIFY →
     демон просыпается. Best-effort: любая ошибка глотается."""
     try:
         recipients = await _resolve_room_mentions(conn, room_id, text)
         recipients = [a for a in recipients if a != from_agent]  # no self-DM
-        for to_agent in recipients:
+        if recipients:
+            # Case 1: @-адресованное → каждому упомянутому агенту.
+            for to_agent in recipients:
+                payload = {
+                    "from": from_agent,
+                    "to": to_agent,
+                    "text": text,
+                    "context": {"via": "room", "room_id": room_id},
+                }
+                await conn.execute(
+                    "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) "
+                    "VALUES ($1, $2, $3::jsonb)",
+                    from_agent,
+                    "agent_inbox",
+                    json.dumps(payload, ensure_ascii=False),
+                )
+            return len(recipients)
+        # Case 2: безадресное (нет резолвимого @) → дирижёру комнаты, если назначен,
+        # чтобы owner получил ответ и БЕЗ @. Зеркало Case 2 _bridge_to_inbox в
+        # cognitive-rooms.py. Автор тут всегда owner:<email> (не агент) → анти-петля
+        # по agent_states не нужна. context.unaddressed=true — пометка для дирижёра.
+        conductor = await conn.fetchval(
+            "SELECT conductor_agent_id FROM rooms WHERE id = $1::uuid", room_id
+        )
+        if conductor and conductor != from_agent:
             payload = {
                 "from": from_agent,
-                "to": to_agent,
+                "to": conductor,
                 "text": text,
-                "context": {"via": "room", "room_id": room_id},
+                "context": {
+                    "via": "room",
+                    "room_id": room_id,
+                    "unaddressed": True,
+                },
             }
             await conn.execute(
                 "INSERT INTO l1_raw_events (source_agent, domain, raw_payload) "
@@ -466,7 +496,8 @@ async def _bridge_owner_mentions_to_inbox(
                 "agent_inbox",
                 json.dumps(payload, ensure_ascii=False),
             )
-        return len(recipients)
+            return 1
+        return 0
     except Exception as e:  # noqa: BLE001 — best-effort, не должен ломать пост
         logger.warning("owner mention-bridge failed room=%s err=%s", room_id, e)
         return 0
