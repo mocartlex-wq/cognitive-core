@@ -135,13 +135,18 @@ CREATE TABLE IF NOT EXISTS agent_states (
     project VARCHAR(64),
     machine VARCHAR(128),
     capabilities JSONB DEFAULT '[]',
-    last_heartbeat_at TIMESTAMPTZ DEFAULT NOW()
+    last_heartbeat_at TIMESTAMPTZ DEFAULT NOW(),
+    -- 24/7 server stand-in opt-in + per-agent connection channel (2026-06-03)
+    standin_enabled BOOLEAN NOT NULL DEFAULT false,
+    wake_channel TEXT NOT NULL DEFAULT 'deepseek'
 );
 -- Idempotent migration for existing rows
 ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS project VARCHAR(64);
 ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS machine VARCHAR(128);
 ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '[]';
 ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS standin_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS wake_channel TEXT NOT NULL DEFAULT 'deepseek';
 CREATE INDEX IF NOT EXISTS idx_agent_states_updated ON agent_states(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_states_project_heartbeat ON agent_states(project, last_heartbeat_at DESC);
 
@@ -156,6 +161,15 @@ CREATE TABLE IF NOT EXISTS agent_keys (
     revoked_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_agent_keys_agent ON agent_keys(agent_id) WHERE revoked_at IS NULL;
+
+-- Per-agent connection-channel secrets (2026-06-03): routine {fire_url,token} /
+-- managed {api_key}. Kept SEPARATE from agent_states so secrets never leak via the
+-- agent list API (/user/agents). Daemon-only read.
+CREATE TABLE IF NOT EXISTS agent_channel_config (
+    agent_id   VARCHAR(64) PRIMARY KEY REFERENCES agent_states(agent_id) ON DELETE CASCADE,
+    config     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- История checkpoints (для отката)
 CREATE TABLE IF NOT EXISTS agent_state_history (
