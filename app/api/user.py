@@ -561,7 +561,7 @@ async def my_agents(request: Request):
                    last_mcp_connect_at, last_mcp_disconnect_at,
                    first_mcp_connect_at,
                    machine_fingerprint, machine_label,
-                   status, created_at, standin_enabled,
+                   status, created_at, standin_enabled, wake_channel,
                    -- Presence: MCP-online если connect в последние 60 сек
                    (last_mcp_connect_at IS NOT NULL
                     AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online,
@@ -857,6 +857,46 @@ async def set_agent_standin(agent_id: str, body: StandinBody, request: Request):
     logger.info("standin_toggle user=%s agent=%s enabled=%s",
                 user.user_id, agent_id, body.enabled)
     return {"ok": True, "agent_id": agent_id, "standin_enabled": body.enabled}
+
+
+class ChannelBody(BaseModel):
+    channel: str  # 'deepseek' | 'claude_routine' | 'managed'
+    config: dict[str, Any] | None = None  # routine: {fire_url, token}; managed: {key}
+
+
+_VALID_CHANNELS = {"deepseek", "claude_routine", "managed"}
+
+
+@router.post("/agents/{agent_id}/channel")
+async def set_agent_channel(agent_id: str, body: ChannelBody, request: Request):
+    """Выбрать способ связи (wake_channel) для агента (owner-scoped) + сохранить
+    секретный config (Routine fire_url+token / managed key) в agent_channel_config.
+
+    Секреты НЕ возвращаются в /user/agents — только сам channel. Демон читает
+    channel+config и маршрутизирует: deepseek (дублёр) / claude_routine (/fire) /
+    managed (фаза 2)."""
+    user = await require_user(request)
+    if body.channel not in _VALID_CHANNELS:
+        raise HTTPException(status_code=400, detail="Неизвестный канал")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "UPDATE agent_states SET wake_channel = $1 "
+            "WHERE agent_id = $2 AND owner_user_id = $3::uuid",
+            body.channel, agent_id, user.user_id,
+        )
+        if res.split()[-1] == "0":
+            raise HTTPException(status_code=404, detail="Агент не найден")
+        if body.config is not None:
+            await conn.execute(
+                "INSERT INTO agent_channel_config (agent_id, config, updated_at) "
+                "VALUES ($1, $2::jsonb, NOW()) "
+                "ON CONFLICT (agent_id) DO UPDATE SET config = $2::jsonb, updated_at = NOW()",
+                agent_id, json.dumps(body.config),
+            )
+    logger.info("channel_set user=%s agent=%s channel=%s has_config=%s",
+                user.user_id, agent_id, body.channel, body.config is not None)
+    return {"ok": True, "agent_id": agent_id, "wake_channel": body.channel}
 
 
 @router.post("/agents/create")

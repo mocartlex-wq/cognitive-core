@@ -756,6 +756,27 @@
     return '<span class="chip" style="background:rgba(100,100,100,0.15);color:var(--glass-text-dim)">offline</span>';
   }
 
+  async function setChannel(agentId, channel) {
+    let config = null;
+    if (channel === 'claude_routine') {
+      const url = prompt('Routine fire-URL\n(https://api.anthropic.com/v1/claude_code/routines/<trig>/fire):');
+      if (url === null) { loadAgents(); return; }
+      const token = prompt('Routine bearer-токен (sk-ant-oat...):');
+      if (token === null) { loadAgents(); return; }
+      config = { fire_url: (url || '').trim(), token: (token || '').trim() };
+    } else if (channel === 'managed') {
+      alert('🏢 Managed Agents — фаза 2 (нужен Platform-ключ). Пока агент будет отвечать через DeepSeek-дублёр.');
+    }
+    const r = await api(`/user/agents/${encodeURIComponent(agentId)}/channel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config ? { channel, config } : { channel }),
+    });
+    if (!r) return;
+    if (r.ok) { loadAgents(); }
+    else { alert('Ошибка: ' + ((await r.json()).detail || r.status)); }
+  }
+
   async function toggleStandin(agentId, enable) {
     const r = await api(`/user/agents/${encodeURIComponent(agentId)}/standin`, {
       method: 'POST',
@@ -806,6 +827,11 @@
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
+              <select title="Способ связи — кто отвечает за агента" onclick="event.stopPropagation()" onchange="event.stopPropagation();event.preventDefault();setChannel('${aidJs}', this.value)" style="font-size:12px;padding:5px 7px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font);cursor:pointer">
+                <option value="deepseek"${(a.wake_channel || 'deepseek') === 'deepseek' ? ' selected' : ''}>🤖 DeepSeek-дублёр</option>
+                <option value="claude_routine"${a.wake_channel === 'claude_routine' ? ' selected' : ''}>☁️ Облачный Claude</option>
+                <option value="managed"${a.wake_channel === 'managed' ? ' selected' : ''}>🏢 Managed (скоро)</option>
+              </select>
               <button class="btn ${a.standin_enabled ? '' : 'secondary'} btn-sm" title="24/7-дублёр: отвечает вместо Claude, когда он офлайн (контекстно, из вашей памяти). ${a.standin_enabled ? 'ВКЛ — нажми, чтобы выключить' : 'выкл — нажми, чтобы включить'}" onclick="event.stopPropagation();event.preventDefault();toggleStandin('${aidJs}', ${a.standin_enabled ? 'false' : 'true'})">${a.standin_enabled ? '🟢 24/7' : '⚪ 24/7'}</button>
               <button class="btn secondary btn-sm" title="Переименовать помощника (отображаемое имя)" onclick="event.stopPropagation();event.preventDefault();renameAgent('${aidJs}','${curLabelJs}')">✏️</button>
               <button class="btn secondary btn-sm" title="Перенести помощника на другую машину" onclick="event.stopPropagation();event.preventDefault();moveAgent('${aidJs}')">⇄</button>
