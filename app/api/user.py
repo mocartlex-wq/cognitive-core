@@ -561,7 +561,7 @@ async def my_agents(request: Request):
                    last_mcp_connect_at, last_mcp_disconnect_at,
                    first_mcp_connect_at,
                    machine_fingerprint, machine_label,
-                   status, created_at,
+                   status, created_at, standin_enabled,
                    -- Presence: MCP-online если connect в последние 60 сек
                    (last_mcp_connect_at IS NOT NULL
                     AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online,
@@ -830,6 +830,33 @@ async def get_usage(request: Request):
         },
         "suspended": bool(row["suspended"]),
     }
+
+
+class StandinBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/agents/{agent_id}/standin")
+async def set_agent_standin(agent_id: str, body: StandinBody, request: Request):
+    """Включить/выключить серверного 24/7-дублёра для агента (owner-scoped).
+
+    Когда enabled=true, демон cognitive-agent-runtime отвечает за этого агента,
+    пока его основной Claude офлайн (контекстная персона из памяти владельца).
+    Меняет только agent_states.standin_enabled. Демон подхватит на следующем
+    цикле перезагрузки персон (<= PERSONA_REFRESH_SEC)."""
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "UPDATE agent_states SET standin_enabled = $1 "
+            "WHERE agent_id = $2 AND owner_user_id = $3::uuid",
+            body.enabled, agent_id, user.user_id,
+        )
+    if res.split()[-1] == "0":  # UPDATE 0 → не ваш агент или не существует
+        raise HTTPException(status_code=404, detail="Агент не найден")
+    logger.info("standin_toggle user=%s agent=%s enabled=%s",
+                user.user_id, agent_id, body.enabled)
+    return {"ok": True, "agent_id": agent_id, "standin_enabled": body.enabled}
 
 
 @router.post("/agents/create")
