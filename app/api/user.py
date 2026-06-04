@@ -913,9 +913,74 @@ async def set_agent_channel(agent_id: str, body: ChannelBody, request: Request):
                 "ON CONFLICT (agent_id) DO UPDATE SET config = $2::jsonb, updated_at = NOW()",
                 agent_id, json.dumps(_encrypt_config(body.config)),
             )
+        elif body.channel == "deepseek":
+            # Free default needs no secret — drop any stored provider config (hygiene).
+            await conn.execute("DELETE FROM agent_channel_config WHERE agent_id = $1", agent_id)
     logger.info("channel_set user=%s agent=%s channel=%s has_config=%s",
                 user.user_id, agent_id, body.channel, body.config is not None)
     return {"ok": True, "agent_id": agent_id, "wake_channel": body.channel}
+
+
+@router.post("/agents/{agent_id}/channel/test")
+async def test_agent_channel(agent_id: str, body: ChannelBody, request: Request):
+    """Make ONE tiny live call to the provider in `config` (without saving) so the
+    owner can verify a channel works before relying on it. Returns {ok, detail}.
+    Owner-gated (prevents using this as an open LLM proxy)."""
+    await require_user(request)
+    import httpx
+    ch = body.channel
+    cfg = body.config or {}
+    try:
+        if ch == "deepseek":
+            return {"ok": True, "detail": "DeepSeek-дублёр (сервер) — всегда доступен"}
+        if ch == "custom_llm":
+            base = (cfg.get("base_url") or "").rstrip("/")
+            model = cfg.get("model")
+            key = cfg.get("api_key") or cfg.get("key")
+            if not base or not model:
+                raise HTTPException(status_code=400, detail="Нужны base_url и model")
+            url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+            payload = {"model": model, "max_tokens": 16,
+                       "messages": [{"role": "user", "content": "ping — ответь словом ok"}]}
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.post(url, json=payload, headers=headers)
+            if r.status_code != 200:
+                return {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:160]}"}
+            d = r.json()
+            sample = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "")[:80]
+            return {"ok": True, "detail": f"✓ {model} ответил: {sample}".strip()}
+        if ch == "managed":
+            key = cfg.get("api_key") or cfg.get("key")
+            if not key:
+                raise HTTPException(status_code=400, detail="Нужен sk-ant ключ")
+            model = cfg.get("model", "claude-3-5-sonnet-20241022")
+            headers = {"x-api-key": key, "anthropic-version": "2023-06-01",
+                       "content-type": "application/json"}
+            payload = {"model": model, "max_tokens": 16,
+                       "messages": [{"role": "user", "content": "ping — reply ok"}]}
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers)
+            if r.status_code != 200:
+                return {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:160]}"}
+            d = r.json()
+            sample = "".join(p.get("text", "") for p in (d.get("content") or []) if isinstance(p, dict))[:80]
+            return {"ok": True, "detail": f"✓ Claude ответил: {sample}".strip()}
+        if ch == "claude_routine":
+            fire = cfg.get("fire_url") or cfg.get("url") or ""
+            tok = cfg.get("token") or ""
+            ok_fmt = ("/routines/" in fire and fire.endswith("/fire") and tok.startswith("sk-ant"))
+            return {"ok": ok_fmt,
+                    "detail": ("Формат корректен. Полная проверка — напиши агенту в комнате "
+                               "(fire создаёт облачную сессию, поэтому авто-тест её не запускает)."
+                               if ok_fmt else "fire_url/token не похожи на Routine API-триггер")}
+        raise HTTPException(status_code=400, detail="Неизвестный канал")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": f"Ошибка: {type(e).__name__}: {e}"}
 
 
 @router.post("/agents/create")
