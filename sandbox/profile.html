@@ -777,6 +777,20 @@
       if (k === null) { loadAgents(); return; }
       config = { base_url: (base || '').trim(), model: (mdl || '').trim(), api_key: (k || '').trim() };
     }
+    // Verify the provider actually works (one live ping) before saving.
+    if (config && (channel === 'custom_llm' || channel === 'managed')) {
+      const t = await api(`/user/agents/${encodeURIComponent(agentId)}/channel/test`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, config }),
+      });
+      if (t) {
+        const tr = await t.json().catch(() => ({}));
+        if (!tr.ok && !confirm('⚠ Проверка связи не прошла:\n' + (tr.detail || '?') + '\n\nВсё равно сохранить канал?')) {
+          loadAgents(); return;
+        }
+        if (tr.ok) alert('✓ Связь работает:\n' + (tr.detail || ''));
+      }
+    }
     const r = await api(`/user/agents/${encodeURIComponent(agentId)}/channel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
