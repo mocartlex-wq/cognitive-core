@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 ENDPOINT = "https://mcp.xn----8sbwawqx4fza.xn--p1ai"
 LOG_FILE = "/var/log/cognitive-agent-runtime.log"
 HISTORY_DIR = "/var/run/cognitive/agent-history"
-PERSONA_REFRESH_SEC = 300
+PERSONA_REFRESH_SEC = 60  # was 300; lower so UI channel/standin changes apply within ~1 min
 DEFAULT_POLL_SEC = 5
 NOTIFY_BIN = "/usr/local/bin/cognitive-notify.sh"
 TOOL_TIMEOUT_SEC = 10
@@ -1462,6 +1462,7 @@ def process_persona(persona):
 def main():
     log.info(f"=== Cognitive Agent Runtime v2 starting (tools: {sorted(TOOL_REGISTRY.keys())}) ===")
     last_persona_load = 0
+    last_sig = None
     personas = {}
     while True:
         try:
@@ -1480,10 +1481,14 @@ def main():
                 for _aid, _p in personas.items():
                     _p["wake_channel"], _p["channel_config"] = load_agent_channel(_aid)
                 n_custom = sum(1 for a in personas if a in custom)
-                log.info(
-                    f"loaded {len(personas)} stand-in personas "
-                    f"(custom={n_custom}, default={len(personas) - n_custom}): "
-                    f"{list(personas.keys())}")
+                # Log only when the (agent, channel) set actually changes — avoids
+                # a log line every refresh now that refresh is frequent (60s).
+                sig = sorted((a, p.get("wake_channel", "deepseek")) for a, p in personas.items())
+                if sig != last_sig:
+                    log.info(
+                        f"loaded {len(personas)} stand-in personas "
+                        f"(custom={n_custom}, default={len(personas) - n_custom}): {sig}")
+                    last_sig = sig
                 last_persona_load = now
             if not personas:
                 log.warning("no personas active sleeping")
