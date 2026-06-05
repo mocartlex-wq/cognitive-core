@@ -1209,15 +1209,11 @@ def handle_llm_reply(persona, msg, history):
     if not reply_text:
         log.warning(f"[{persona['persona_id']}] llm_reply empty fallback to auto_ack")
         return handle_auto_ack(persona, msg, history)
-    suffix = "\n\n— автоматический ответ помощника проекта."
-    if suffix.strip() not in reply_text:
-        reply_text += suffix
-    # Reverse room bridge: if the question arrived via a room @-mention, answer
-    # IN THE ROOM (where the owner asked) instead of DM-ing their private inbox.
-    # Anti-loop: the auto-reply suffix marker is matched by AUTO_REPLY_MARKER_RE,
-    # so this reply landing back in room_messages -> forward-bridge -> inbox would
-    # be classified SILENT even if it mentioned someone. It contains no @mention
-    # here, so the forward bridge does not re-bridge it at all.
+    # The owner wants the AGENT's OWN voice — no "— автоматический ответ помощника
+    # проекта" marker. Anti-loop is preserved without it: the forward-bridge only
+    # bridges @-addressed messages (this reply has no @mention -> never re-bridged),
+    # plus loop_depth/can_reply caps any chain. Reverse room bridge: a question that
+    # arrived via a room @-mention is answered IN THE ROOM.
     room_id = room_ctx(msg)
     if room_id:
         sent_id = post_to_room(room_id, persona["persona_id"], reply_text)
@@ -1313,9 +1309,8 @@ def handle_managed(persona, msg, history):
         if not reply:
             log.warning(f"[{pid}] managed: empty reply -> fallback deepseek")
             return None
-        # Reuse the auto-reply marker so the reply is anti-loop-safe (matches
-        # AUTO_REPLY_MARKER_RE), with a Claude tag for transparency.
-        reply += "\n\n— автоматический ответ помощника проекта. (Claude API)"
+        # No auto-reply marker — the agent answers in its own voice (anti-loop via
+        # @-mention-only bridging + loop_depth).
         room_id = room_ctx(msg)
         if room_id:
             sid = post_to_room(room_id, pid, reply)
@@ -1371,7 +1366,7 @@ def handle_custom_llm(persona, msg, history):
         if not reply:
             log.warning(f"[{pid}] custom_llm: empty reply -> fallback deepseek")
             return None
-        reply += "\n\n— автоматический ответ помощника проекта."
+        # No auto-reply marker — agent answers in its own voice.
         room_id = room_ctx(msg)
         if room_id:
             sid = post_to_room(room_id, pid, reply)
