@@ -1389,6 +1389,47 @@ def handle_custom_llm(persona, msg, history):
         return None
 
 
+def handle_webhook(persona, msg, history):
+    """Channel 'webhook' — the 'wake-me' mode (vs the 'answer-for-me' modes above).
+    The single central daemon WAKES the real agent by POSTing the room event to the
+    agent's own webhook (config {webhook_url, secret?}); the agent then responds and
+    posts back to the room itself. One central waker for ALL agents — no per-agent
+    poller. Returns a success sentinel (so the daemon does NOT also stand-in reply),
+    or None to fall back to DeepSeek (no webhook configured / POST failed)."""
+    pid = persona["persona_id"]
+    cfg = persona.get("channel_config") or {}
+    hook = cfg.get("webhook_url") or cfg.get("url")
+    if not hook:
+        log.warning(f"[{pid}] webhook: no webhook_url -> fallback deepseek")
+        return None
+    room_id = room_ctx(msg)
+    sender = extract_real_sender(msg) or "owner"
+    payload = {
+        "event": "room_message",
+        "agent_id": pid,
+        "room_id": room_id,
+        "from": sender,
+        "text": msg.get("text", ""),
+    }
+    try:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(hook, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        secret = cfg.get("secret")
+        if secret:
+            req.add_header("X-Wake-Secret", secret)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            code = resp.getcode()
+        log.info(f"[{pid}] WEBHOOK woke agent -> {hook} HTTP {code} room={room_id}")
+        return f"webhook:{code}"  # success — the agent posts its own reply to the room
+    except urllib.error.HTTPError as e:
+        log.error(f"[{pid}] webhook HTTP {e.code} -> fallback deepseek")
+        return None
+    except Exception as e:
+        log.error(f"[{pid}] webhook failed: {e} -> fallback deepseek")
+        return None
+
+
 ACTION_HANDLERS = {
     "silent": handle_silent,
     "auto_ack": handle_auto_ack,
@@ -1447,6 +1488,12 @@ def process_persona(persona):
         elif action == "llm_reply" and channel == "custom_llm":
             # Any OpenAI-compatible provider the owner configured; DeepSeek fallback.
             sent_id = handle_custom_llm(persona, msg, history)
+            if sent_id is None:
+                sent_id = handle_llm_reply(persona, msg, history)
+        elif action == "llm_reply" and channel == "webhook":
+            # 'Wake-me' mode: wake the real agent via its webhook; it answers itself.
+            # DeepSeek fallback only if the webhook isn't set / POST fails.
+            sent_id = handle_webhook(persona, msg, history)
             if sent_id is None:
                 sent_id = handle_llm_reply(persona, msg, history)
         else:

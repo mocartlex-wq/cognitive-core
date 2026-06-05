@@ -865,7 +865,7 @@ class ChannelBody(BaseModel):
     config: dict[str, Any] | None = None  # routine:{fire_url,token} managed:{api_key} custom_llm:{base_url,api_key,model}
 
 
-_VALID_CHANNELS = {"deepseek", "claude_routine", "managed", "custom_llm"}
+_VALID_CHANNELS = {"deepseek", "claude_routine", "managed", "custom_llm", "webhook"}
 
 
 def _encrypt_config(d: dict) -> dict:
@@ -976,6 +976,18 @@ async def test_agent_channel(agent_id: str, body: ChannelBody, request: Request)
                     "detail": ("Формат корректен. Полная проверка — напиши агенту в комнате "
                                "(fire создаёт облачную сессию, поэтому авто-тест её не запускает)."
                                if ok_fmt else "fire_url/token не похожи на Routine API-триггер")}
+        if ch == "webhook":
+            hook = cfg.get("webhook_url") or cfg.get("url")
+            if not hook:
+                raise HTTPException(status_code=400, detail="Нужен webhook_url")
+            headers = {"Content-Type": "application/json"}
+            if cfg.get("secret"):
+                headers["X-Wake-Secret"] = cfg["secret"]
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post(hook, json={"event": "test", "text": "ping от Cognitive Core"}, headers=headers)
+            if 200 <= r.status_code < 300:
+                return {"ok": True, "detail": f"✓ webhook ответил HTTP {r.status_code}"}
+            return {"ok": False, "detail": f"webhook вернул HTTP {r.status_code}: {r.text[:120]}"}
         raise HTTPException(status_code=400, detail="Неизвестный канал")
     except HTTPException:
         raise
