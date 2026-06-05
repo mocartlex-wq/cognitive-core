@@ -37,6 +37,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
+from app.utils.env import _env
+
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 log = logging.getLogger("mcp_protocol")
 
@@ -573,7 +575,7 @@ async def _call_self(
 # Аутентификация: X-Room-Key для участников комнаты (создаётся в room_create).
 # Каждый MCP tool принимает room_key как параметр — передаём в header.
 ROOMS_BASE_URL = os.environ.get("ROOMS_BASE_URL", "http://cognitive_nginx/rooms")
-ROOMS_TIMEOUT_S = float(os.environ.get("ROOMS_TIMEOUT_S", "10.0"))
+ROOMS_TIMEOUT_S = float(_env("ROOMS_TIMEOUT_S", "10.0"))
 
 
 async def _call_rooms(

@@ -22,13 +22,15 @@ from typing import Any
 
 import asyncpg
 
+from app.utils.env import _env
+
 logger = logging.getLogger("cognitive.replication")
 
 NATS_URL = os.environ.get("NATS_URL", "nats://nats:4222")
 STREAM_NAME = os.environ.get("REPLICATION_STREAM", "COGNITIVE_REPL")
 SUBJECT_PREFIX = "cognitive.repl"
-POLL_INTERVAL = float(os.environ.get("REPLICATION_POLL_SEC", "1.0"))
-BATCH_SIZE = int(os.environ.get("REPLICATION_BATCH", "50"))
+POLL_INTERVAL = float(_env("REPLICATION_POLL_SEC", "1.0"))
+BATCH_SIZE = int(_env("REPLICATION_BATCH", "50"))
 
 
 async def write_outbox_event(
