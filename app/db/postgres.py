@@ -197,6 +197,12 @@ CREATE TABLE IF NOT EXISTS l_arbitration (
 );
 """
 
+# Stable arbitrary lock id for pg_advisory_xact_lock in init_db.
+# Serializes startup DDL across uvicorn workers (4 by default in prod) — without
+# it, concurrent CREATE/ALTER on shared relations take AccessExclusiveLock and
+# Postgres reports DeadlockDetectedError, killing 2-3 of the 4 workers.
+_INIT_DB_LOCK_ID = 48319
+
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
@@ -213,7 +219,9 @@ async def init_db() -> None:
     """Создаёт таблицы при старте приложения."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(CREATE_TABLES_SQL)
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", _INIT_DB_LOCK_ID)
+            await conn.execute(CREATE_TABLES_SQL)
 
 
 async def close_db() -> None:
