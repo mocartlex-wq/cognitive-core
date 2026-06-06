@@ -562,7 +562,7 @@ async def my_agents(request: Request):
                    last_mcp_connect_at, last_mcp_disconnect_at,
                    first_mcp_connect_at,
                    machine_fingerprint, machine_label,
-                   status, created_at, standin_enabled, wake_channel,
+                   status, created_at, standin_enabled, wake_channel, brain_id,
                    -- Presence: MCP-online если connect в последние 60 сек
                    (last_mcp_connect_at IS NOT NULL
                     AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online,
@@ -858,6 +858,82 @@ async def set_agent_standin(agent_id: str, body: StandinBody, request: Request):
     logger.info("standin_toggle user=%s agent=%s enabled=%s",
                 user.user_id, agent_id, body.enabled)
     return {"ok": True, "agent_id": agent_id, "standin_enabled": body.enabled}
+
+
+class BrainBody(BaseModel):
+    brain_id: str | None = None   # join existing brain by id; null/"" = detach
+    name: str | None = None       # create a new brain with this name and join it
+
+
+@router.post("/agents/{agent_id}/brain")
+async def set_agent_brain(agent_id: str, body: BrainBody, request: Request):
+    """Привязать устройство к ОБЩЕМУ МОЗГУ (brain) — несколько устройств одного
+    владельца действуют как ОДИН логический агент: общее рабочее состояние
+    (cognitive_continue/resume), общая история чекпоинтов и общая (owner-scoped)
+    память. brain_id → присоединить к существующему; name → создать новый и
+    присоединить; пусто → отвязать (стать одиночным)."""
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owns = await conn.fetchval(
+            "SELECT 1 FROM agent_states WHERE agent_id=$1 AND owner_user_id=$2::uuid",
+            agent_id, user.user_id,
+        )
+        if not owns:
+            raise HTTPException(status_code=404, detail="Агент не найден")
+        target = (body.brain_id or "").strip()
+        if not target and body.name and body.name.strip():
+            import uuid as _uuid
+            target = "brain_" + _uuid.uuid4().hex[:12]
+            await conn.execute(
+                "INSERT INTO brains (brain_id, owner_user_id, name) VALUES ($1,$2::uuid,$3)",
+                target, user.user_id, body.name.strip()[:80],
+            )
+        elif target:
+            ok = await conn.fetchval(
+                "SELECT 1 FROM brains WHERE brain_id=$1 AND owner_user_id=$2::uuid",
+                target, user.user_id,
+            )
+            if not ok:
+                raise HTTPException(status_code=404, detail="Мозг не найден")
+        await conn.execute(
+            "UPDATE agent_states SET brain_id=$1 WHERE agent_id=$2 AND owner_user_id=$3::uuid",
+            (target or None), agent_id, user.user_id,
+        )
+    logger.info("brain_set user=%s agent=%s brain=%s", user.user_id, agent_id, target or None)
+    return {"ok": True, "agent_id": agent_id, "brain_id": (target or None)}
+
+
+@router.get("/brains")
+async def my_brains(request: Request):
+    """Список общих мозгов владельца + устройства в каждом."""
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        brains = await conn.fetch(
+            "SELECT brain_id, name, created_at FROM brains WHERE owner_user_id=$1::uuid ORDER BY created_at",
+            user.user_id,
+        )
+        members = await conn.fetch(
+            "SELECT agent_id, agent_label, machine_label, brain_id FROM agent_states "
+            "WHERE owner_user_id=$1::uuid AND brain_id IS NOT NULL",
+            user.user_id,
+        )
+    by_brain: dict[str, list] = {}
+    for m in members:
+        by_brain.setdefault(m["brain_id"], []).append({
+            "agent_id": m["agent_id"],
+            "label": m["agent_label"] or m["machine_label"] or m["agent_id"],
+        })
+    return {"brains": [
+        {
+            "brain_id": b["brain_id"],
+            "name": b["name"],
+            "created_at": b["created_at"].isoformat() if b["created_at"] else None,
+            "devices": by_brain.get(b["brain_id"], []),
+        }
+        for b in brains
+    ]}
 
 
 class ChannelBody(BaseModel):
