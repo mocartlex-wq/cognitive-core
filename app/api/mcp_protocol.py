@@ -1367,14 +1367,32 @@ async def mcp_messages(request: Request) -> JSONResponse:
     if not response:
         return JSONResponse({}, status_code=202 if session_id else 200)
 
-    # SSE-routed mode: enqueue в очередь session и вернуть 202
-    if session_id and session_id in _MCP_SSE_SESSIONS:
+    # SSE-routed mode. MULTI-WORKER SAFE (2026-06-06): публикуем ответ через
+    # Redis pub/sub в канал mcp:sse:{session_id}. POST может попасть в ЛЮБОЙ из
+    # uvicorn-воркеров, а доставит ответ тот воркер, что держит SSE-стрим этой
+    # сессии. Раньше сессии жили только в памяти одного воркера → ~3/4 POST не
+    # доходили до стрима и клиент отваливался каждые ~30с.
+    if session_id:
+        # 1) Redis path (cross-worker delivery)
         try:
-            await _MCP_SSE_SESSIONS[session_id].put(response)
-            return JSONResponse({}, status_code=202)
+            from app.db.redis import get_redis
+            r = await get_redis()
+            if await r.exists(f"mcp:sess:{session_id}"):
+                await r.publish(
+                    f"mcp:sse:{session_id}",
+                    json.dumps(response, ensure_ascii=False),
+                )
+                return JSONResponse({}, status_code=202)
         except Exception as e:
-            log.warning("SSE enqueue failed: %s", e)
-            # Fall through → inline response (degraded)
+            log.warning("mcp redis publish failed: %s", e)
+        # 2) Same-worker in-memory fallback (Redis down)
+        if session_id in _MCP_SSE_SESSIONS:
+            try:
+                await _MCP_SSE_SESSIONS[session_id].put(response)
+                return JSONResponse({}, status_code=202)
+            except Exception as e:
+                log.warning("SSE enqueue failed: %s", e)
+        # 3) Degraded → inline (клиент прочитает тело)
 
     # Legacy mode — inline HTTP response (curl tests, no-SSE clients)
     return JSONResponse(response)
@@ -1455,11 +1473,12 @@ async def _mark_mcp_connected(request: Request) -> None:
 # ─────────────────────────────────────────────────────────────────
 # Session-based SSE message routing (proper MCP SSE transport)
 # ─────────────────────────────────────────────────────────────────
-# In-memory session store: session_id → asyncio.Queue
-# POST /mcp/messages?session_id=X enqueues response, SSE-generator
-# pulls and yields as `event: message` frames.
-# Single-process — для multi-worker нужен Redis pubsub, но для нашего
-# single-uvicorn-worker config достаточно.
+# MULTI-WORKER SAFE (2026-06-06): ответы маршрутизируются через Redis
+# pub/sub (канал mcp:sse:{session_id}) + реестр живых сессий в Redis
+# (ключ mcp:sess:{session_id}). Любой uvicorn-воркер может принять POST
+# /mcp/messages и доставить ответ в SSE-стрим, который держит другой
+# воркер. In-memory _MCP_SSE_SESSIONS остаётся как fallback, если Redis
+# недоступен (тогда — single-worker semantics, как раньше).
 import uuid as _uuid
 
 _MCP_SSE_SESSIONS: dict[str, asyncio.Queue] = {}
@@ -1471,45 +1490,89 @@ async def mcp_sse(request: Request) -> StreamingResponse:
 
     Flow по MCP spec:
     1. Client opens GET /sse
-    2. Server assigns session_id, sends `event: endpoint
-       data: /mcp/messages?session_id=XYZ`
+    2. Server assigns session_id, sends `event: endpoint` + POST URL
     3. Client POSTs JSON-RPC to /mcp/messages?session_id=XYZ
-    4. POST handler responds 202 Accepted + enqueues response
-    5. SSE generator pulls from queue → yields `event: message
-       data: {jsonrpc-response}`
+    4. POST публикует ответ в Redis-канал mcp:sse:{session_id}
+    5. SSE generator (подписан на канал) yields `event: message`
     6. Client SDK matches response.id, marks tool/method complete
 
-    Без session_id (legacy /mcp/messages) — response idёт в HTTP body
-    (backward compat для curl-тестов).
+    Без session_id (legacy /mcp/messages) — response idёт в HTTP body.
     """
     # Mark agent as MCP-connected (for /ui/profile green dot UI)
     await _mark_mcp_connected(request)
 
     session_id = _uuid.uuid4().hex
-    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-    _MCP_SSE_SESSIONS[session_id] = queue
-    log.info("mcp_sse session opened: %s", session_id[:8])
+
+    # Prefer Redis pub/sub (multi-worker safe). Fallback: in-memory queue.
+    r = None
+    pubsub = None
+    try:
+        from app.db.redis import get_redis
+        r = await get_redis()
+        pubsub = r.pubsub()
+        await pubsub.subscribe(f"mcp:sse:{session_id}")
+        await r.setex(f"mcp:sess:{session_id}", 120, "1")
+    except Exception as e:
+        log.warning("mcp_sse redis unavailable, in-memory fallback: %s", e)
+        r = None
+        pubsub = None
+
+    queue: asyncio.Queue | None = None
+    if pubsub is None:
+        queue = asyncio.Queue(maxsize=100)
+        _MCP_SSE_SESSIONS[session_id] = queue
+
+    log.info("mcp_sse session opened: %s (redis=%s)", session_id[:8], pubsub is not None)
 
     async def gen():
         try:
             # Initial endpoint event — session-bound POST URL
             yield "event: endpoint\n"
             yield f"data: /mcp/messages?session_id={session_id}\n\n"
-            # Pull responses from queue. Timeout 25s → send keep-alive event:ping.
+            # Pull responses. Timeout 25s → send keep-alive event:ping.
             while True:
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=25.0)
-                    yield "event: message\n"
-                    yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
-                    # Keepalive — event:ping чтобы Claude Code SDK не закрыл по inactivity
-                    yield "event: ping\n"
-                    yield "data: {}\n\n"
+                if pubsub is not None:
+                    msg = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=25.0
+                    )
+                    if msg and msg.get("type") == "message":
+                        # data уже JSON-строка (опубликована POST-хендлером)
+                        yield "event: message\n"
+                        yield f"data: {msg.get('data')}\n\n"
+                    else:
+                        try:
+                            await r.expire(f"mcp:sess:{session_id}", 120)
+                        except Exception:
+                            pass
+                        yield "event: ping\n"
+                        yield "data: {}\n\n"
+                else:
+                    try:
+                        m = await asyncio.wait_for(queue.get(), timeout=25.0)
+                        yield "event: message\n"
+                        yield f"data: {json.dumps(m, ensure_ascii=False)}\n\n"
+                    except asyncio.TimeoutError:
+                        yield "event: ping\n"
+                        yield "data: {}\n\n"
         except asyncio.CancelledError:
             log.info("mcp_sse session closed: %s", session_id[:8])
             return
         finally:
             _MCP_SSE_SESSIONS.pop(session_id, None)
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe(f"mcp:sse:{session_id}")
+                except Exception:
+                    pass
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+            if r is not None:
+                try:
+                    await r.delete(f"mcp:sess:{session_id}")
+                except Exception:
+                    pass
 
     return StreamingResponse(
         gen(),
