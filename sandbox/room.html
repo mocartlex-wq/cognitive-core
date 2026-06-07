@@ -338,8 +338,8 @@
     });
     const ta = document.getElementById('composerText');
     ta.addEventListener('keydown', (e) => {
-      // Ctrl/Cmd+Enter — быстрая отправка
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendMessage(); }
+      // Enter — отправка; Shift+Enter — перенос строки. (Ctrl/Cmd+Enter тоже отправляет.)
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
     });
     scrollThreadToBottom();
     lastMsgKey = msgKey(detail.messages);
