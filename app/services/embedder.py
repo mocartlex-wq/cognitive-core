@@ -107,6 +107,22 @@ def get_embedding_provider() -> str:
     return _fastembed_provider
 
 
+def warm_up() -> str:
+    """Eager-load the embedding model so the FIRST cognitive_recall after a (re)start
+    is fast (~tens of ms) instead of timing out on a cold model load (~20-40s).
+
+    Called non-blocking from the app lifespan (per uvicorn worker). Safe to run in a
+    thread. Returns the provider ('CPU'/'CUDA') or 'unavailable'."""
+    model = _get_fastembed()
+    if model is None:
+        return "unavailable"
+    try:
+        list(model.embed(["warm-up"]))  # force first inference (lazy graph build)
+    except Exception as e:
+        logger.warning("embedder warm-up inference failed: %s", e)
+    return _fastembed_provider or "loaded"
+
+
 async def embed_text(text: str) -> list[float]:
     """Возвращает 384-dim эмбеддинг для текста."""
     if not text:
