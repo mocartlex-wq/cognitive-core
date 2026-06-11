@@ -869,9 +869,31 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             last_ts = state.get("last_checkpoint_at")
             state["since_human"] = _human_since(last_ts)
 
+        # Relevant skills (библиотека domain='skills') — auto-surface top-2 on resume so
+        # the agent reuses a ready recipe instead of re-deriving. Cheap + on-demand
+        # (resume only, top 2). Best-effort: never breaks resume.
+        skills = []
+        try:
+            from app.services.operative import build_operative
+            owner_uid = await _resolve_owner(request)
+            task_ctx = (state.get("current_task") if isinstance(state, dict) else None) \
+                or "восстановление продолжение работы память комната команда"
+            sk = await asyncio.wait_for(
+                build_operative(query=str(task_ctx)[:200], domain="skills", top_k=2, owner_user_id=owner_uid),
+                timeout=4.0,
+            )
+            for x in (sk or []):
+                cont = x.get("content") if isinstance(x, dict) else None
+                if isinstance(cont, dict) and cont.get("kind") == "skill":
+                    skills.append({"name": cont.get("name"), "when_to_use": cont.get("when_to_use"),
+                                   "steps": cont.get("steps")})
+        except Exception as e:
+            log.warning("resume skills recall failed: %s", e)
+
         return {
             "agent_id": agent_id,
             "state": state,
+            "skills": skills,
             "pending_dms": {
                 "count": inbox.get("count", 0) if isinstance(inbox, dict) else 0,
                 "preview": [
