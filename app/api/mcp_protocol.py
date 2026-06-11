@@ -892,8 +892,8 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
 
         return {
             "agent_id": agent_id,
-            "state": state,
             "skills": skills,
+            "state": state,
             "pending_dms": {
                 "count": inbox.get("count", 0) if isinstance(inbox, dict) else 0,
                 "preview": [
