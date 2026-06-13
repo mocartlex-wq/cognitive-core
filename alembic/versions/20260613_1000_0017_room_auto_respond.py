@@ -22,24 +22,37 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # IF EXISTS: таблица room_participants создаётся rooms-схемой (init SQL), а не
-    # alembic-ом. На инсталляции без комнат миграция тогда безопасный no-op.
+    # room_participants создаётся СХЕМОЙ rooms-сервиса (init SQL), а НЕ alembic-ом,
+    # поэтому таблицы может не быть (CI без init-SQL; инсталляции без комнат). Весь
+    # ALTER+INDEX обёрнут в DO-блок с to_regclass: если таблицы нет — чистый no-op,
+    # если есть — идемпотентное применение. (CREATE INDEX, в отличие от ALTER, не
+    # умеет IF EXISTS для самой таблицы и иначе жёстко падает на отсутствующей.)
+    # Частичный индекс — под запрос демона load_room_responder_agents() (WHERE
+    # auto_respond = true): обычно таких строк мало.
     op.execute(
         """
-        ALTER TABLE IF EXISTS room_participants
-        ADD COLUMN IF NOT EXISTS auto_respond BOOLEAN NOT NULL DEFAULT false
+        DO $$
+        BEGIN
+            IF to_regclass('public.room_participants') IS NOT NULL THEN
+                ALTER TABLE public.room_participants
+                    ADD COLUMN IF NOT EXISTS auto_respond BOOLEAN NOT NULL DEFAULT false;
+                CREATE INDEX IF NOT EXISTS idx_rp_auto_respond
+                    ON public.room_participants(agent_id) WHERE auto_respond = true;
+            END IF;
+        END $$;
         """
-    )
-    # Частичный индекс под запрос демона load_room_responder_agents()
-    # (WHERE auto_respond = true): обычно таких строк мало.
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_rp_auto_respond "
-        "ON room_participants(agent_id) WHERE auto_respond = true"
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_rp_auto_respond")
     op.execute(
-        "ALTER TABLE IF EXISTS room_participants DROP COLUMN IF EXISTS auto_respond"
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('public.room_participants') IS NOT NULL THEN
+                DROP INDEX IF EXISTS idx_rp_auto_respond;
+                ALTER TABLE public.room_participants DROP COLUMN IF EXISTS auto_respond;
+            END IF;
+        END $$;
+        """
     )
