@@ -94,6 +94,7 @@ services:
       # Whisper модель (~150MB для base) — persist между rebuild'ами,
       # иначе при каждой пересборке скачивается с HuggingFace.
       - whisper_cache:/data/whisper
+      - cognitive_fastembed_cache:/tmp/fastembed_cache
     # Vision/secrets — passed from systemd-loaded env at the cognitive-deploy.service
     # level (systemd EnvironmentFile reads /etc/cogcore-qwen.env as root *before*
     # dropping to user salex, then exports вars; docker compose interpolates here).
@@ -322,6 +323,8 @@ volumes:
     name: cognitive_whisper_cache
   gitea_data:
     name: cognitive_gitea_data
+  cognitive_fastembed_cache:
+    name: cognitive_fastembed_cache
 
 # External network references (managed by other stacks). Cognitive nginx joins
 # ai-crm_aicrm so it can resolve ai-crm-backend upstream in nginx/conf.d/ai-crm.conf
