@@ -97,7 +97,7 @@ def main() -> int:
 
     pwd = load_pg_password()
     try:
-        conn = psycopg2.connect(DSN_TEMPLATE.format(pwd=pwd))
+        conn = psycopg2.connect(os.environ.get("DATABASE_URL") or DSN_TEMPLATE.format(pwd=pwd))
     except psycopg2.Error as e:
         log.error("DB connect failed: %s", e)
         return 1
