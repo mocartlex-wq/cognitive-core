@@ -312,7 +312,8 @@ async def get_my_room_detail(room_id: str, request: Request):
             prows = await conn.fetch(
                 """
                 SELECT p.agent_id, COALESCE(p.role, 'member') AS role,
-                       p.joined_at, p.last_seen_at, s.agent_label
+                       p.joined_at, p.last_seen_at, s.agent_label,
+                       COALESCE(p.auto_respond, false) AS auto_respond
                   FROM room_participants p
                   LEFT JOIN agent_states s ON s.agent_id = p.agent_id
                  WHERE p.room_id = $1::uuid
@@ -376,6 +377,48 @@ async def get_my_room_detail(room_id: str, request: Request):
         "participants": participants,
         "messages": messages,
     }
+
+
+class AutoRespondBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
+@router.post("/rooms/{room_id}/participants/{agent_id}/auto-respond")
+async def set_participant_auto_respond(
+    room_id: str, agent_id: str, body: AutoRespondBody, request: Request
+):
+    """Привязать/отвязать агента к авто-ответам в ЭТОЙ комнате (owner-scoped).
+
+    enabled=true → демон cognitive-agent-runtime будит этого агента на ПРЯМОЕ
+    @упоминание в данной комнате и постит ответ обратно (через его wake_channel),
+    даже если у агента НЕ включён полный 24/7-дежурный (standin_enabled). Привязка
+    ровно per-room — флаг живёт на room_participants. Демон подхватит на следующем
+    цикле перезагрузки персон (<= PERSONA_REFRESH_SEC).
+
+    404 если комнаты нет / агент не участник; 403 если комната не ваша.
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM rooms WHERE id = $1::uuid", room_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+        res = await conn.execute(
+            "UPDATE room_participants SET auto_respond = $1 "
+            "WHERE room_id = $2::uuid AND agent_id = $3",
+            body.enabled, room_id, agent_id,
+        )
+    if res.split()[-1] == "0":  # UPDATE 0 → агент не состоит в этой комнате
+        raise HTTPException(status_code=404, detail="Агент не участник этой комнаты")
+    logger.info("room_auto_respond user=%s room=%s agent=%s enabled=%s",
+                user.user_id, room_id, agent_id, body.enabled)
+    return {"ok": True, "room_id": room_id, "agent_id": agent_id,
+            "auto_respond": body.enabled}
 
 
 # ─────────────────────────────────────────────────────────────────────────

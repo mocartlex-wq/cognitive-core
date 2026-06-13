@@ -39,9 +39,19 @@ CREATE TABLE IF NOT EXISTS public.room_participants (
     last_seen_at timestamptz DEFAULT now(),
     role         text        DEFAULT 'member',
     platform     text        DEFAULT 'unknown',
+    -- Per-room auto-responder: when true, the cognitive-agent-runtime daemon wakes
+    -- THIS agent on a DIRECT @mention in THIS room and posts the reply back —
+    -- without the agent being a full 24/7 stand-in (agent_states.standin_enabled).
+    -- Per-room by design: the flag lives on the participant row. See alembic 0017.
+    auto_respond boolean     NOT NULL DEFAULT false,
     PRIMARY KEY (room_id, agent_id)
 );
 CREATE INDEX IF NOT EXISTS idx_rp_agent ON public.room_participants (agent_id);
+-- Idempotent guard for existing installations (init SQL only runs on an empty DB).
+ALTER TABLE public.room_participants
+    ADD COLUMN IF NOT EXISTS auto_respond boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_rp_auto_respond
+    ON public.room_participants (agent_id) WHERE auto_respond = true;
 
 CREATE TABLE IF NOT EXISTS public.room_messages (
     id         uuid        DEFAULT uuid_generate_v4() PRIMARY KEY,
