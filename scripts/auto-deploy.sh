@@ -81,7 +81,10 @@ else
     git fetch --quiet origin "$BRANCH" 2>&1 || true
 fi
 
-if ! git diff-index --quiet HEAD 2>/dev/null; then
+# ai-crm.conf is a foreign nginx config continuously rewritten by an external tool
+# (davsync/dynup); it is NOT part of cognitive-core and diverges from origin permanently.
+# Exclude it from the dirty check so this guard stops false-aborting every deploy tick.
+if ! git diff-index --quiet HEAD -- "." ":(exclude)nginx/conf.d/ai-crm.conf" 2>/dev/null; then
     # Working tree dirty. Check if content matches origin/$BRANCH (safe self-heal case)
     if git diff --quiet "origin/$BRANCH" -- . 2>/dev/null; then
         log "dirty index but content matches origin/$BRANCH — self-healing via checkout + clean"
