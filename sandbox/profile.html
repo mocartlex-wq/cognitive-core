@@ -881,14 +881,14 @@
         const curLabelJs = esc(a.agent_label || '').replace(/'/g, "&#39;");
         return `
         <details style="margin-left:12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:14px;padding:0">
-          <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;gap:14px;align-items:center" data-agent-id="${esc(a.agent_id)}" onclick="loadAgentEvents(event, '${esc(a.agent_id)}')">
+          <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;flex-wrap:wrap;gap:14px;align-items:center" data-agent-id="${esc(a.agent_id)}" onclick="loadAgentEvents(event, '${esc(a.agent_id)}')">
             <div style="flex:1;min-width:0">
               <div class="name">${agentDot(a)}${titleName} ${agentChip(a)}${idSub}</div>
               <div class="meta">${esc(a.project || '—')} · ${a.total_events || 0} событий · создан ${esc(createdFull)} · ${a.last_mcp_connect_at ? 'MCP ' + fmtDate(a.last_mcp_connect_at) : 'MCP никогда'}</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
-              <select title="Способ связи — кто отвечает за агента" onclick="event.stopPropagation()" onchange="event.stopPropagation();event.preventDefault();setChannel('${aidJs}', this.value)" style="font-size:12px;padding:5px 7px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font);cursor:pointer">
+              <select title="Способ связи — кто отвечает за агента" onclick="event.stopPropagation()" onchange="event.stopPropagation();event.preventDefault();setChannel('${aidJs}', this.value)" style="max-width:190px;font-size:12px;padding:5px 7px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font);cursor:pointer">
                 <option value="deepseek"${(a.wake_channel || 'deepseek') === 'deepseek' ? ' selected' : ''}>🤖 DeepSeek-дублёр</option>
                 <option value="claude_routine"${a.wake_channel === 'claude_routine' ? ' selected' : ''}>☁️ Облачный Claude (Routine)</option>
                 <option value="managed"${a.wake_channel === 'managed' ? ' selected' : ''}>🏢 Claude API (прямой)</option>
