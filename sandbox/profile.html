@@ -524,7 +524,7 @@
   </form>
 </dialog>
 
-<script src="/static/theme.js?v=20260520"></script>
+<script src="/static/theme.js?v=20260613"></script>
 <script src="/static/error-reporter.js?v=20260530" defer></script>
 <script src="/static/auth-widget.js?v=20260522" defer></script>
 <script src="/static/machine-fp.js?v=20260526" defer></script>
@@ -768,6 +768,35 @@
       const key = prompt('Anthropic API-ключ (sk-ant-...)\nАгент будет отвечать НАСТОЯЩИМ Claude через Anthropic API (демон постит ответ в комнату):');
       if (key === null) { loadAgents(); return; }
       config = { api_key: (key || '').trim() };
+    } else if (channel === 'custom_llm') {
+      const base = prompt('🔌 Свой LLM — Base URL OpenAI-совместимого API:\n(DeepSeek: https://api.deepseek.com/v1 · OpenAI: https://api.openai.com/v1 · Ollama: http://localhost:11434/v1)');
+      if (base === null) { loadAgents(); return; }
+      const mdl = prompt('Модель:\n(напр. deepseek-chat · gpt-4o-mini · llama3.1 · mistral-large-latest)');
+      if (mdl === null) { loadAgents(); return; }
+      const k = prompt('API-ключ провайдера (оставь пустым для локального Ollama):');
+      if (k === null) { loadAgents(); return; }
+      config = { base_url: (base || '').trim(), model: (mdl || '').trim(), api_key: (k || '').trim() };
+    } else if (channel === 'webhook') {
+      const hook = prompt('🔔 Webhook твоего агента — URL, куда центральный демон пришлёт событие из комнаты {agent_id, room_id, from, text}. Твой агент сам ответит через room_post:');
+      if (hook === null) { loadAgents(); return; }
+      const sec = prompt('Секрет для заголовка X-Wake-Secret (необязательно — Enter чтобы пропустить):');
+      if (sec === null) { loadAgents(); return; }
+      config = { webhook_url: (hook || '').trim() };
+      if ((sec || '').trim()) config.secret = sec.trim();
+    }
+    // Verify the provider actually works (one live ping) before saving.
+    if (config && (channel === 'custom_llm' || channel === 'managed' || channel === 'webhook')) {
+      const t = await api(`/user/agents/${encodeURIComponent(agentId)}/channel/test`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, config }),
+      });
+      if (t) {
+        const tr = await t.json().catch(() => ({}));
+        if (!tr.ok && !confirm('⚠ Проверка связи не прошла:\n' + (tr.detail || '?') + '\n\nВсё равно сохранить канал?')) {
+          loadAgents(); return;
+        }
+        if (tr.ok) alert('✓ Связь работает:\n' + (tr.detail || ''));
+      }
     }
     const r = await api(`/user/agents/${encodeURIComponent(agentId)}/channel`, {
       method: 'POST',
@@ -788,6 +817,36 @@
     if (!r) return;
     if (r.ok) { loadAgents(); }
     else { alert('Ошибка: ' + ((await r.json()).detail || r.status)); }
+  }
+
+  // 🧠 Общий мозг: несколько устройств владельца = ОДИН логический агент
+  // (общая память, рабочее состояние и история между устройствами).
+  async function setBrain(agentId, currentBrainId) {
+    let brains = [];
+    try { const br = await api('/user/brains'); if (br && br.ok) brains = (await br.json()).brains || []; } catch (e) {}
+    let msg = '🧠 Общий мозг — несколько устройств работают как ОДИН агент: общая память, общее рабочее состояние (cognitive_continue/resume) и история.\n\n';
+    if (currentBrainId) msg += 'Сейчас устройство в мозге: ' + currentBrainId + '\n\n';
+    msg += 'Введите ИМЯ нового мозга (создать и присоединить это устройство).';
+    if (brains.length) msg += '\n\nИли вставьте ID существующего мозга:\n' + brains.map(b => '• ' + b.brain_id + ' — «' + (b.name || '—') + '» (' + ((b.devices && b.devices.length) || 0) + ' устр.)').join('\n');
+    if (currentBrainId) msg += '\n\nИли «-» чтобы отвязать (сделать одиночным).';
+    const ans = prompt(msg, currentBrainId || '');
+    if (ans === null) return;
+    const v = ans.trim();
+    let body;
+    if (v === '' || v === '-') body = { brain_id: null };
+    else if (brains.some(b => b.brain_id === v)) body = { brain_id: v };
+    else body = { name: v };
+    const r = await api(`/user/agents/${encodeURIComponent(agentId)}/brain`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r) return;
+    if (r.ok) {
+      const d = await r.json();
+      alert(d.brain_id ? ('🧠 Устройство в мозге: ' + d.brain_id) : '🧠 Устройство отвязано (одиночное)');
+      loadAgents();
+    } else { alert('Ошибка: ' + ((await r.json()).detail || r.status)); }
   }
 
   async function loadAgents() {
@@ -822,19 +881,22 @@
         const curLabelJs = esc(a.agent_label || '').replace(/'/g, "&#39;");
         return `
         <details style="margin-left:12px;background:var(--glass-bg-light);border:1px solid var(--glass-border);border-radius:14px;padding:0">
-          <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;gap:14px;align-items:center" data-agent-id="${esc(a.agent_id)}" onclick="loadAgentEvents(event, '${esc(a.agent_id)}')">
-            <div style="flex:1;min-width:0">
+          <summary style="cursor:pointer;padding:14px 16px;list-style:none;display:flex;flex-wrap:wrap;gap:14px;align-items:center" data-agent-id="${esc(a.agent_id)}" onclick="loadAgentEvents(event, '${esc(a.agent_id)}')">
+            <div style="flex:1 1 100%;min-width:0">
               <div class="name">${agentDot(a)}${titleName} ${agentChip(a)}${idSub}</div>
               <div class="meta">${esc(a.project || '—')} · ${a.total_events || 0} событий · создан ${esc(createdFull)} · ${a.last_mcp_connect_at ? 'MCP ' + fmtDate(a.last_mcp_connect_at) : 'MCP никогда'}</div>
             </div>
-            <div style="display:flex;gap:6px;align-items:center">
+            <div style="display:flex;gap:6px;align-items:center;width:100%;flex-wrap:wrap;justify-content:flex-end;margin-top:2px">
               <span class="meta" style="margin-right:6px" title="${esc(a.last_heartbeat_at ? fmtFullDate(a.last_heartbeat_at) : '')}">${a.last_heartbeat_at ? fmtDate(a.last_heartbeat_at) : 'никогда'}</span>
-              <select title="Способ связи — кто отвечает за агента" onclick="event.stopPropagation()" onchange="event.stopPropagation();event.preventDefault();setChannel('${aidJs}', this.value)" style="font-size:12px;padding:5px 7px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font);cursor:pointer">
+              <select title="Способ связи — кто отвечает за агента" onclick="event.stopPropagation()" onchange="event.stopPropagation();event.preventDefault();setChannel('${aidJs}', this.value)" style="max-width:190px;font-size:12px;padding:5px 7px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font);cursor:pointer">
                 <option value="deepseek"${(a.wake_channel || 'deepseek') === 'deepseek' ? ' selected' : ''}>🤖 DeepSeek-дублёр</option>
                 <option value="claude_routine"${a.wake_channel === 'claude_routine' ? ' selected' : ''}>☁️ Облачный Claude (Routine)</option>
                 <option value="managed"${a.wake_channel === 'managed' ? ' selected' : ''}>🏢 Claude API (прямой)</option>
+                <option value="custom_llm"${a.wake_channel === 'custom_llm' ? ' selected' : ''}>🔌 Свой LLM (любой провайдер)</option>
+                <option value="webhook"${a.wake_channel === 'webhook' ? ' selected' : ''}>🔔 Свой webhook (разбудить моего агента)</option>
               </select>
               <button class="btn ${a.standin_enabled ? '' : 'secondary'} btn-sm" title="24/7-дублёр: отвечает вместо Claude, когда он офлайн (контекстно, из вашей памяти). ${a.standin_enabled ? 'ВКЛ — нажми, чтобы выключить' : 'выкл — нажми, чтобы включить'}" onclick="event.stopPropagation();event.preventDefault();toggleStandin('${aidJs}', ${a.standin_enabled ? 'false' : 'true'})">${a.standin_enabled ? '🟢 24/7' : '⚪ 24/7'}</button>
+              <button class="btn ${a.brain_id ? '' : 'secondary'} btn-sm" title="🧠 Общий мозг — устройства в одном мозге работают как ОДИН агент (общая память, состояние, история между устройствами)" onclick="event.stopPropagation();event.preventDefault();setBrain('${aidJs}', ${a.brain_id ? "'" + a.brain_id + "'" : 'null'})">${a.brain_id ? '🧠 ✓' : '🧠'}</button>
               <button class="btn secondary btn-sm" title="Переименовать помощника (отображаемое имя)" onclick="event.stopPropagation();event.preventDefault();renameAgent('${aidJs}','${curLabelJs}')">✏️</button>
               <button class="btn secondary btn-sm" title="Перенести помощника на другую машину" onclick="event.stopPropagation();event.preventDefault();moveAgent('${aidJs}')">⇄</button>
               <button class="btn danger btn-sm" title="Удалить помощника + revoke ключи" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc(a.agent_id)}')">🗑️</button>

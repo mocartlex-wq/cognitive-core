@@ -171,7 +171,7 @@
   </div>
 </main>
 
-<script src="/static/theme.js?v=20260520"></script>
+<script src="/static/theme.js?v=20260613"></script>
 <script src="/static/error-reporter.js?v=20260530" defer></script>
 <script src="/static/auth-widget.js?v=20260522" defer></script>
 <script>
@@ -370,8 +370,8 @@
     });
     const ta = document.getElementById('composerText');
     ta.addEventListener('keydown', (e) => {
-      // Ctrl/Cmd+Enter — быстрая отправка
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendMessage(); }
+      // Enter — отправка; Shift+Enter — перенос строки. (Ctrl/Cmd+Enter тоже отправляет.)
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
     });
     scrollThreadToBottom();
     lastMsgKey = msgKey(detail.messages);

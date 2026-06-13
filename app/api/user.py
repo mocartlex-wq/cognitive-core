@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 from datetime import datetime
@@ -604,7 +605,7 @@ async def my_agents(request: Request):
                    last_mcp_connect_at, last_mcp_disconnect_at,
                    first_mcp_connect_at,
                    machine_fingerprint, machine_label,
-                   status, created_at, standin_enabled, wake_channel,
+                   status, created_at, standin_enabled, wake_channel, brain_id,
                    -- Presence: MCP-online если connect в последние 60 сек
                    (last_mcp_connect_at IS NOT NULL
                     AND last_mcp_connect_at > NOW() - INTERVAL '60 seconds') AS mcp_online,
@@ -902,12 +903,106 @@ async def set_agent_standin(agent_id: str, body: StandinBody, request: Request):
     return {"ok": True, "agent_id": agent_id, "standin_enabled": body.enabled}
 
 
+class BrainBody(BaseModel):
+    brain_id: str | None = None   # join existing brain by id; null/"" = detach
+    name: str | None = None       # create a new brain with this name and join it
+
+
+@router.post("/agents/{agent_id}/brain")
+async def set_agent_brain(agent_id: str, body: BrainBody, request: Request):
+    """Привязать устройство к ОБЩЕМУ МОЗГУ (brain) — несколько устройств одного
+    владельца действуют как ОДИН логический агент: общее рабочее состояние
+    (cognitive_continue/resume), общая история чекпоинтов и общая (owner-scoped)
+    память. brain_id → присоединить к существующему; name → создать новый и
+    присоединить; пусто → отвязать (стать одиночным)."""
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owns = await conn.fetchval(
+            "SELECT 1 FROM agent_states WHERE agent_id=$1 AND owner_user_id=$2::uuid",
+            agent_id, user.user_id,
+        )
+        if not owns:
+            raise HTTPException(status_code=404, detail="Агент не найден")
+        target = (body.brain_id or "").strip()
+        if not target and body.name and body.name.strip():
+            import uuid as _uuid
+            target = "brain_" + _uuid.uuid4().hex[:12]
+            await conn.execute(
+                "INSERT INTO brains (brain_id, owner_user_id, name) VALUES ($1,$2::uuid,$3)",
+                target, user.user_id, body.name.strip()[:80],
+            )
+        elif target:
+            ok = await conn.fetchval(
+                "SELECT 1 FROM brains WHERE brain_id=$1 AND owner_user_id=$2::uuid",
+                target, user.user_id,
+            )
+            if not ok:
+                raise HTTPException(status_code=404, detail="Мозг не найден")
+        await conn.execute(
+            "UPDATE agent_states SET brain_id=$1 WHERE agent_id=$2 AND owner_user_id=$3::uuid",
+            (target or None), agent_id, user.user_id,
+        )
+    logger.info("brain_set user=%s agent=%s brain=%s", user.user_id, agent_id, target or None)
+    return {"ok": True, "agent_id": agent_id, "brain_id": (target or None)}
+
+
+@router.get("/brains")
+async def my_brains(request: Request):
+    """Список общих мозгов владельца + устройства в каждом."""
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        brains = await conn.fetch(
+            "SELECT brain_id, name, created_at FROM brains WHERE owner_user_id=$1::uuid ORDER BY created_at",
+            user.user_id,
+        )
+        members = await conn.fetch(
+            "SELECT agent_id, agent_label, machine_label, brain_id FROM agent_states "
+            "WHERE owner_user_id=$1::uuid AND brain_id IS NOT NULL",
+            user.user_id,
+        )
+    by_brain: dict[str, list] = {}
+    for m in members:
+        by_brain.setdefault(m["brain_id"], []).append({
+            "agent_id": m["agent_id"],
+            "label": m["agent_label"] or m["machine_label"] or m["agent_id"],
+        })
+    return {"brains": [
+        {
+            "brain_id": b["brain_id"],
+            "name": b["name"],
+            "created_at": b["created_at"].isoformat() if b["created_at"] else None,
+            "devices": by_brain.get(b["brain_id"], []),
+        }
+        for b in brains
+    ]}
+
+
 class ChannelBody(BaseModel):
-    channel: str  # 'deepseek' | 'claude_routine' | 'managed'
-    config: dict[str, Any] | None = None  # routine: {fire_url, token}; managed: {key}
+    channel: str  # deepseek | claude_routine | managed | custom_llm
+    config: dict[str, Any] | None = None  # routine:{fire_url,token} managed:{api_key} custom_llm:{base_url,api_key,model}
 
 
-_VALID_CHANNELS = {"deepseek", "claude_routine", "managed"}
+_VALID_CHANNELS = {"deepseek", "claude_routine", "managed", "custom_llm", "webhook"}
+
+
+def _encrypt_config(d: dict) -> dict:
+    """Encrypt per-agent channel config (provider API keys) at rest with Fernet
+    (COGCORE_CONFIG_KEY env). Stored as {'_enc': <token>}; the daemon decrypts on
+    read. If no key is configured, fall back to plaintext so the feature still
+    works (logged) rather than hard-failing."""
+    key = os.environ.get("COGCORE_CONFIG_KEY")
+    if not key:
+        logger.warning("COGCORE_CONFIG_KEY unset — storing channel config UNENCRYPTED")
+        return d
+    try:
+        from cryptography.fernet import Fernet
+        token = Fernet(key.encode()).encrypt(json.dumps(d).encode()).decode()
+        return {"_enc": token}
+    except Exception as e:  # noqa: BLE001
+        logger.error("channel config encrypt failed: %s — storing plaintext", e)
+        return d
 
 
 @router.post("/agents/{agent_id}/channel")
@@ -935,11 +1030,88 @@ async def set_agent_channel(agent_id: str, body: ChannelBody, request: Request):
                 "INSERT INTO agent_channel_config (agent_id, config, updated_at) "
                 "VALUES ($1, $2::jsonb, NOW()) "
                 "ON CONFLICT (agent_id) DO UPDATE SET config = $2::jsonb, updated_at = NOW()",
-                agent_id, json.dumps(body.config),
+                agent_id, json.dumps(_encrypt_config(body.config)),
             )
+        elif body.channel == "deepseek":
+            # Free default needs no secret — drop any stored provider config (hygiene).
+            await conn.execute("DELETE FROM agent_channel_config WHERE agent_id = $1", agent_id)
     logger.info("channel_set user=%s agent=%s channel=%s has_config=%s",
                 user.user_id, agent_id, body.channel, body.config is not None)
     return {"ok": True, "agent_id": agent_id, "wake_channel": body.channel}
+
+
+@router.post("/agents/{agent_id}/channel/test")
+async def test_agent_channel(agent_id: str, body: ChannelBody, request: Request):
+    """Make ONE tiny live call to the provider in `config` (without saving) so the
+    owner can verify a channel works before relying on it. Returns {ok, detail}.
+    Owner-gated (prevents using this as an open LLM proxy)."""
+    await require_user(request)
+    import httpx
+    ch = body.channel
+    cfg = body.config or {}
+    try:
+        if ch == "deepseek":
+            return {"ok": True, "detail": "DeepSeek-дублёр (сервер) — всегда доступен"}
+        if ch == "custom_llm":
+            base = (cfg.get("base_url") or "").rstrip("/")
+            model = cfg.get("model")
+            key = cfg.get("api_key") or cfg.get("key")
+            if not base or not model:
+                raise HTTPException(status_code=400, detail="Нужны base_url и model")
+            url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+            payload = {"model": model, "max_tokens": 16,
+                       "messages": [{"role": "user", "content": "ping — ответь словом ok"}]}
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.post(url, json=payload, headers=headers)
+            if r.status_code != 200:
+                return {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:160]}"}
+            d = r.json()
+            sample = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "")[:80]
+            return {"ok": True, "detail": f"✓ {model} ответил: {sample}".strip()}
+        if ch == "managed":
+            key = cfg.get("api_key") or cfg.get("key")
+            if not key:
+                raise HTTPException(status_code=400, detail="Нужен sk-ant ключ")
+            model = cfg.get("model", "claude-3-5-sonnet-20241022")
+            headers = {"x-api-key": key, "anthropic-version": "2023-06-01",
+                       "content-type": "application/json"}
+            payload = {"model": model, "max_tokens": 16,
+                       "messages": [{"role": "user", "content": "ping — reply ok"}]}
+            async with httpx.AsyncClient(timeout=20) as cli:
+                r = await cli.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers)
+            if r.status_code != 200:
+                return {"ok": False, "detail": f"HTTP {r.status_code}: {r.text[:160]}"}
+            d = r.json()
+            sample = "".join(p.get("text", "") for p in (d.get("content") or []) if isinstance(p, dict))[:80]
+            return {"ok": True, "detail": f"✓ Claude ответил: {sample}".strip()}
+        if ch == "claude_routine":
+            fire = cfg.get("fire_url") or cfg.get("url") or ""
+            tok = cfg.get("token") or ""
+            ok_fmt = ("/routines/" in fire and fire.endswith("/fire") and tok.startswith("sk-ant"))
+            return {"ok": ok_fmt,
+                    "detail": ("Формат корректен. Полная проверка — напиши агенту в комнате "
+                               "(fire создаёт облачную сессию, поэтому авто-тест её не запускает)."
+                               if ok_fmt else "fire_url/token не похожи на Routine API-триггер")}
+        if ch == "webhook":
+            hook = cfg.get("webhook_url") or cfg.get("url")
+            if not hook:
+                raise HTTPException(status_code=400, detail="Нужен webhook_url")
+            headers = {"Content-Type": "application/json"}
+            if cfg.get("secret"):
+                headers["X-Wake-Secret"] = cfg["secret"]
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post(hook, json={"event": "test", "text": "ping от Cognitive Core"}, headers=headers)
+            if 200 <= r.status_code < 300:
+                return {"ok": True, "detail": f"✓ webhook ответил HTTP {r.status_code}"}
+            return {"ok": False, "detail": f"webhook вернул HTTP {r.status_code}: {r.text[:120]}"}
+        raise HTTPException(status_code=400, detail="Неизвестный канал")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": f"Ошибка: {type(e).__name__}: {e}"}
 
 
 @router.post("/agents/create")

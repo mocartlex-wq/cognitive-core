@@ -79,6 +79,18 @@ async def lifespan(app: FastAPI):
             log_event("warn", "Whisper pre-cache failed", error=str(e)[:200])
     asyncio.create_task(_prefetch_whisper())
 
+    # Eager warm-up of the embedding model so the FIRST cognitive_recall after a
+    # (re)start doesn't time out on a cold model load (~20-40s). Non-blocking; runs
+    # per uvicorn worker. Also flips /health embedding provider off 'not-initialized'.
+    async def _warm_embedder():
+        try:
+            from app.services.embedder import warm_up
+            prov = await asyncio.to_thread(warm_up)
+            log_event("info", "Embedder warmed up", provider=prov)
+        except Exception as e:
+            log_event("warn", "Embedder warm-up failed", error=str(e)[:200])
+    asyncio.create_task(_warm_embedder())
+
     # Media cleanup loop — TTL 15 мин, scan каждые 5 мин (owner-decision).
     # Удаляет MinIO files старше TTL, L1 metadata остаётся вечно.
     try:

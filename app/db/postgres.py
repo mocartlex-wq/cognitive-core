@@ -171,6 +171,20 @@ CREATE TABLE IF NOT EXISTS agent_channel_config (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Shared "brain" (общий мозг, 2026-06-06): group multiple device agent_ids of ONE
+-- owner into a single logical agent that shares working state (cognitive_continue/
+-- resume), checkpoint history, and the already owner-scoped L3 memory. brain_id is
+-- nullable on agent_states — NULL = standalone device (unchanged behaviour).
+CREATE TABLE IF NOT EXISTS brains (
+    brain_id      VARCHAR(64) PRIMARY KEY,
+    owner_user_id UUID NOT NULL,
+    name          TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_brains_owner ON brains(owner_user_id);
+ALTER TABLE agent_states ADD COLUMN IF NOT EXISTS brain_id VARCHAR(64);
+CREATE INDEX IF NOT EXISTS idx_agent_states_brain ON agent_states(brain_id) WHERE brain_id IS NOT NULL;
+
 -- История checkpoints (для отката)
 CREATE TABLE IF NOT EXISTS agent_state_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -197,6 +211,12 @@ CREATE TABLE IF NOT EXISTS l_arbitration (
 );
 """
 
+# Stable arbitrary lock id for pg_advisory_xact_lock in init_db.
+# Serializes startup DDL across uvicorn workers (4 by default in prod) — without
+# it, concurrent CREATE/ALTER on shared relations take AccessExclusiveLock and
+# Postgres reports DeadlockDetectedError, killing 2-3 of the 4 workers.
+_INIT_DB_LOCK_ID = 48319
+
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
@@ -213,7 +233,9 @@ async def init_db() -> None:
     """Создаёт таблицы при старте приложения."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(CREATE_TABLES_SQL)
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", _INIT_DB_LOCK_ID)
+            await conn.execute(CREATE_TABLES_SQL)
 
 
 async def close_db() -> None:

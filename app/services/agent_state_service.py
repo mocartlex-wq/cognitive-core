@@ -20,6 +20,52 @@ from app.security.sanitizer import sanitize_payload
 MAX_STATE_SIZE_BYTES = 256 * 1024
 
 
+async def _brain_members(conn, agent_id: str):
+    """Return (brain_id, [member_agent_ids]) for the agent's shared brain (общий мозг).
+
+    If the agent has no brain_id (or the column/table is absent), returns
+    (None, [agent_id]) — single-device behaviour, unchanged. Members are ordered
+    most-recently-checkpointed first."""
+    try:
+        bid = await conn.fetchval("SELECT brain_id FROM agent_states WHERE agent_id = $1", agent_id)
+    except Exception:
+        return None, [agent_id]
+    if not bid:
+        return None, [agent_id]
+    rows = await conn.fetch(
+        "SELECT agent_id FROM agent_states WHERE brain_id = $1 "
+        "ORDER BY last_checkpoint_at DESC NULLS LAST",
+        bid,
+    )
+    members = [r["agent_id"] for r in rows] or [agent_id]
+    return bid, members
+
+
+async def _brain_block(conn, brain_id: str) -> dict:
+    """Summary of a brain for cognitive_continue/resume: name + member devices."""
+    name = await conn.fetchval("SELECT name FROM brains WHERE brain_id = $1", brain_id)
+    devs = await conn.fetch(
+        """SELECT agent_id, agent_label, machine_label, current_task,
+                  last_checkpoint_at, last_mcp_connect_at
+             FROM agent_states WHERE brain_id = $1
+            ORDER BY last_checkpoint_at DESC NULLS LAST""",
+        brain_id,
+    )
+    now = datetime.now(timezone.utc)
+    devices = []
+    for d in devs:
+        lc = d["last_mcp_connect_at"]
+        online = bool(lc) and (now - lc).total_seconds() < 120
+        devices.append({
+            "agent_id": d["agent_id"],
+            "label": d["agent_label"] or d["machine_label"] or d["agent_id"],
+            "current_task": (d["current_task"][:120] if d["current_task"] else None),
+            "last_checkpoint_at": d["last_checkpoint_at"].isoformat() if d["last_checkpoint_at"] else None,
+            "online": online,
+        })
+    return {"brain_id": brain_id, "name": name, "device_count": len(devices), "devices": devices}
+
+
 async def save_checkpoint(
     agent_id: str,
     current_task: str | None = None,
@@ -120,19 +166,23 @@ async def restore_state(
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Main state
+        brain_id, members = await _brain_members(conn, agent_id)
+        # Main state: the most-recently-checkpointed device in the brain (= where
+        # work last happened). For a solo agent that is just itself.
         row = await conn.fetchrow(
             """
             SELECT agent_id, current_task, state_data, active_session_ids,
                    last_checkpoint_at, total_events, total_checkpoints, notes
-            FROM agent_states WHERE agent_id = $1
+            FROM agent_states WHERE agent_id = ANY($1::text[])
+            ORDER BY last_checkpoint_at DESC NULLS LAST LIMIT 1
             """,
-            agent_id,
+            members,
         )
         if not row:
             return {
                 "agent_id": agent_id,
                 "exists": False,
+                "brain": (await _brain_block(conn, brain_id)) if brain_id else None,
                 "message": (
                     f"No saved state for agent '{agent_id}'. "
                     "First call cognitive_save_state to create checkpoint."
@@ -142,6 +192,7 @@ async def restore_state(
             }
 
         state = dict(row)
+        state_source_agent = state["agent_id"]
         # Parse state_data jsonb
         if isinstance(state["state_data"], str):
             try: state["state_data"] = json.loads(state["state_data"])
@@ -149,21 +200,22 @@ async def restore_state(
         state["active_session_ids"] = [str(s) for s in (state["active_session_ids"] or [])]
         state["last_checkpoint_at"] = state["last_checkpoint_at"].isoformat() if state["last_checkpoint_at"] else None
 
-        # Recent events
+        # Recent events — across ALL devices of the brain (or just this agent if solo)
         ev_rows = await conn.fetch(
             """
-            SELECT id, timestamp, domain, raw_payload
+            SELECT id, timestamp, domain, raw_payload, source_agent
             FROM l1_raw_events
-            WHERE source_agent = $1
+            WHERE source_agent = ANY($1::text[])
             ORDER BY timestamp DESC LIMIT $2
             """,
-            agent_id, include_recent_events,
+            members, include_recent_events,
         )
         recent_events = [
             {
                 "id": str(r["id"]),
                 "timestamp": r["timestamp"].isoformat(),
                 "domain": r["domain"],
+                "device": r["source_agent"],
                 "payload": r["raw_payload"] if not isinstance(r["raw_payload"], str)
                           else (json.loads(r["raw_payload"]) if r["raw_payload"] else {}),
             }
@@ -196,9 +248,13 @@ async def restore_state(
                     "version": r["version"],
                 })
 
+        brain = await _brain_block(conn, brain_id) if brain_id else None
+
     return {
         "agent_id": agent_id,
         "exists": True,
+        "brain": brain,
+        "state_source_agent": state_source_agent,
         "current_task": state["current_task"],
         "state_data": state["state_data"],
         "active_session_ids": state["active_session_ids"],
@@ -216,14 +272,15 @@ async def get_history(agent_id: str, limit: int = 20) -> list[dict]:
     """История checkpoints — для отката или анализа."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        _brain_id, members = await _brain_members(conn, agent_id)
         rows = await conn.fetch(
             """
-            SELECT id, current_task, state_data, active_session_ids, checkpoint_at, trigger
+            SELECT id, agent_id, current_task, state_data, active_session_ids, checkpoint_at, trigger
             FROM agent_state_history
-            WHERE agent_id = $1
+            WHERE agent_id = ANY($1::text[])
             ORDER BY checkpoint_at DESC LIMIT $2
             """,
-            agent_id, limit,
+            members, limit,
         )
     result = []
     for r in rows:
@@ -233,6 +290,7 @@ async def get_history(agent_id: str, limit: int = 20) -> list[dict]:
             except: sd = {}
         result.append({
             "id": str(r["id"]),
+            "device": r["agent_id"],
             "current_task": r["current_task"],
             "state_size_bytes": len(json.dumps(sd, ensure_ascii=False).encode("utf-8")),
             "active_session_ids": [str(s) for s in (r["active_session_ids"] or [])],

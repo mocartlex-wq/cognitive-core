@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 ENDPOINT = "https://mcp.xn----8sbwawqx4fza.xn--p1ai"
 LOG_FILE = "/var/log/cognitive-agent-runtime.log"
 HISTORY_DIR = "/var/run/cognitive/agent-history"
-PERSONA_REFRESH_SEC = 300
+PERSONA_REFRESH_SEC = 60  # was 300; lower so UI channel/standin changes apply within ~1 min
 DEFAULT_POLL_SEC = 5
 NOTIFY_BIN = "/usr/local/bin/cognitive-notify.sh"
 TOOL_TIMEOUT_SEC = 10
@@ -54,18 +54,34 @@ def load_deepseek_env():
 DS_ENV = load_deepseek_env()
 
 
+def _urlopen_retry(req, timeout, attempts=3):
+    """urlopen with retry on TRANSIENT network/DNS errors (URLError such as the
+    intermittent '.рф' "No address associated with hostname" flap from the host).
+    HTTPError (real 4xx/5xx responses) is NOT retried. Backoff 0.8s, 1.6s."""
+    last = None
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError:
+            raise  # a real HTTP response — do not retry
+        except urllib.error.URLError as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(0.8 * (i + 1))
+    raise last
+
+
 def http_get(url, headers=None, timeout=10):
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    return _urlopen_retry(req, timeout)
 
 
 def http_post(url, payload, headers=None, timeout=15):
     data = json.dumps(payload).encode()
     h = {"Content-Type": "application/json", **(headers or {})}
     req = urllib.request.Request(url, data=data, headers=h, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    return _urlopen_retry(req, timeout)
 
 
 # === TOOLS (whitelisted) ===
@@ -742,6 +758,36 @@ def load_room_responder_agents():
     return out
 
 
+_CONFIG_KEY_CACHE = {}
+
+
+def _decrypt_config(cfg):
+    """Decrypt a per-agent channel config the app encrypted ({'_enc': token},
+    Fernet/COGCORE_CONFIG_KEY). Plaintext configs (no '_enc') pass through. The key
+    is read once from the api container env (where the app keeps it)."""
+    if not isinstance(cfg, dict) or "_enc" not in cfg:
+        return cfg
+    key = _CONFIG_KEY_CACHE.get("k")
+    if key is None:
+        try:
+            r = subprocess.run(
+                ["docker", "exec", "cognitive_api", "printenv", "COGCORE_CONFIG_KEY"],
+                capture_output=True, text=True, timeout=5)
+            key = (r.stdout or "").strip()
+        except Exception:
+            key = ""
+        _CONFIG_KEY_CACHE["k"] = key
+    if not key:
+        log.warning("no COGCORE_CONFIG_KEY -> cannot decrypt channel config")
+        return {}
+    try:
+        from cryptography.fernet import Fernet
+        return json.loads(Fernet(key.encode()).decrypt(cfg["_enc"].encode()).decode())
+    except Exception as e:
+        log.error(f"channel config decrypt failed: {e}")
+        return {}
+
+
 def load_agent_channel(agent_id):
     """Return (wake_channel, config_dict) for an agent: channel from agent_states,
     secret config (routine fire_url+token / managed key) from agent_channel_config.
@@ -770,6 +816,7 @@ def load_agent_channel(agent_id):
             if cout:
                 try:
                     cfg = json.loads(cout.splitlines()[0])
+                    cfg = _decrypt_config(cfg)
                 except Exception:
                     cfg = {}
     except Exception as e:
@@ -1218,15 +1265,11 @@ def handle_llm_reply(persona, msg, history):
     if not reply_text:
         log.warning(f"[{persona['persona_id']}] llm_reply empty fallback to auto_ack")
         return handle_auto_ack(persona, msg, history)
-    suffix = "\n\n— автоматический ответ помощника проекта."
-    if suffix.strip() not in reply_text:
-        reply_text += suffix
-    # Reverse room bridge: if the question arrived via a room @-mention, answer
-    # IN THE ROOM (where the owner asked) instead of DM-ing their private inbox.
-    # Anti-loop: the auto-reply suffix marker is matched by AUTO_REPLY_MARKER_RE,
-    # so this reply landing back in room_messages -> forward-bridge -> inbox would
-    # be classified SILENT even if it mentioned someone. It contains no @mention
-    # here, so the forward bridge does not re-bridge it at all.
+    # The owner wants the AGENT's OWN voice — no "— автоматический ответ помощника
+    # проекта" marker. Anti-loop is preserved without it: the forward-bridge only
+    # bridges @-addressed messages (this reply has no @mention -> never re-bridged),
+    # plus loop_depth/can_reply caps any chain. Reverse room bridge: a question that
+    # arrived via a room @-mention is answered IN THE ROOM.
     room_id = room_ctx(msg)
     if room_id:
         sent_id = post_to_room(room_id, persona["persona_id"], reply_text)
@@ -1322,9 +1365,8 @@ def handle_managed(persona, msg, history):
         if not reply:
             log.warning(f"[{pid}] managed: empty reply -> fallback deepseek")
             return None
-        # Reuse the auto-reply marker so the reply is anti-loop-safe (matches
-        # AUTO_REPLY_MARKER_RE), with a Claude tag for transparency.
-        reply += "\n\n— автоматический ответ помощника проекта. (Claude API)"
+        # No auto-reply marker — the agent answers in its own voice (anti-loop via
+        # @-mention-only bridging + loop_depth).
         room_id = room_ctx(msg)
         if room_id:
             sid = post_to_room(room_id, pid, reply)
@@ -1339,6 +1381,103 @@ def handle_managed(persona, msg, history):
         return None
     except Exception as e:
         log.error(f"[{pid}] managed failed: {e} -> fallback deepseek")
+        return None
+
+
+def handle_custom_llm(persona, msg, history):
+    """Channel 'custom_llm': answer via ANY OpenAI-compatible provider the owner
+    configured (config {base_url, api_key, model}) — POST {base_url}/chat/completions.
+    Covers OpenAI / DeepSeek / Mistral / Groq / OpenRouter / Ollama / etc. The daemon
+    posts the reply back to the room. Returns reply id, or None -> fallback to the
+    built-in DeepSeek persona (no config / API error / empty reply)."""
+    pid = persona["persona_id"]
+    cfg = persona.get("channel_config") or {}
+    base_url = (cfg.get("base_url") or "").rstrip("/")
+    api_key = cfg.get("api_key") or cfg.get("key")
+    model = cfg.get("model")
+    if not base_url or not model:
+        log.warning(f"[{pid}] custom_llm: no base_url/model -> fallback deepseek")
+        return None
+    url = base_url if base_url.endswith("/chat/completions") else base_url + "/chat/completions"
+    text = msg.get("text", "")
+    sender = extract_real_sender(msg) or "owner"
+    sys_prompt = (persona.get("llm_settings") or {}).get(
+        "system_prompt", "Ты ассистент владельца. Ответь кратко и по делу на русском.")
+    try:
+        body = json.dumps({
+            "model": model,
+            "max_tokens": 800,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": text},
+            ],
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="POST")
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            d = json.loads(resp.read().decode())
+        reply = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        if not reply:
+            log.warning(f"[{pid}] custom_llm: empty reply -> fallback deepseek")
+            return None
+        # No auto-reply marker — agent answers in its own voice.
+        room_id = room_ctx(msg)
+        if room_id:
+            sid = post_to_room(room_id, pid, reply)
+            log.info(f"[{pid}] CUSTOM_LLM(room) -> {room_id} model={model} ({len(reply)}ch) reply={sid[:8] if sid else '?'}")
+            return sid
+        sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
+        log.info(f"[{pid}] CUSTOM_LLM(dm) -> {sender} model={model} reply={sid[:8] if sid else '?'}")
+        return sid
+    except urllib.error.HTTPError as e:
+        b = e.read().decode()[:200] if e.fp else ""
+        log.error(f"[{pid}] custom_llm HTTP {e.code} {b} -> fallback deepseek")
+        return None
+    except Exception as e:
+        log.error(f"[{pid}] custom_llm failed: {e} -> fallback deepseek")
+        return None
+
+
+def handle_webhook(persona, msg, history):
+    """Channel 'webhook' — the 'wake-me' mode (vs the 'answer-for-me' modes above).
+    The single central daemon WAKES the real agent by POSTing the room event to the
+    agent's own webhook (config {webhook_url, secret?}); the agent then responds and
+    posts back to the room itself. One central waker for ALL agents — no per-agent
+    poller. Returns a success sentinel (so the daemon does NOT also stand-in reply),
+    or None to fall back to DeepSeek (no webhook configured / POST failed)."""
+    pid = persona["persona_id"]
+    cfg = persona.get("channel_config") or {}
+    hook = cfg.get("webhook_url") or cfg.get("url")
+    if not hook:
+        log.warning(f"[{pid}] webhook: no webhook_url -> fallback deepseek")
+        return None
+    room_id = room_ctx(msg)
+    sender = extract_real_sender(msg) or "owner"
+    payload = {
+        "event": "room_message",
+        "agent_id": pid,
+        "room_id": room_id,
+        "from": sender,
+        "text": msg.get("text", ""),
+    }
+    try:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(hook, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        secret = cfg.get("secret")
+        if secret:
+            req.add_header("X-Wake-Secret", secret)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            code = resp.getcode()
+        log.info(f"[{pid}] WEBHOOK woke agent -> {hook} HTTP {code} room={room_id}")
+        return f"webhook:{code}"  # success — the agent posts its own reply to the room
+    except urllib.error.HTTPError as e:
+        log.error(f"[{pid}] webhook HTTP {e.code} -> fallback deepseek")
+        return None
+    except Exception as e:
+        log.error(f"[{pid}] webhook failed: {e} -> fallback deepseek")
         return None
 
 
@@ -1405,6 +1544,17 @@ def process_persona(persona):
             sent_id = handle_managed(persona, msg, history)
             if sent_id is None:
                 sent_id = handle_llm_reply(persona, msg, history)
+        elif action == "llm_reply" and channel == "custom_llm":
+            # Any OpenAI-compatible provider the owner configured; DeepSeek fallback.
+            sent_id = handle_custom_llm(persona, msg, history)
+            if sent_id is None:
+                sent_id = handle_llm_reply(persona, msg, history)
+        elif action == "llm_reply" and channel == "webhook":
+            # 'Wake-me' mode: wake the real agent via its webhook; it answers itself.
+            # DeepSeek fallback only if the webhook isn't set / POST fails.
+            sent_id = handle_webhook(persona, msg, history)
+            if sent_id is None:
+                sent_id = handle_llm_reply(persona, msg, history)
         else:
             handler = ACTION_HANDLERS.get(action, handle_silent)
             sent_id = handler(persona, msg, history)
@@ -1418,6 +1568,7 @@ def process_persona(persona):
 def main():
     log.info(f"=== Cognitive Agent Runtime v2 starting (tools: {sorted(TOOL_REGISTRY.keys())}) ===")
     last_persona_load = 0
+    last_sig = None
     personas = {}
     while True:
         try:
@@ -1451,10 +1602,15 @@ def main():
                 for _aid, _p in personas.items():
                     _p["wake_channel"], _p["channel_config"] = load_agent_channel(_aid)
                 n_custom = sum(1 for a in personas if a in custom)
-                log.info(
-                    f"loaded {len(personas)} personas "
-                    f"(stand-in={len(personas) - n_room_only}, room-only={n_room_only}, "
-                    f"custom={n_custom}): {list(personas.keys())}")
+                # Log only when the (agent, channel) set actually changes — avoids
+                # a log line every refresh now that refresh is frequent (60s).
+                sig = sorted((a, p.get("wake_channel", "deepseek")) for a, p in personas.items())
+                if sig != last_sig:
+                    log.info(
+                        f"loaded {len(personas)} personas "
+                        f"(stand-in={len(personas) - n_room_only}, room-only={n_room_only}, "
+                        f"custom={n_custom}): {sig}")
+                    last_sig = sig
                 last_persona_load = now
             if not personas:
                 log.warning("no personas active sleeping")
