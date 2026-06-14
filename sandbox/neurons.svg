@@ -27,9 +27,9 @@
 
     <!-- Линии-аксоны: тонкие с прозрачностью -->
     <linearGradient id="axonGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="rgba(164,205,255,0.2)"/>
-      <stop offset="50%" stop-color="rgba(164,205,255,0.8)"/>
-      <stop offset="100%" stop-color="rgba(164,205,255,0.2)"/>
+      <stop offset="0%" stop-color="rgba(164,205,255,0.08)"/>
+      <stop offset="50%" stop-color="rgba(164,205,255,0.5)"/>
+      <stop offset="100%" stop-color="rgba(164,205,255,0.08)"/>
     </linearGradient>
 
     <!-- Импульс — маленькая яркая точка -->
@@ -60,7 +60,7 @@
   </defs>
 
   <!-- Аксоны (нервные пути) — тонкие криволинейные -->
-  <g stroke-width="2" fill="none" opacity="0.85">
+  <g stroke-width="1.4" fill="none" opacity="0.5">
     <use href="#path1" stroke="url(#axonGradient)"/>
     <use href="#path2" stroke="url(#axonGradient)"/>
     <use href="#path3" stroke="url(#axonGradient)"/>
@@ -72,7 +72,7 @@
   </g>
 
   <!-- Дополнительные дендриты (более тонкие отростки) -->
-  <g stroke="rgba(164,205,255,0.35)" stroke-width="1.1" fill="none">
+  <g stroke="rgba(164,205,255,0.35)" stroke-width="1.1" fill="none" display="none">
     <path d="M 200,300 L 150,250 L 100,280"/>
     <path d="M 200,300 L 220,250 L 250,220"/>
     <path d="M 600,350 L 580,300 L 560,260"/>
