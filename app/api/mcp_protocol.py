@@ -600,7 +600,17 @@ async def _call_rooms(
     if room_key:
         headers["X-Room-Key"] = room_key
     if agent_id:
-        headers["X-Agent-Id"] = agent_id
+        # HTTP header values must be latin-1-encodable; a non-ASCII agent_id
+        # (e.g. Cyrillic "сервер_память") makes httpx raise UnicodeEncodeError
+        # and breaks EVERY room call. Write ops already carry identity in the
+        # JSON body, and the rooms backend also accepts agent_id via the query
+        # string — so keep the header only when it can be encoded, otherwise
+        # route the id through query params (UTF-8-safe).
+        try:
+            agent_id.encode("latin-1")
+            headers["X-Agent-Id"] = agent_id
+        except UnicodeEncodeError:
+            params = {**(params or {}), "agent_id": agent_id}
     tmo = timeout_s if timeout_s is not None else ROOMS_TIMEOUT_S
     try:
         async with AsyncClient(timeout=tmo) as client:
