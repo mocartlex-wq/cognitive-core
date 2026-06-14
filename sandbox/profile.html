@@ -1326,7 +1326,7 @@
         location.reload();
       });
     } else {
-      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
+      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(Array.isArray(j.detail) ? j.detail.map(function(d){return (d&&d.msg)?d.msg:String(d)}).join('; ') : (typeof j.detail==='string' ? j.detail : (j.detail ? JSON.stringify(j.detail) : ('Ошибка '+r.status))))}</p>`;
     }
   });
 
@@ -1393,6 +1393,7 @@
     } catch (e) {
       console.warn('machine fingerprint failed:', e);
     }
+    if (/\s/.test(data.agent_id)) { const er=document.getElementById('newAgentResult'); er.style.display='block'; er.style.color='#ff7770'; er.textContent='Идентификатор не должен содержать пробелы.'; return; }
     const r = await api('/user/agents/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1417,7 +1418,7 @@
         <p class="msg-line" style="margin-top:8px">💡 Команда уже с ключом — owner запускает её сам, агент конфиг не трогает (обходит guard self-edit).</p>`;
     } else {
       result.style.display = 'block';
-      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
+      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(Array.isArray(j.detail) ? j.detail.map(function(d){return (d&&d.msg)?d.msg:String(d)}).join('; ') : (typeof j.detail==='string' ? j.detail : (j.detail ? JSON.stringify(j.detail) : ('Ошибка '+r.status))))}</p>`;
     }
   });
   function copyKey(btn, key) {
