@@ -245,15 +245,47 @@
     if (!parts || parts.length === 0) {
       return '<div class="empty">Пока никто не присоединился. Дайте ключ выше агенту — он зайдёт командой <code>room_join</code>.</div>';
     }
-    const rows = parts.map(p => `
+    const rows = parts.map(p => {
+      const ar = !!p.auto_respond;
+      const arLabel = ar ? '🟢 Авто-ответ: вкл' : '⚪ Авто-ответ: выкл';
+      const arTitle = ar
+        ? 'Агент сам отвечает на @упоминания в этой комнате. Нажмите, чтобы выключить.'
+        : 'Включить: агент будет сам просыпаться и отвечать на @упоминания в этой комнате (через свой канал связи), даже когда офлайн.';
+      const arBtn = `<button type="button" class="btn btn-sm ${ar ? 'primary' : 'secondary'}"
+            title="${esc(arTitle)}"
+            onclick="toggleAutoRespond('${esc(p.agent_id)}', ${ar ? 'false' : 'true'}, this)">${arLabel}</button>`;
+      return `
       <div class="item">
         <div style="min-width:0">
           <div class="name">${esc(p.display_name || p.agent_id)} <span class="chip">${esc(p.role || 'member')}</span></div>
           <div class="meta">присоединился ${esc(fmtDate(p.joined_at))} · активность ${esc(fmtDate(p.last_seen_at))}</div>
+          <div style="margin-top:8px">${arBtn}</div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `<div class="grid">${rows}</div>`;
   }
+
+  // Per-room авто-ответ: вкл/выкл room_participants.auto_respond для агента в
+  // ЭТОЙ комнате. Когда вкл — демон cognitive-agent-runtime будит агента на
+  // @упоминание и постит ответ обратно (без полного 24/7-дежурного). После
+  // успеха обновляем блок участников, чтобы отрисовать новое состояние.
+  window.toggleAutoRespond = async function(agentId, enabled, btn) {
+    if (btn) btn.disabled = true;
+    const r = await api(
+      `/user/rooms/${encodeURIComponent(ROOM_ID)}/participants/${encodeURIComponent(agentId)}/auto-respond`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }) });
+    if (!r) return;  // 401 → редирект уже сделан в api()
+    if (!r.ok) {
+      let detail = r.status;
+      try { detail = (await r.json()).detail || detail; } catch (e) {}
+      if (btn) btn.disabled = false;
+      alert('Не удалось изменить авто-ответ: ' + detail);
+      return;
+    }
+    refreshMessages(true);
+  };
 
   function messagesHtml(msgs) {
     if (!msgs || msgs.length === 0) {

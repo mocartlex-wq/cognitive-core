@@ -720,6 +720,44 @@ def load_standin_agents():
         return {}
 
 
+def load_room_responder_agents():
+    """Return {agent_id: {"label": str, "rooms": set[str]}} for agents bound as
+    PER-ROOM auto-responders (room_participants.auto_respond = true).
+
+    UNLIKE the full 24/7 stand-in, the daemon wakes these agents ONLY for a DIRECT
+    @mention in the specific room(s) they are bound to — enforced by room_mention_ctx
+    + the room_responder gate in process_persona. `label` (agent_states.agent_label)
+    is used to name the default persona."""
+    out = {}
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "cognitive_postgres", "psql", "-U", "cognitive",
+             "-d", "cognitive_core", "-t", "-A", "-F", "|", "-c",
+             "SELECT p.agent_id, COALESCE(s.agent_label,''), p.room_id::text "
+             "FROM room_participants p "
+             "LEFT JOIN agent_states s ON s.agent_id = p.agent_id "
+             "WHERE p.auto_respond = true"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in (result.stdout or "").strip().splitlines():
+            parts = line.split("|")
+            if len(parts) < 3:
+                continue
+            # agent_id (^[\w-]+$) and room_id (uuid) never contain '|', but an
+            # agent_label (middle field) might — so take ends first, label between.
+            aid, rid = parts[0].strip(), parts[-1].strip()
+            label = "|".join(parts[1:-1]).strip()
+            if not aid or not rid:
+                continue
+            entry = out.setdefault(aid, {"label": label, "rooms": set()})
+            if label and not entry["label"]:
+                entry["label"] = label
+            entry["rooms"].add(rid)
+    except Exception as e:
+        log.error(f"load_room_responder_agents failed: {e}")
+    return out
+
+
 _CONFIG_KEY_CACHE = {}
 
 
@@ -956,6 +994,24 @@ def room_ctx(msg):
     try:
         ctx = msg.get("context") or {}
         if isinstance(ctx, dict) and ctx.get("via") == "room":
+            return ctx.get("room_id")
+    except Exception:
+        pass
+    return None
+
+
+def room_mention_ctx(msg):
+    """Like room_ctx, but returns room_id ONLY for a DIRECT @mention bridged from a
+    room (inbox context {via:room, room_id} with NO extra marker). Conductor
+    control-copies (copy:true) and unaddressed->conductor routes (unaddressed:true)
+    are NOT direct mentions, so they return None.
+
+    Used by the per-room auto-responder gate: a room-bound (non-stand-in) agent
+    answers ONLY when it is @-addressed in a room it is bound to."""
+    try:
+        ctx = msg.get("context") or {}
+        if (isinstance(ctx, dict) and ctx.get("via") == "room"
+                and not ctx.get("copy") and not ctx.get("unaddressed")):
             return ctx.get("room_id")
     except Exception:
         pass
@@ -1451,6 +1507,14 @@ def process_persona(persona):
         history.mark_seen(msg_id)
         new_count += 1
         text = msg.get("text", "")
+        # Per-room auto-responder gate: an agent bound via room_participants
+        # .auto_respond (but NOT a full 24/7 stand-in) wakes ONLY for a DIRECT
+        # @mention in a room it is bound to. Skip DMs, conductor copies,
+        # unaddressed routes, and rooms it isn't an auto-responder of.
+        if persona.get("room_responder_only"):
+            rid = room_mention_ctx(msg)
+            if not rid or rid not in persona.get("room_responder_rooms", set()):
+                continue
         trigger = match_trigger(text, persona.get("triggers", []))
         if not trigger:
             continue
@@ -1518,6 +1582,21 @@ def main():
                     aid: (custom.get(aid) or default_persona(aid, label))
                     for aid, label in standin.items()
                 }
+                # Per-room auto-responders (room_participants.auto_respond=true):
+                # wake for a DIRECT @mention in their bound room(s) only — a lighter
+                # binding than the full 24/7 stand-in. A full stand-in already covers
+                # every room, so only add agents NOT already stand-in, and tag them
+                # room-scoped (the gate in process_persona enforces it).
+                responders = load_room_responder_agents()
+                n_room_only = 0
+                for aid, info in responders.items():
+                    if aid in personas:
+                        continue  # already a full stand-in — do not downgrade it
+                    p = dict(custom.get(aid) or default_persona(aid, info["label"]))
+                    p["room_responder_only"] = True
+                    p["room_responder_rooms"] = info["rooms"]
+                    personas[aid] = p
+                    n_room_only += 1
                 # Attach per-agent connection channel + (secret) config so the
                 # dispatcher in process_persona can route deepseek/claude_routine/managed.
                 for _aid, _p in personas.items():
@@ -1528,8 +1607,9 @@ def main():
                 sig = sorted((a, p.get("wake_channel", "deepseek")) for a, p in personas.items())
                 if sig != last_sig:
                     log.info(
-                        f"loaded {len(personas)} stand-in personas "
-                        f"(custom={n_custom}, default={len(personas) - n_custom}): {sig}")
+                        f"loaded {len(personas)} personas "
+                        f"(stand-in={len(personas) - n_room_only}, room-only={n_room_only}, "
+                        f"custom={n_custom}): {sig}")
                     last_sig = sig
                 last_persona_load = now
             if not personas:

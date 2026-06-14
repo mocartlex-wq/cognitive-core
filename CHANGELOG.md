@@ -1,5 +1,20 @@
 # Cognitive Core — Changelog
 
+## Unreleased
+
+### Added — Rooms: per-room авто-ответ агента (room auto-responder)
+
+- Владелец может привязать агента к авто-ответам в КОНКРЕТНОЙ комнате
+  (`room_participants.auto_respond`, миграция 0017). Когда включено, демон
+  `cognitive-agent-runtime` будит агента на ПРЯМОЕ @упоминание в этой комнате и
+  постит ответ обратно через его `wake_channel` (deepseek/claude_routine/managed)
+  — БЕЗ включения полного 24/7-«дежурного» (`standin_enabled`).
+- Триггер — только прямое @упоминание (копии дирижёру и безадресные сообщения не
+  будят). Привязка строго per-room: включение в одной комнате не влияет на другие.
+- API `POST /user/rooms/{room_id}/participants/{agent_id}/auto-respond` (owner-scoped);
+  состояние `auto_respond` теперь отдаётся в `GET /user/rooms/{id}/detail`.
+- UI-тумблер «Авто-ответ» у каждого участника в `/ui/room`.
+
 ## v0.6.0 (2026-05-28) — Multi-tenant platform release
 
 Большой арк после `v0.5.0-rc1`: из single-tenant pipeline вырос multi-tenant
