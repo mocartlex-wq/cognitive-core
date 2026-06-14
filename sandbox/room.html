@@ -242,8 +242,9 @@
   }
 
   function participantsHtml(parts) {
+    const addCtl = '<div id="addAgentWrap" style="margin:0 0 12px"><button type="button" class="btn btn-sm secondary" onclick="addOwnerAgent()">➕ Добавить моего агента</button></div>';
     if (!parts || parts.length === 0) {
-      return '<div class="empty">Пока никто не присоединился. Дайте ключ выше агенту — он зайдёт командой <code>room_join</code>.</div>';
+      return addCtl + '<div class="empty">Пока никто не присоединился. Добавьте своего агента кнопкой ниже, либо дайте ключ агенту — он зайдёт командой <code>room_join</code>.</div>';
     }
     const rows = parts.map(p => {
       const ar = !!p.auto_respond;
@@ -263,7 +264,7 @@
         </div>
       </div>`;
     }).join('');
-    return `<div class="grid">${rows}</div>`;
+    return addCtl + `<div class="grid">${rows}</div>`;
   }
 
   // Per-room авто-ответ: вкл/выкл room_participants.auto_respond для агента в
@@ -285,6 +286,34 @@
       return;
     }
     refreshMessages(true);
+  };
+
+  window.addOwnerAgent = async function() {
+    const wrap = document.getElementById('addAgentWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<span class="meta">Загружаю ваших агентов…</span>';
+    const r = await api('/user/agents');
+    if (!r || !r.ok) { wrap.innerHTML = '<span class="meta" style="color:#ff7770">Не удалось загрузить агентов</span>'; return; }
+    const data = await r.json();
+    const agents = [];
+    const push = a => { if (a && a.agent_id) agents.push(a); };
+    if (Array.isArray(data)) data.forEach(push);
+    else if (Array.isArray(data.agents)) data.agents.forEach(push);
+    else if (Array.isArray(data.machines)) data.machines.forEach(m => (m.agents || []).forEach(push));
+    else Object.values(data || {}).forEach(v => { if (Array.isArray(v)) v.forEach(push); });
+    if (!agents.length) { wrap.innerHTML = '<span class="meta">Нет ваших агентов — создайте в Профиле.</span>'; return; }
+    const opts = agents.map(a => '<option value="' + esc(a.agent_id) + '">' + esc(a.agent_label || a.agent_id) + '</option>').join('');
+    wrap.innerHTML = '<select id="addAgentSel" style="padding:6px 9px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font)">' + opts + '</select> <button type="button" class="btn btn-sm primary" onclick="confirmAddAgent(this)">Добавить в комнату</button>';
+  };
+  window.confirmAddAgent = async function(btn) {
+    const sel = document.getElementById('addAgentSel');
+    if (!sel) return;
+    const agentId = sel.value;
+    btn.disabled = true; const ot = btn.textContent; btn.textContent = '…';
+    const r = await api('/user/rooms/' + encodeURIComponent(ROOM_ID) + '/participants/' + encodeURIComponent(agentId), { method: 'POST' });
+    if (!r) return;
+    if (!r.ok) { let d = r.status; try { d = (await r.json()).detail || d; } catch (e) {} btn.disabled = false; btn.textContent = ot; alert('Не удалось добавить: ' + d); return; }
+    loadDetail();
   };
 
   function messagesHtml(msgs) {
