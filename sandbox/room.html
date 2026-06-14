@@ -437,27 +437,19 @@
       '(ключ комнаты — пароль входа, как Zoom-код. Работает только после успешного claim выше.)';
     const box = document.getElementById('inviteNewResult');
     box.style.display = 'block';
+    let _copied = false;
+    try { await navigator.clipboard.writeText(combined); _copied = true; } catch (e) {}
     box.innerHTML =
-      '<button class="btn" id="copyInviteBtn" type="button">📋 Скопировать приглашение</button>' +
-      '<details style="margin-top:10px">' +
-      '<summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none;list-style:none">▸ Посмотреть текст (для специалиста)</summary>' +
-      '<textarea readonly id="inviteText" style="width:100%;min-height:180px;resize:vertical;margin-top:8px;' +
+      '<p class="key-hint" style="margin-top:0;color:' + (_copied ? '#4cc960' : '#ff8c42') + ';font-weight:600">' +
+      (_copied ? '✓ Приглашение скопировано в буфер — вставь его агенту на нужном устройстве.' : '⚠ Не удалось скопировать автоматически — открой текст ниже и скопируй вручную.') + '</p>' +
+      '<details style="margin-top:10px"' + (_copied ? '' : ' open') + '>' +
+      '<summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none;list-style:none">▸ Текст приглашения</summary>' +
+      '<textarea readonly id="inviteText" onclick="this.select()" style="width:100%;min-height:180px;resize:vertical;margin-top:8px;' +
       'padding:11px 13px;font-family:var(--mono);font-size:11px;line-height:1.5;border-radius:9px;' +
       'border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);' +
       'box-sizing:border-box"></textarea></details>' +
-      '<p class="key-hint" style="margin-top:8px">Токен живёт 10 мин, agent_id: <code>' + esc(j.agent_id || '—') + '</code>. Жми «Скопировать» и дай агенту — он подключится и зайдёт в комнату.</p>';
+      '<p class="key-hint" style="margin-top:8px">Токен живёт 10 мин, agent_id: <code>' + esc(j.agent_id || '—') + '</code>.</p>';
     document.getElementById('inviteText').value = combined;
-    document.getElementById('copyInviteBtn').addEventListener('click', async function () {
-      const b = this;
-      try {
-        await navigator.clipboard.writeText(combined);
-        b.textContent = '✓ Скопировано'; setTimeout(() => { b.textContent = '📋 Скопировать приглашение'; }, 1600);
-      } catch (e) {
-        const t = document.getElementById('inviteText'); t.focus(); t.select();
-        try { document.execCommand('copy'); b.textContent = '✓ Скопировано'; setTimeout(() => { b.textContent = '📋 Скопировать приглашение'; }, 1600); }
-        catch (_) { alert('Скопируйте текст из поля вручную.'); }
-      }
-    });
   }
 
   // Подставить @упоминание агента в начало поля. Клик по другому чипу заменяет
