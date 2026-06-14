@@ -422,6 +422,34 @@ async def set_participant_auto_respond(
             "auto_respond": body.enabled}
 
 
+@router.post("/rooms/{room_id}/participants/{agent_id}")
+async def add_my_room_participant(room_id: str, agent_id: str, request: Request):
+    # Owner добавляет СВОЕГО агента участником комнаты напрямую (без room_join со
+    # стороны агента): прямой INSERT в room_participants, как другие /user/rooms.
+    # После этого @упоминание агента резолвится и можно включить ему auto_respond.
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval("SELECT owner_user_id::text FROM rooms WHERE id = $1::uuid", room_id)
+        if not owner:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+        ag_owner = await conn.fetchval("SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1", agent_id)
+        if not ag_owner:
+            raise HTTPException(status_code=404, detail="Агент не найден")
+        if str(ag_owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Это не ваш агент")
+        await conn.execute(
+            "INSERT INTO room_participants (room_id, agent_id, platform) "
+            "VALUES ($1::uuid, $2, 'owner-added') "
+            "ON CONFLICT (room_id, agent_id) DO UPDATE SET last_seen_at = NOW()",
+            room_id, agent_id,
+        )
+    logger.info("room_participant_added user=%s room=%s agent=%s", user.user_id, room_id, agent_id)
+    return {"ok": True, "room_id": room_id, "agent_id": agent_id}
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # @mention → agent_inbox bridge для OWNER-постов в комнату.
 #
