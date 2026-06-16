@@ -576,7 +576,7 @@ TOOL_REGISTRY = {
         "type": "function",
         "function": {
             "name": "docker_restart",
-            "description": "[WRITE] Restart container. Whitelisted: cognitive_api, cognitive_mcp, cognitive_nginx, cognitive_redis, ai-crm-backend, ai-crm-frontend, monitoring_grafana, monitoring_prometheus. Requires reason ≥10 chars. Excluded for safety: postgres, minio, nats.",
+            "description": "[WRITE] Restart container. Whitelisted: cognitive_api, cognitive_mcp, cognitive_nginx, cognitive_redis, monitoring_grafana, monitoring_prometheus. Requires reason ≥10 chars. Excluded: postgres, minio, nats (data); ai-crm-* removed 2026-06-16 (deploy via update.sh).",
             "parameters": {
                 "type": "object",
                 "properties": {
