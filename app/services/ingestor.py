@@ -80,16 +80,21 @@ async def get_unprocessed_events(
         return [dict(r) for r in rows]
 
 
-async def mark_events_processed(event_ids: list[UUID]) -> None:
-    """Помечает L1-события как обработанные."""
+async def mark_events_processed(event_ids: list[UUID], conn=None) -> None:
+    """Помечает L1-события как обработанные.
+
+    Если передан `conn`, выполняется на нём (для атомарной связки с
+    INSERT в L2 — иначе была дыра: INSERT L2 успешен, UPDATE флага падает
+    → события дублируются на следующем daily-цикле)."""
     if not event_ids:
         return
+    sql = (
+        "UPDATE l1_raw_events SET processed_to_l2 = TRUE "
+        "WHERE id = ANY($1)"
+    )
+    if conn is not None:
+        await conn.execute(sql, event_ids)
+        return
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE l1_raw_events SET processed_to_l2 = TRUE
-            WHERE id = ANY($1)
-            """,
-            event_ids,
-        )
+    async with pool.acquire() as c:
+        await c.execute(sql, event_ids)

@@ -1,8 +1,10 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from app.config import settings
 from app.db.postgres import get_pool
+from app.db.redis import get_redis
 from app.security.audit import log_audit
 from app.services.consolidator import (
     daily_consolidate,
@@ -10,11 +12,79 @@ from app.services.consolidator import (
     weekly_consolidate,
 )
 
+log = logging.getLogger(__name__)
+
+# Persistent retry-queue для упавших доменов. Раньше: домен падает на LLM
+# timeout → попадает в results.error → молча скипается на следующем цикле
+# до тех пор пока в нём не будет новых событий (а это может никогда не
+# случиться, если домен и так был «тихий»). Теперь: имя домена кладётся
+# в Redis SET, на следующем цикле он явно включается в обход (даже если
+# в основной выборке его нет), при успехе — выгребается из set'а.
+RETRY_KEY_DAILY = "worker:retry:daily"
+RETRY_KEY_WEEKLY = "worker:retry:weekly"
+RETRY_KEY_MONTHLY = "worker:retry:monthly"
+RETRY_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней — больше реальной паузы циклов
+
+
+async def _retry_queue_pending(key: str) -> set[str]:
+    try:
+        r = await get_redis()
+        members = await r.smembers(key)
+        return set(members or [])
+    except Exception as e:
+        log.warning("retry-queue read failed key=%s err=%s", key, e)
+        return set()
+
+
+async def _retry_queue_add(key: str, domain: str) -> None:
+    try:
+        r = await get_redis()
+        await r.sadd(key, domain)
+        await r.expire(key, RETRY_TTL_SECONDS)
+    except Exception as e:
+        log.warning("retry-queue add failed key=%s domain=%s err=%s", key, domain, e)
+
+
+async def _retry_queue_remove(key: str, domain: str) -> None:
+    try:
+        r = await get_redis()
+        await r.srem(key, domain)
+    except Exception as e:
+        log.warning("retry-queue remove failed key=%s domain=%s err=%s", key, domain, e)
+
 
 async def run_daily_cycle():
-    """Ежедневная консолидация L1→L2."""
+    """Ежедневная консолидация L1→L2.
+
+    Сначала прогоняем retry-queue (домены с прошлого сбоя), потом основной
+    daily_consolidate без domain-фильтра. Per-domain failures из обоих
+    кладутся обратно в retry-queue, успешные — выгребаются."""
+    # Сначала ретраим то, что висело с прошлого раза.
+    retry_pending = await _retry_queue_pending(RETRY_KEY_DAILY)
+    if retry_pending:
+        log.info("daily retry-queue domains=%s", sorted(retry_pending))
+        for retry_dom in sorted(retry_pending):
+            try:
+                r = await daily_consolidate(domain=retry_dom)
+                # Если домен ушёл в результаты как «error» — оставляем в очереди.
+                domain_results = r.get("results") or []
+                failed = any(
+                    d.get("status") == "error" and d.get("domain") == retry_dom
+                    for d in domain_results
+                )
+                if not failed:
+                    await _retry_queue_remove(RETRY_KEY_DAILY, retry_dom)
+            except Exception as e:
+                log.warning("daily retry failed domain=%s err=%s", retry_dom, e)
+
     try:
         result = await daily_consolidate()
+        # Любой домен, упавший в основном проходе → ставим в retry-queue.
+        for d in (result.get("results") or []):
+            if d.get("status") == "error":
+                dom = d.get("domain")
+                if dom:
+                    await _retry_queue_add(RETRY_KEY_DAILY, dom)
         await log_audit(
             agent_id="system",
             action="daily_consolidate",
@@ -43,15 +113,24 @@ async def run_weekly_cycle():
             UNION
             SELECT DISTINCT domain FROM l3_master_knowledge WHERE effective_to IS NULL
         """, settings.weekly_days)
-        domains = [r["domain"] for r in rows]
+        domains = {r["domain"] for r in rows}
+
+    # Подмешиваем доменов из retry-очереди прошлой попытки.
+    retry_pending = await _retry_queue_pending(RETRY_KEY_WEEKLY)
+    if retry_pending:
+        log.info("weekly retry-queue domains=%s", sorted(retry_pending))
+        domains |= retry_pending
 
     results = []
-    for domain in domains:
+    for domain in sorted(domains):
         try:
             result = await weekly_consolidate(domain)
             results.append({"domain": domain, "result": result})
+            if domain in retry_pending:
+                await _retry_queue_remove(RETRY_KEY_WEEKLY, domain)
         except Exception as e:
             results.append({"domain": domain, "error": str(e)})
+            await _retry_queue_add(RETRY_KEY_WEEKLY, domain)
 
     await log_audit(
         agent_id="system",
@@ -72,15 +151,23 @@ async def run_monthly_cycle():
             UNION
             SELECT DISTINCT domain FROM l2_daily_buffers
         """)
-        domains = [r["domain"] for r in rows]
+        domains = {r["domain"] for r in rows}
+
+    retry_pending = await _retry_queue_pending(RETRY_KEY_MONTHLY)
+    if retry_pending:
+        log.info("monthly retry-queue domains=%s", sorted(retry_pending))
+        domains |= retry_pending
 
     results = []
-    for domain in domains:
+    for domain in sorted(domains):
         try:
             result = await run_monthly_audit(domain)
             results.append({"domain": domain, "result": result})
+            if domain in retry_pending:
+                await _retry_queue_remove(RETRY_KEY_MONTHLY, domain)
         except Exception as e:
             results.append({"domain": domain, "error": str(e)})
+            await _retry_queue_add(RETRY_KEY_MONTHLY, domain)
 
     await log_audit(
         agent_id="system",

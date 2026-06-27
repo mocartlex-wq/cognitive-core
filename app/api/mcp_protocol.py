@@ -493,6 +493,32 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "cognitive_deploy_promote_branch",
+        "description": (
+            "Запустить деплой: смержить указанную ветку в main через GitHub API. "
+            "Существующий systemd-timer auto-deploy на сервере подхватит изменение "
+            "в течение 60 сек, прогонит smoke-test /health и при сбое сам "
+            "откатится. Требует owner-уровня (legacy env-agent или owner_user_id "
+            "из COGCORE_DEPLOY_ADMIN_OWNER_IDS) и заданного COGCORE_DEPLOY_GITHUB_TOKEN."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["branch"],
+            "properties": {
+                "branch": {"type": "string", "description": "ветка (например, claude/festive-newton-WhrlH)"},
+                "message": {"type": "string", "description": "опц. сообщение merge-коммита"},
+            },
+        },
+    },
+    {
+        "name": "cognitive_deploy_status",
+        "description": (
+            "Текущее состояние деплоя: HEAD-sha на main в репо, аналог по /health "
+            "(healthy/version/uptime). Полезно для проверки 'дошёл ли мой merge до прода'."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -600,7 +626,17 @@ async def _call_rooms(
     if room_key:
         headers["X-Room-Key"] = room_key
     if agent_id:
-        headers["X-Agent-Id"] = agent_id
+        # HTTP header values must be latin-1-encodable; a non-ASCII agent_id
+        # (e.g. Cyrillic "сервер_память") makes httpx raise UnicodeEncodeError
+        # and breaks EVERY room call. Write ops already carry identity in the
+        # JSON body, and the rooms backend also accepts agent_id via the query
+        # string — so keep the header only when it can be encoded, otherwise
+        # route the id through query params (UTF-8-safe).
+        try:
+            agent_id.encode("latin-1")
+            headers["X-Agent-Id"] = agent_id
+        except UnicodeEncodeError:
+            params = {**(params or {}), "agent_id": agent_id}
     tmo = timeout_s if timeout_s is not None else ROOMS_TIMEOUT_S
     try:
         async with AsyncClient(timeout=tmo) as client:
@@ -693,6 +729,137 @@ async def _resolve_agent(request: Request) -> str:
     """Backward-compat: возвращает только agent_id. Новый код — _resolve_agent_full."""
     agent_id, _ = await _resolve_agent_full(request)
     return agent_id
+
+
+# ─────────────────────────────────────────────────────────────────
+# Deploy MCP tools — promote-branch + status
+# ─────────────────────────────────────────────────────────────────
+# Дизайн: НЕ выполняем git pull / systemctl restart внутри API-контейнера.
+# Вместо этого мерджим ветку в main через GitHub API; уже работающий на
+# хосте systemd-timer scripts/auto-deploy.sh (раз в 60 сек) подхватит,
+# прогонит smoke-test /health и сам откатится при сбое.
+# Один HTTP-вызов наружу = меньше прав, проще audit, не нужны новые
+# host-сервисы / sudoers / shared volumes.
+
+_GH_API = "https://api.github.com"
+
+
+def _can_deploy(owner_user_id: str | None) -> bool:
+    """Может ли вызывающий запустить деплой.
+
+    Разрешено:
+      • legacy env-агентам (owner_user_id is None) — pre-provisioned admin.
+      • owner_user_id из COGCORE_DEPLOY_ADMIN_OWNER_IDS (CSV).
+    """
+    if owner_user_id is None:
+        return True
+    raw = os.environ.get("COGCORE_DEPLOY_ADMIN_OWNER_IDS", "")
+    allowed = {x.strip() for x in raw.split(",") if x.strip()}
+    return owner_user_id in allowed
+
+
+async def _github_merge_branch_to_main(branch: str, message: str) -> dict:
+    """POST /repos/{repo}/merges — server-side merge без локального git push.
+
+    Возвращает структуру для MCP-клиента: {ok, merged, sha, html_url, note}
+    или {_error} при отказе. Никогда не raise'ит — клиент получит JSON.
+    """
+    token = os.environ.get("COGCORE_DEPLOY_GITHUB_TOKEN", "").strip()
+    if not token:
+        return {
+            "_error": "COGCORE_DEPLOY_GITHUB_TOKEN не задан в env API-контейнера. "
+                      "Положи GitHub PAT с правами repo:write и перезапусти cognitive-api."
+        }
+    repo = os.environ.get("COGCORE_DEPLOY_REPO", "mocartlex-wq/cognitive-core").strip()
+    base = os.environ.get("COGCORE_DEPLOY_BASE_BRANCH", "main").strip()
+    url = f"{_GH_API}/repos/{repo}/merges"
+    body = {"base": base, "head": branch, "commit_message": message[:140]}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "cognitive-core-mcp-deploy/1",
+    }
+    try:
+        async with AsyncClient(timeout=30.0) as client:
+            r = await client.post(url, json=body, headers=headers)
+    except Exception as e:
+        return {"_error": f"github http error: {type(e).__name__}: {e}"}
+
+    if r.status_code == 201:
+        d = r.json()
+        return {
+            "ok": True,
+            "merged": True,
+            "sha": d.get("sha"),
+            "html_url": d.get("html_url"),
+            "base": base,
+            "head": branch,
+            "note": (
+                "Merge-commit на main создан. Auto-deploy timer (60s) подтянет, "
+                "выполнит conditional_reload, прогонит /health smoke-test 6×5с. "
+                "При сбое — авто-rollback к prev-sha + Telegram-alert. "
+                "Проверить статус: cognitive_deploy_status()."
+            ),
+        }
+    if r.status_code == 204:
+        return {"ok": True, "merged": False, "note": f"Нечего мержить: {branch} уже в {base} (no-op)."}
+    if r.status_code == 404:
+        return {"_error": f"branch '{branch}' не найдена в {repo} (или нет прав)"}
+    if r.status_code == 409:
+        return {
+            "_error": f"merge conflict между {branch} и {base} — разрешить вручную (gh PR + manual merge)"
+        }
+    if r.status_code == 422:
+        return {"_error": f"github 422: {r.text[:300]}"}
+    return {"_error": f"github {r.status_code}: {r.text[:300]}"}
+
+
+async def _deploy_status() -> dict:
+    """Текущий sha главной ветки + /health сервиса (что реально крутится)."""
+    out: dict[str, Any] = {}
+    # 1) HEAD-sha main через GitHub API (даже без токена — публичный repo)
+    repo = os.environ.get("COGCORE_DEPLOY_REPO", "mocartlex-wq/cognitive-core").strip()
+    base = os.environ.get("COGCORE_DEPLOY_BASE_BRANCH", "main").strip()
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "cognitive-core-mcp-deploy/1"}
+    token = os.environ.get("COGCORE_DEPLOY_GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{_GH_API}/repos/{repo}/commits/{base}", headers=headers)
+        if r.status_code == 200:
+            d = r.json()
+            out["github_main"] = {
+                "sha": d.get("sha"),
+                "short_sha": (d.get("sha") or "")[:8],
+                "message": (d.get("commit") or {}).get("message", "").split("\n")[0][:120],
+                "author": ((d.get("commit") or {}).get("author") or {}).get("name"),
+                "committed_at": ((d.get("commit") or {}).get("author") or {}).get("date"),
+            }
+        else:
+            out["github_main"] = {"_error": f"github {r.status_code}: {r.text[:200]}"}
+    except Exception as e:
+        out["github_main"] = {"_error": f"{type(e).__name__}: {e}"}
+
+    # 2) /health — что реально крутится в API-контейнере
+    try:
+        async with AsyncClient(timeout=8.0) as client:
+            r = await client.get("http://localhost:8000/health")
+        if r.status_code == 200:
+            d = r.json()
+            out["live"] = {
+                "healthy": d.get("healthy"),
+                "version": d.get("version"),
+                "uptime_seconds": d.get("uptime_seconds"),
+                "last_l4_snapshot": (d.get("deep") or {}).get("last_l4_snapshot"),
+                "embedding": d.get("embedding"),
+            }
+        else:
+            out["live"] = {"_error": f"health {r.status_code}"}
+    except Exception as e:
+        out["live"] = {"_error": f"{type(e).__name__}: {e}"}
+    return out
 
 
 async def _resolve_owner(request: Request) -> str | None:
@@ -1304,6 +1471,23 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         # GET /rooms/{id}/pending — server отфильтрует по X-Agent-Id header (нашему agent_id)
         return await _call_rooms("GET", f"/{room_id}/pending",
                                  room_key=room_key, agent_id=agent_id, timeout_s=8.0)
+
+    if name == "cognitive_deploy_promote_branch":
+        agent_id, owner_uid = await _resolve_agent_full(request)
+        if not _can_deploy(owner_uid):
+            raise ValueError(
+                "cognitive_deploy_promote_branch: forbidden — caller is not in deploy "
+                "admin list. Add owner_user_id to COGCORE_DEPLOY_ADMIN_OWNER_IDS or "
+                "use a legacy env-pre-provisioned key."
+            )
+        branch = (a.get("branch") or "").strip()
+        if not branch:
+            raise ValueError("cognitive_deploy_promote_branch: branch обязателен")
+        message = a.get("message") or f"chore(deploy): promote {branch} via MCP by {agent_id}"
+        return await _github_merge_branch_to_main(branch, message)
+
+    if name == "cognitive_deploy_status":
+        return await _deploy_status()
 
     raise ValueError(f"unknown tool: {name}")
 
