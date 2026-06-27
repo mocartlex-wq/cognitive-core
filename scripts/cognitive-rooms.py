@@ -1977,7 +1977,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         path = url.path
-        params = urllib.parse.parse_qs(url.query)
+        # encoding="utf-8" — иначе percent-decoded байты query-параметров
+        # интерпретируются как latin-1 и кириллица возвращается дважды-
+        # кодированной ("сервер" → "Ñ\x81ÐµÑ\x80вер"). На запись в БД не
+        # влияет (POST-body парсится как JSON), но GET-эндпоинты sync-pending
+        # и любые ?agent_id=... ломались на любом non-ASCII id.
+        params = urllib.parse.parse_qs(url.query, encoding="utf-8", errors="replace")
         try:
             # Mobile UI routes
             if path == "/ui" or path == "/ui/":
