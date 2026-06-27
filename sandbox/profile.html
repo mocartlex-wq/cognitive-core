@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#0a0e14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EC%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/shared.css?v=20260520j">
-<link rel="stylesheet" href="/static/glass.css?v=20260520i">
+<link rel="stylesheet" href="/static/glass.css?v=20260613">
 <style>
   html, body { background: var(--glass-base-bg) !important; color: var(--glass-text) !important; }
   body { min-height: 100vh; }
@@ -1326,7 +1326,7 @@
         location.reload();
       });
     } else {
-      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
+      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(Array.isArray(j.detail) ? j.detail.map(function(d){return (d&&d.msg)?d.msg:String(d)}).join('; ') : (typeof j.detail==='string' ? j.detail : (j.detail ? JSON.stringify(j.detail) : ('Ошибка '+r.status))))}</p>`;
     }
   });
 
@@ -1393,6 +1393,7 @@
     } catch (e) {
       console.warn('machine fingerprint failed:', e);
     }
+    if (/\s/.test(data.agent_id)) { const er=document.getElementById('newAgentResult'); er.style.display='block'; er.style.color='#ff7770'; er.textContent='Идентификатор не должен содержать пробелы.'; return; }
     const r = await api('/user/agents/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1417,7 +1418,7 @@
         <p class="msg-line" style="margin-top:8px">💡 Команда уже с ключом — owner запускает её сам, агент конфиг не трогает (обходит guard self-edit).</p>`;
     } else {
       result.style.display = 'block';
-      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(j.detail || 'Ошибка')}</p>`;
+      result.innerHTML = `<p style="color: #ff7770; margin: 14px 0;">${esc(Array.isArray(j.detail) ? j.detail.map(function(d){return (d&&d.msg)?d.msg:String(d)}).join('; ') : (typeof j.detail==='string' ? j.detail : (j.detail ? JSON.stringify(j.detail) : ('Ошибка '+r.status))))}</p>`; if (r.status === 409) { var _m = data.agent_id.match(/^(.*?)-(\d+)$/); var _sug = (_m ? _m[1] : data.agent_id) + '-' + (_m ? (parseInt(_m[2])+1) : 2); document.getElementById('newAgentId').value = _sug; result.innerHTML = '<p style="color:#ff8c42;margin:14px 0;">«' + esc(data.agent_id) + '» занят. Подставил свободный <b>' + esc(_sug) + '</b> — нажмите «Создать».</p>'; }
     }
   });
   function copyKey(btn, key) {

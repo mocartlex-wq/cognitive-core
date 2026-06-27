@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#0a0e14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='58%25' font-size='34' font-weight='700' fill='white' text-anchor='middle' font-family='system-ui'%3EC%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/shared.css?v=20260520j">
-<link rel="stylesheet" href="/static/glass.css?v=20260520i">
+<link rel="stylesheet" href="/static/glass.css?v=20260613">
 <style>
   html, body { background: var(--glass-base-bg) !important; color: var(--glass-text) !important; }
   body { min-height: 100vh; }
@@ -272,8 +272,9 @@
   }
 
   function participantsHtml(parts) {
+    const addCtl = '<div id="addAgentWrap" style="margin:0 0 12px"><button type="button" class="btn btn-sm secondary" onclick="addOwnerAgent()">➕ Добавить моего агента</button></div>';
     if (!parts || parts.length === 0) {
-      return '<div class="empty">Пока никто не присоединился. Дайте ключ выше агенту — он зайдёт командой <code>room_join</code>.</div>';
+      return addCtl + '<div class="empty">Пока никто не присоединился. Добавьте своего агента кнопкой ниже, либо дайте ключ агенту — он зайдёт командой <code>room_join</code>.</div>';
     }
     const rows = parts.map(p => {
       const ar = !!p.auto_respond;
@@ -293,7 +294,7 @@
         </div>
       </div>`;
     }).join('');
-    return `<div class="grid">${rows}</div>`;
+    return addCtl + `<div class="grid">${rows}</div>`;
   }
 
   // Per-room авто-ответ: вкл/выкл room_participants.auto_respond для агента в
@@ -315,6 +316,34 @@
       return;
     }
     refreshMessages(true);
+  };
+
+  window.addOwnerAgent = async function() {
+    const wrap = document.getElementById('addAgentWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<span class="meta">Загружаю ваших агентов…</span>';
+    const r = await api('/user/agents');
+    if (!r || !r.ok) { wrap.innerHTML = '<span class="meta" style="color:#ff7770">Не удалось загрузить агентов</span>'; return; }
+    const data = await r.json();
+    const agents = [];
+    const push = a => { if (a && a.agent_id) agents.push(a); };
+    if (Array.isArray(data)) data.forEach(push);
+    else if (Array.isArray(data.agents)) data.agents.forEach(push);
+    else if (Array.isArray(data.machines)) data.machines.forEach(m => (m.agents || []).forEach(push));
+    else Object.values(data || {}).forEach(v => { if (Array.isArray(v)) v.forEach(push); });
+    if (!agents.length) { wrap.innerHTML = '<span class="meta">Нет ваших агентов — создайте в Профиле.</span>'; return; }
+    const opts = agents.map(a => '<option value="' + esc(a.agent_id) + '">' + esc(a.agent_label || a.agent_id) + '</option>').join('');
+    wrap.innerHTML = '<select id="addAgentSel" style="padding:6px 9px;border-radius:8px;background:var(--glass-bg-light);color:var(--glass-text);border:1px solid var(--glass-border);font-family:var(--font)">' + opts + '</select> <button type="button" class="btn btn-sm primary" onclick="confirmAddAgent(this)">Добавить в комнату</button>';
+  };
+  window.confirmAddAgent = async function(btn) {
+    const sel = document.getElementById('addAgentSel');
+    if (!sel) return;
+    const agentId = sel.value;
+    btn.disabled = true; const ot = btn.textContent; btn.textContent = '…';
+    const r = await api('/user/rooms/' + encodeURIComponent(ROOM_ID) + '/participants/' + encodeURIComponent(agentId), { method: 'POST' });
+    if (!r) return;
+    if (!r.ok) { let d = r.status; try { d = (await r.json()).detail || d; } catch (e) {} btn.disabled = false; btn.textContent = ot; alert('Не удалось добавить: ' + d); return; }
+    loadDetail();
   };
 
   function messagesHtml(msgs) {
@@ -516,27 +545,19 @@
       '(ключ комнаты — пароль входа, как Zoom-код. Работает только после успешного claim выше.)';
     const box = document.getElementById('inviteNewResult');
     box.style.display = 'block';
+    let _copied = false;
+    try { await navigator.clipboard.writeText(combined); _copied = true; } catch (e) {}
     box.innerHTML =
-      '<button class="btn" id="copyInviteBtn" type="button">📋 Скопировать приглашение</button>' +
-      '<details style="margin-top:10px">' +
-      '<summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none;list-style:none">▸ Посмотреть текст (для специалиста)</summary>' +
-      '<textarea readonly id="inviteText" style="width:100%;min-height:180px;resize:vertical;margin-top:8px;' +
+      '<p class="key-hint" style="margin-top:0;color:' + (_copied ? '#4cc960' : '#ff8c42') + ';font-weight:600">' +
+      (_copied ? '✓ Приглашение скопировано в буфер — вставь его агенту на нужном устройстве.' : '⚠ Не удалось скопировать автоматически — открой текст ниже и скопируй вручную.') + '</p>' +
+      '<details style="margin-top:10px"' + (_copied ? '' : ' open') + '>' +
+      '<summary style="cursor:pointer;font-size:12.5px;color:var(--glass-text-dim);user-select:none;list-style:none">▸ Текст приглашения</summary>' +
+      '<textarea readonly id="inviteText" onclick="this.select()" style="width:100%;min-height:180px;resize:vertical;margin-top:8px;' +
       'padding:11px 13px;font-family:var(--mono);font-size:11px;line-height:1.5;border-radius:9px;' +
       'border:1px solid var(--glass-border);background:var(--glass-bg-light);color:var(--glass-text);' +
       'box-sizing:border-box"></textarea></details>' +
-      '<p class="key-hint" style="margin-top:8px">Токен живёт 10 мин, agent_id: <code>' + esc(j.agent_id || '—') + '</code>. Жми «Скопировать» и дай агенту — он подключится и зайдёт в комнату.</p>';
+      '<p class="key-hint" style="margin-top:8px">Токен живёт 10 мин, agent_id: <code>' + esc(j.agent_id || '—') + '</code>.</p>';
     document.getElementById('inviteText').value = combined;
-    document.getElementById('copyInviteBtn').addEventListener('click', async function () {
-      const b = this;
-      try {
-        await navigator.clipboard.writeText(combined);
-        b.textContent = '✓ Скопировано'; setTimeout(() => { b.textContent = '📋 Скопировать приглашение'; }, 1600);
-      } catch (e) {
-        const t = document.getElementById('inviteText'); t.focus(); t.select();
-        try { document.execCommand('copy'); b.textContent = '✓ Скопировано'; setTimeout(() => { b.textContent = '📋 Скопировать приглашение'; }, 1600); }
-        catch (_) { alert('Скопируйте текст из поля вручную.'); }
-      }
-    });
   }
 
   // Подставить @упоминание агента в начало поля. Клик по другому чипу заменяет

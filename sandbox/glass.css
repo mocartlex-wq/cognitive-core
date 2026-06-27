@@ -149,12 +149,12 @@ body.glass-mode .orb-3 {
   position: fixed; inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.45;
+  opacity: 0.7;
   mix-blend-mode: screen;
   transition: opacity 0.4s ease;
 }
 :root[data-theme="light"] .neuron-bg {
-  opacity: 0.28;
+  opacity: 0.45;
   mix-blend-mode: multiply;
 }
 .neuron-bg svg, .neuron-bg object, .neuron-bg img {

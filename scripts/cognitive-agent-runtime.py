@@ -309,7 +309,7 @@ def tool_docker_restart(container: str, reason: str = "") -> str:
     """Restart a known container. Requires reason ≥10 chars for audit."""
     allowed = {
         "cognitive_api", "cognitive_mcp", "cognitive_nginx", "cognitive_redis",
-        "ai-crm-backend", "ai-crm-frontend",
+        # ai-crm-backend/frontend REMOVED 2026-06-16: ai-crm ops only via deploy/update.sh
         "monitoring_grafana", "monitoring_prometheus",
         # Excluded by design: cognitive_postgres (data risk), cognitive_minio (data risk), cognitive_nats (state)
     }
@@ -364,7 +364,7 @@ def tool_nginx_reload(reason: str = "") -> str:
 
 def tool_git_pull(repo: str = "/opt/cognitive-core", reason: str = "") -> str:
     """git pull --ff-only on whitelisted repo. Reason ≥10 chars."""
-    allowed = {"/opt/cognitive-core", "/opt/ai-crm"}
+    allowed = {"/opt/cognitive-core"}
     if repo not in allowed:
         return f"ERROR: repo {repo} not whitelisted"
     if len(reason) < 10:
@@ -576,7 +576,7 @@ TOOL_REGISTRY = {
         "type": "function",
         "function": {
             "name": "docker_restart",
-            "description": "[WRITE] Restart container. Whitelisted: cognitive_api, cognitive_mcp, cognitive_nginx, cognitive_redis, ai-crm-backend, ai-crm-frontend, monitoring_grafana, monitoring_prometheus. Requires reason ≥10 chars. Excluded for safety: postgres, minio, nats.",
+            "description": "[WRITE] Restart container. Whitelisted: cognitive_api, cognitive_mcp, cognitive_nginx, cognitive_redis, monitoring_grafana, monitoring_prometheus. Requires reason ≥10 chars. Excluded: postgres, minio, nats (data); ai-crm-* removed 2026-06-16 (deploy via update.sh).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -618,7 +618,7 @@ TOOL_REGISTRY = {
         "type": "function",
         "function": {
             "name": "git_pull",
-            "description": "[WRITE] git pull --ff-only on whitelisted repo (/opt/cognitive-core, /opt/ai-crm). Reason ≥10 chars.",
+            "description": "[WRITE] git pull --ff-only on /opt/cognitive-core ONLY. Reason ≥10 chars. (ai-crm removed -> deploy via /opt/ai-crm/deploy/update.sh)",
             "parameters": {
                 "type": "object",
                 "properties": {
