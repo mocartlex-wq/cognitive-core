@@ -123,6 +123,18 @@ class Settings(BaseSettings):
     # и query-параметров в access-логе.
     log_redact_secrets: bool = True
 
+    # ─────────────────────────────────────────────────────────────────────
+    # TRADING (добавлено 2026-06-27) — котировки, новости, риск, брокер.
+    # По умолчанию активен paper-trading (симулятор); реальные брокеры
+    # подключаются явно через trading_broker=tinkoff|alpaca|binance.
+    # Консервативные лимиты для новичка.
+    # ─────────────────────────────────────────────────────────────────────
+    trading_broker: str = "paper"
+    trading_max_position_pct: float = 10.0        # не больше 10% капитала в одну позицию
+    trading_max_stop_pct: float = 2.0             # стоп не дальше 2% от цены входа
+    trading_max_daily_drawdown_pct: float = 5.0   # дневная просадка > 5% → стоп
+    trading_max_day_trades: int = 20              # лимит ордеров в сутки
+
     def get_agent_keys(self) -> dict:
         return json.loads(self.agent_api_keys)
 
