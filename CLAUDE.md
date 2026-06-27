@@ -114,6 +114,20 @@ asyncpg 0.30 требует JSON-строки для JSONB колонок.
 - Санитайзер отклоняет SQL/JS инъекции, экранирует HTML и shell-команды
 - Rate-limit через Redis INCR с TTL 1 сек
 
+## Подводные камни (gotchas из аудита 2026-06-14)
+
+Заметки, чтобы новая сессия не повторила мои ошибки прошлого аудита:
+
+- **`scripts/cognitive-rooms.py:3010` — это `ThreadingHTTPServer`, не single-thread.** Concurrency-bottleneck'а на уровне модели потоков НЕТ. `_PG_CONN_LOCK` защищает shared psycopg-коннекцию. Не предлагать «async refactor» как BLOCKING — это уже не нужно.
+- **`launch/extras/cognitive-rooms.py` — это public reference**, не дубль. Используется `launch/docker-compose.public.yml` и `launch/E2E_RESULTS.md`. Не удалять. Security-фиксы из `scripts/` нужно бэкпортить туда.
+- **SQL-проверка в санитайзере убрана сознательно** (`app/security/sanitizer.py:93`, коммит 2026-05-26). Все SQL-запросы параметризованы asyncpg. Старый фильтр блокировал валидные em-dash и shell-args. Не «возвращать как фикс».
+- **L4-снапшоты по дизайну каждые 4 недели** (`settings.l4_full_snapshot_interval_weeks=4`). Если `last_l4_snapshot` ≤ 4 недель назад и hash не менялся → skip корректен. Не паника.
+- **HMAC-хеширование agent_keys включается флагом** `COGCORE_KEY_LOOKUP_SECRET`. Без env — старое поведение (plaintext lookup). С env — dual-path (HMAC OR plaintext) для миграционного периода. Инфра в `app/security/key_hash.py`, миграция `0018`, backfill `scripts/backfill_agent_key_hmac.py`. Если не задано — никакого Argon2/HMAC-логики не активируется.
+- **Subprocess `docker exec printenv POSTGRES_PASSWORD` (`scripts/cognitive-rooms.py:~98`) — документированный 3-й fallback** после `env` → `.env`. Срабатывает только когда первые два пусты. Это корректное поведение, не security-risk.
+- **`agent_keys` cache TTL 60s** в `mcp_protocol.py:_KEYS_CACHE` — только для env-JSON. DB-ключи не кешируются, revoke мгновенный.
+- **CLAUDE.md «56 тестов» — устарело**, реально 388 функций в 33 файлах. Цифра не контракт.
+- **Кириллические `agent_id`** (например, `сервер_память`) корректно работают с MCP room-вызовами после фикса `8449f64`. Если в логах виден `UnicodeEncodeError: 'ascii' codec` на `X-Agent-Id` — значит, прод не обновлён.
+
 ## Запущенные тесты (не чини что не сломано)
 
 Все проверки в `test_api.py` используют домены `test_api`, `test_bulk` — не удаляй эти данные.
