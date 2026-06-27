@@ -62,8 +62,9 @@
   ".cogasst-head .cogasst-ic svg{width:17px;height:17px;}" +
   ".cogasst-title{font-weight:700;font-size:15px;flex:1;line-height:1.15;}" +
   ".cogasst-title small{display:block;font-weight:500;font-size:11px;opacity:.6;}" +
-  ".cogasst-x{background:transparent;border:0;color:inherit;opacity:.55;cursor:pointer;font-size:22px;line-height:1;padding:4px 6px;border-radius:8px;}" +
-  ".cogasst-x:hover{opacity:1;background:rgba(255,255,255,.08);}" +
+  ".cogasst-x,.cogasst-reset{background:transparent;border:0;color:inherit;opacity:.55;cursor:pointer;font-size:22px;line-height:1;padding:4px 6px;border-radius:8px;}" +
+  ".cogasst-x:hover,.cogasst-reset:hover{opacity:1;background:rgba(255,255,255,.08);}" +
+  ".cogasst-reset{font-size:18px;}" +
   ".cogasst-tabs{display:flex;gap:6px;padding:8px 12px 0;}" +
   ".cogasst-tab{font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:9px 9px 0 0;border:0;cursor:pointer;" +
     "background:transparent;color:var(--glass-text,#e9edf5);opacity:.65;}" +
@@ -115,6 +116,7 @@
     '<div class="cogasst-head">' +
       '<div class="cogasst-ic">' + CHAT_SVG + "</div>" +
       '<div class="cogasst-title">Помощники AI<small>Cognitive Core</small></div>' +
+      '<button class="cogasst-reset" title="Сбросить положение в угол" aria-label="Сбросить положение">&#x21BA;</button>' +
       '<button class="cogasst-x" aria-label="Закрыть">&times;</button>' +
     "</div>" +
     '<div class="cogasst-tabs">' +
@@ -143,9 +145,11 @@
   var FAB_SIZE = 58;        // должен соответствовать CSS width/height
   var FAB_MARGIN = 8;       // минимальный отступ от края экрана
   var DRAG_THRESHOLD = 5;   // px: меньше — считаем кликом, не drag'ом
+  var LONG_PRESS_MS = 600;  // ms удержания без движения → reset позиции
   var POS_KEY = "cogasst_fab_pos";
   var dragState = null;     // {startX, startY, offX, offY, moved}
   var clickGuardUntil = 0;  // timestamp до которого подавляем click
+  var longPressTimer = null;
 
   function loadSavedPos() {
     try {
@@ -180,6 +184,20 @@
   function restoreFabPos() {
     var p = loadSavedPos();
     if (p) applyFabPos(p.x, p.y);
+  }
+
+  // Вернуть FAB в правый-нижний (CSS-default) угол + забыть сохранённую позицию.
+  // Вызывается либо кнопкой ↺ в шапке панели, либо длинным удержанием FAB'а.
+  function resetFabPos() {
+    fab.style.left = ""; fab.style.top = "";
+    fab.style.right = ""; fab.style.bottom = "";
+    panel.style.left = ""; panel.style.top = "";
+    panel.style.right = ""; panel.style.bottom = "";
+    try { localStorage.removeItem(POS_KEY); } catch (e) {}
+  }
+
+  function cancelLongPress() {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
   }
 
   // Привязка панели к текущему положению FAB: панель появляется С ТОЙ ЖЕ
@@ -218,6 +236,26 @@
       moved: false,
     };
     try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    // Long-press: если палец/мышь не двинулись за LONG_PRESS_MS, считаем
+    // что юзер хочет сбросить позицию. Таймер сбивается на любом движении
+    // (drag), на pointerup и на pointercancel.
+    cancelLongPress();
+    longPressTimer = setTimeout(function () {
+      longPressTimer = null;
+      if (!dragState || dragState.moved) return;
+      // Уже совершено намерение reset — глотаем последующий click.
+      clickGuardUntil = Date.now() + 700;
+      resetFabPos();
+      // Мягкая тактильная отдача на мобильном (если разрешено браузером).
+      try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) {}
+      // Анимационная подсказка: короткий «пульс» на FAB'е.
+      fab.style.transition = "transform .25s ease";
+      fab.style.transform = "scale(.85)";
+      setTimeout(function () {
+        fab.style.transform = "";
+        setTimeout(function () { fab.style.transition = ""; }, 250);
+      }, 120);
+    }, LONG_PRESS_MS);
   }
 
   function onPointerMove(e) {
@@ -226,12 +264,14 @@
     var dy = e.clientY - dragState.startY;
     if (!dragState.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
     dragState.moved = true;
+    cancelLongPress();  // движение → это drag, не long-press
     fab.classList.add("cogasst-dragging");
     applyFabPos(e.clientX - dragState.offX, e.clientY - dragState.offY);
     e.preventDefault();
   }
 
   function onPointerUp(e) {
+    cancelLongPress();
     if (!dragState) return;
     var moved = dragState.moved;
     fab.classList.remove("cogasst-dragging");
@@ -396,6 +436,12 @@
     sendEl = panel.querySelector("#cogasst-send");
     fab.addEventListener("click", openPanel);
     panel.querySelector(".cogasst-x").addEventListener("click", closePanel);
+    panel.querySelector(".cogasst-reset").addEventListener("click", function () {
+      // Сначала сбрасываем позицию, потом закрываем панель — иначе на доли
+      // секунды FAB всплывёт у старой точки.
+      resetFabPos();
+      closePanel();
+    });
     sendEl.addEventListener("click", send);
     var sel = panel.querySelector("#cogasst-persona");
     if (sel) sel.addEventListener("change", function () {
