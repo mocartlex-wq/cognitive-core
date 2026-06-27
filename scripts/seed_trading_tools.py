@@ -72,20 +72,55 @@ TOOLS = [
         tool_type="service",
         description="Симулятор торговли. Старт-капитал 100000, состояние в Redis.",
         config_schema={
-            "endpoints": [
-                "GET  /trading/portfolio",
+            "broker": "paper",
+            "endpoints_common": [
+                "GET  /trading/portfolio?market=us",
                 "POST /trading/order            {symbol, market, side, quantity, stop_loss?}",
-                "GET  /trading/orders?limit=50",
+                "GET  /trading/orders?market=us&limit=50",
                 "POST /trading/portfolio/reset  {cash?}",
             ],
-            "broker": "paper",
-            "real_brokers_supported": ["tinkoff", "alpaca", "binance"],
-            "real_brokers_status": "адаптеры подключаются по запросу + API-ключи",
         },
-        usage_patterns={
-            "роль": "по умолчанию — тренировка стратегий без денежного риска",
-            "переключение_на_реальный": "settings.trading_broker = 'tinkoff' и т.п.",
+        usage_patterns={"роль": "тренировка стратегий без денежного риска"},
+    ),
+    ToolRegistryInput(
+        domain=DOMAIN,
+        tool_name="alpaca_broker",
+        tool_type="service",
+        description="Alpaca (US акции). По умолчанию paper-api.alpaca.markets.",
+        config_schema={
+            "market": "us",
+            "settings": ["alpaca_key", "alpaca_secret", "alpaca_paper (default True)"],
+            "live_required": "alpaca_paper=False И trading_allow_live=True",
+            "docs": "https://docs.alpaca.markets/reference",
         },
+        usage_patterns={"когда_активен": "settings.trading_broker='alpaca' или 'auto' для market=us"},
+    ),
+    ToolRegistryInput(
+        domain=DOMAIN,
+        tool_name="binance_broker",
+        tool_type="service",
+        description="Binance Spot (крипта). По умолчанию testnet.binance.vision.",
+        config_schema={
+            "market": "crypto",
+            "settings": ["binance_key", "binance_secret", "binance_testnet (default True)", "binance_quote_asset"],
+            "live_required": "binance_testnet=False И trading_allow_live=True",
+            "testnet_keys_url": "https://testnet.binance.vision",
+            "docs": "https://developers.binance.com/docs/binance-spot-api-docs",
+        },
+        usage_patterns={"когда_активен": "settings.trading_broker='binance' или 'auto' для market=crypto"},
+    ),
+    ToolRegistryInput(
+        domain=DOMAIN,
+        tool_name="tinkoff_broker",
+        tool_type="service",
+        description="T-Bank Invest (RU акции). По умолчанию SandboxService/*.",
+        config_schema={
+            "market": "ru",
+            "settings": ["tinkoff_token", "tinkoff_account_id (опционально)", "tinkoff_sandbox (default True)"],
+            "live_required": "tinkoff_sandbox=False И trading_allow_live=True",
+            "docs": "https://russianinvestments.github.io/investAPI/",
+        },
+        usage_patterns={"когда_активен": "settings.trading_broker='tinkoff' или 'auto' для market=ru"},
     ),
 ]
 

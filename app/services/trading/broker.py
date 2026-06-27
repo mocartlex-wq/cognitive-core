@@ -210,19 +210,69 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_DEFAULT_BROKER: BrokerClient | None = None
+_PAPER: BrokerClient | None = None
+_ALPACA: BrokerClient | None = None
+_BINANCE: BrokerClient | None = None
+_TINKOFF: BrokerClient | None = None
 
 
-def get_broker() -> BrokerClient:
-    """Returns active broker per settings.trading_broker. Default = paper."""
-    global _DEFAULT_BROKER
-    if _DEFAULT_BROKER is not None:
-        return _DEFAULT_BROKER
-    name = (settings.trading_broker or "paper").lower()
-    if name == "paper":
-        _DEFAULT_BROKER = PaperBroker()
-        return _DEFAULT_BROKER
-    raise BrokerError(
-        f"broker '{name}' is not implemented yet — only 'paper' is supported. "
-        "Реальные брокеры (Tinkoff/Alpaca/Binance) добавляются отдельным адаптером."
-    )
+def _paper() -> BrokerClient:
+    global _PAPER
+    if _PAPER is None:
+        _PAPER = PaperBroker()
+    return _PAPER
+
+
+def _alpaca() -> BrokerClient:
+    global _ALPACA
+    if _ALPACA is None:
+        from app.services.trading.brokers.alpaca import AlpacaBroker
+        _ALPACA = AlpacaBroker()
+    return _ALPACA
+
+
+def _binance() -> BrokerClient:
+    global _BINANCE
+    if _BINANCE is None:
+        from app.services.trading.brokers.binance import BinanceBroker
+        _BINANCE = BinanceBroker()
+    return _BINANCE
+
+
+def _tinkoff() -> BrokerClient:
+    global _TINKOFF
+    if _TINKOFF is None:
+        from app.services.trading.brokers.tinkoff import TinkoffBroker
+        _TINKOFF = TinkoffBroker()
+    return _TINKOFF
+
+
+def reset_broker_cache() -> None:
+    """Сбрасывает кэш брокеров (для тестов и при смене настроек)."""
+    global _PAPER, _ALPACA, _BINANCE, _TINKOFF
+    _PAPER = _ALPACA = _BINANCE = _TINKOFF = None
+
+
+def get_broker(market: str | None = None) -> BrokerClient:
+    """Активный брокер. В режиме 'auto' выбирается по рынку:
+       ru→tinkoff, us→alpaca, crypto→binance (если ключи заданы),
+       иначе — paper.
+    """
+    mode = (settings.trading_broker or "paper").lower()
+    if mode == "paper":
+        return _paper()
+    if mode == "alpaca":
+        return _alpaca()
+    if mode == "binance":
+        return _binance()
+    if mode == "tinkoff":
+        return _tinkoff()
+    if mode == "auto":
+        if market == "ru" and settings.tinkoff_token:
+            return _tinkoff()
+        if market == "us" and settings.alpaca_key and settings.alpaca_secret:
+            return _alpaca()
+        if market == "crypto" and settings.binance_key and settings.binance_secret:
+            return _binance()
+        return _paper()
+    raise BrokerError(f"unknown broker mode: {mode}")

@@ -58,12 +58,17 @@ async def sentiment(body: SentimentRequest, request: Request):
 
 
 @router.get("/portfolio")
-async def portfolio(request: Request):
+async def portfolio(request: Request, market: str = "us"):
     agent_id = await verify_api_key(request)
-    p = await get_broker().get_portfolio(agent_id)
+    try:
+        broker = get_broker(market)
+        p = await broker.get_portfolio(agent_id)
+    except BrokerError as e:
+        raise HTTPException(status_code=502, detail=f"broker: {e}")
     return {
         "agent_id": agent_id,
-        "broker": getattr(get_broker(), "name", "paper"),
+        "broker": getattr(broker, "name", "paper"),
+        "market": market,
         "cash": p.cash,
         "equity": p.equity,
         "positions": p.positions,
@@ -76,7 +81,8 @@ async def portfolio(request: Request):
 async def submit_order(body: OrderInput, request: Request):
     agent_id = await verify_api_key(request)
     try:
-        order = await get_broker().submit_order(
+        broker = get_broker(body.market)
+        order = await broker.submit_order(
             agent_id=agent_id,
             symbol=body.symbol,
             market=body.market,
@@ -92,18 +98,23 @@ async def submit_order(body: OrderInput, request: Request):
 
 
 @router.get("/orders")
-async def list_orders(request: Request, limit: int = 50):
+async def list_orders(request: Request, limit: int = 50, market: str = "us"):
     agent_id = await verify_api_key(request)
     limit = max(1, min(limit, 500))
-    return {"agent_id": agent_id, "orders": await get_broker().list_orders(agent_id, limit)}
+    try:
+        broker = get_broker(market)
+        return {"agent_id": agent_id, "broker": broker.name, "orders": await broker.list_orders(agent_id, limit)}
+    except BrokerError as e:
+        raise HTTPException(status_code=502, detail=f"broker: {e}")
 
 
 @router.post("/portfolio/reset")
-async def reset_portfolio(body: ResetPortfolioInput, request: Request):
-    """Сбрасывает paper-портфель в исходное состояние. Для реальных брокеров — 405."""
+async def reset_portfolio(body: ResetPortfolioInput, request: Request, market: str = "us"):
+    """Сбрасывает paper-портфель или sandbox Tinkoff. Для live-счетов — 405."""
     agent_id = await verify_api_key(request)
-    broker = get_broker()
-    if getattr(broker, "name", "") != "paper":
-        raise HTTPException(status_code=405, detail="reset допустим только для paper-broker")
-    await broker.reset(agent_id, body.cash)
-    return {"status": "reset", "agent_id": agent_id, "cash": body.cash}
+    try:
+        broker = get_broker(market)
+        await broker.reset(agent_id, body.cash)
+    except BrokerError as e:
+        raise HTTPException(status_code=405, detail=f"reset: {e}")
+    return {"status": "reset", "agent_id": agent_id, "broker": broker.name, "cash": body.cash}
