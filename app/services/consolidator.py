@@ -1,6 +1,7 @@
 ﻿import hashlib
 import io
 import json
+import logging
 import uuid as _uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -12,6 +13,8 @@ from app.services.analyzer import analyze_daily_events, analyze_weekly
 from app.services.curator import monthly_audit, pre_daily_filter, pre_weekly_check
 from app.services.ingestor import get_unprocessed_events, mark_events_processed
 from app.services.operative import index_domain_vectors
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -287,6 +290,15 @@ async def _maybe_snapshot(domain: str) -> _uuid.UUID | None:
         hash_changed = last["snapshot_hash"] != current_hash
 
         if weeks_elapsed < settings.l4_full_snapshot_interval_weeks and not hash_changed:
+            # Раньше — тихий None: /health показывал «last_l4_snapshot 13 дней
+            # назад», operator не понимал, баг это или by-design. Теперь явно
+            # логируем причину, чтобы не было ложной паники в инцидент-чате.
+            log.info(
+                "l4_snapshot_skipped domain=%s weeks_elapsed=%.2f "
+                "interval_weeks=%d hash_changed=%s",
+                domain, weeks_elapsed,
+                settings.l4_full_snapshot_interval_weeks, hash_changed,
+            )
             return None
 
     # Создаём полный снапшот
