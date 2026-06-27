@@ -469,6 +469,12 @@ async def pricing_page():
     return _html("pricing.html")
 
 
+@app.get("/ui/trading")
+async def trading_page():
+    """Trading dashboard: портфель, котировки+сентимент, ордера, история."""
+    return _html("trading.html")
+
+
 @app.get("/ui/welcome")
 async def welcome_page():
     """Phase 5C — onboarding flow после OTP signup. 3 шага до first remember."""
