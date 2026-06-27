@@ -41,9 +41,15 @@
     "background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;cursor:grab;z-index:2147483000;" +
     "box-shadow:0 10px 28px rgba(99,102,241,.45);display:flex;align-items:center;justify-content:center;" +
     "transition:transform .15s ease,box-shadow .15s ease;padding:0;" +
-    // touch-action:none — без него pointermove на мобильном съедается скроллом и
-    // drag не работает; user-select:none — иначе двойной тап выделяет иконку.
-    "touch-action:none;user-select:none;-webkit-user-select:none;}" +
+    // touch-action:none — pointermove не съедается скроллом на мобильном.
+    // user-select:none — двойной тап не выделяет иконку.
+    // -webkit-touch-callout:none — на iOS Safari и в Яндекс.Браузере long-press
+    //   больше не открывает контекстное «Сохранить/Найти в Яндексе» меню.
+    // -webkit-tap-highlight-color:transparent — убирает серый bash на тап.
+    // -webkit-user-drag:none — кнопка не «уезжает» как drag-image при удержании.
+    "touch-action:none;user-select:none;-webkit-user-select:none;" +
+    "-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;" +
+    "-webkit-user-drag:none;}" +
   "#cogasst-fab.cogasst-dragging{cursor:grabbing;transition:none;}" +
   // Авто-скрытие FAB пока юзер печатает в инпут/textarea на узком экране —
   // иначе плавающий пузырь налезает на кнопку «Отправить» и портит вёрстку
@@ -51,7 +57,17 @@
   // и клик прошёл сквозь, и визуально кнопка чиста.
   "#cogasst-fab.cogasst-hidden-by-input{opacity:0;pointer-events:none;transform:scale(.9);}" +
   "#cogasst-fab:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 14px 34px rgba(99,102,241,.55);}" +
-  "#cogasst-fab svg{width:27px;height:27px;}" +
+  // SVG внутри кнопки — pointer-events:none, чтобы все события всегда
+  // адресовались FAB-у, не svg-у (иначе браузер думает что long-press на
+  // картинке и предлагает image-search). Касается особенно Яндекс.Браузера.
+  "#cogasst-fab svg{width:27px;height:27px;pointer-events:none;-webkit-user-drag:none;}" +
+  // Пока пользователь зажимает/тащит FAB — глушим выделение текста по всей
+  // странице. На некоторых браузерах (iOS Safari, Яндекс) даже с user-select
+  // на самой кнопке селект бил по соседнему тексту: жест приходит на body
+  // одновременно. Класс ставится на pointerdown, снимается на pointerup.
+  "body.cogasst-suppress-select,body.cogasst-suppress-select *" +
+    "{user-select:none!important;-webkit-user-select:none!important;" +
+    "-webkit-touch-callout:none!important;}" +
   "#cogasst-fab .cogasst-dot{position:absolute;top:12px;right:12px;width:9px;height:9px;border-radius:50%;" +
     "background:#34c759;box-shadow:0 0 0 3px rgba(52,199,89,.25);}" +
   "#cogasst-panel{position:fixed;right:24px;bottom:92px;width:384px;max-width:calc(100vw - 32px);" +
@@ -241,6 +257,15 @@
       moved: false,
     };
     try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    // Глушим выделение текста на всей странице пока юзер держит палец/мышь
+    // на FAB-е. Снимается на pointerup/cancel. Иначе Яндекс.Браузер на iOS
+    // подсвечивал страницу как «select» и показывал «Найти в Яндексе».
+    document.body.classList.add("cogasst-suppress-select");
+    // Снимаем уже существующее выделение, если оно успело родиться.
+    try {
+      var sel = window.getSelection && window.getSelection();
+      if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    } catch (err) {}
     // Long-press: если палец/мышь не двинулись за LONG_PRESS_MS, считаем
     // что юзер хочет сбросить позицию. Таймер сбивается на любом движении
     // (drag), на pointerup и на pointercancel.
@@ -277,6 +302,10 @@
 
   function onPointerUp(e) {
     cancelLongPress();
+    // В любом случае снимаем глушилку селекта (даже если dragState уже null —
+    // например, при pointercancel из браузера-овер-кладывающего собственный
+    // gesture-handler).
+    document.body.classList.remove("cogasst-suppress-select");
     if (!dragState) return;
     var moved = dragState.moved;
     fab.classList.remove("cogasst-dragging");
@@ -298,6 +327,13 @@
     fab.addEventListener("pointermove", onPointerMove);
     fab.addEventListener("pointerup", onPointerUp);
     fab.addEventListener("pointercancel", onPointerUp);
+    // Любой context-menu запрос на FAB (right-click на десктопе, long-press
+    // в мобильных браузерах — Safari iOS, Яндекс, Chrome Android) — глушим.
+    // Long-press у нас закреплён за reset, а не за «сохранить изображение».
+    fab.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    // Дополнительно глушим dragstart на случай, если браузер всё же
+    // попытается утащить SVG как drag-image.
+    fab.addEventListener("dragstart", function (e) { e.preventDefault(); });
     // Окно меняется — пере-clamp'аем чтобы FAB не оказался за пределами вьюпорта
     window.addEventListener("resize", function () {
       if (!fab.style.left) return;
