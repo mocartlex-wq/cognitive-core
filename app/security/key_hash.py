@@ -37,7 +37,6 @@ import hashlib
 import hmac
 import os
 
-
 _SECRET_ENV = "COGCORE_KEY_LOOKUP_SECRET"
 
 

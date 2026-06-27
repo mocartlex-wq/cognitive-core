@@ -1,8 +1,6 @@
 """HMAC-based lookup hashing для agent_keys (новая infra, по умолчанию off)."""
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from app.security import key_hash
