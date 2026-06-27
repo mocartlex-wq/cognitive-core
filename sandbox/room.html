@@ -117,20 +117,30 @@
     box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
   }
 
+  /* Тонкая подсказка под композером — про поведение Enter под устройство. */
+  .composer-hint {
+    font-size: 11.5px; color: var(--glass-text-dim); margin-top: 6px;
+    line-height: 1.35; opacity: 0.7;
+  }
+
   /* Мобильная вёрстка композера: складываем кнопку под поле, увеличиваем
      поле, поднимаем шрифт до 16 px (иначе iOS Safari/Yandex auto-zoom'ит
      страницу при фокусе на textarea и сбивает прокрутку). Двухстрочный
      placeholder теперь помещается, кнопка «Отправить» во всю ширину
      — её не загораживает плавающий FAB-помощник в правом нижнем углу. */
-  @media (max-width: 600px) {
-    .composer { flex-direction: column; align-items: stretch; gap: 10px; }
+  @media (max-width: 600px), (pointer: coarse) {
+    .composer { flex-direction: column !important; align-items: stretch !important; gap: 10px; }
     .composer textarea {
-      min-height: 84px; max-height: 220px; font-size: 16px;
-      padding: 12px 14px; line-height: 1.45;
+      min-height: 96px !important; max-height: 240px; font-size: 16px !important;
+      padding: 12px 14px; line-height: 1.45; width: 100%;
     }
-    .composer .btn { width: 100%; padding: 13px 14px; font-size: 15px; min-height: 46px; }
+    .composer .btn {
+      width: 100% !important; padding: 14px 16px !important;
+      font-size: 16px !important; min-height: 50px;
+    }
     /* iOS safe-area inset снизу — чтобы кнопку «Отправить» не накрыл нижний жест-бар. */
     .composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
+    .composer-hint { font-size: 12px; opacity: 0.65; }
   }
 
   /* === Кому писать: чипы-получатели над полем ввода === */
@@ -375,6 +385,7 @@
           <textarea id="composerText" placeholder="Напишите агенту… (нажмите @имя выше, чтобы адресовать)" maxlength="4000" rows="1"></textarea>
           <button class="btn" id="sendBtn" type="button">Отправить</button>
         </div>
+        <div class="composer-hint" id="composerHint"></div>
       </div>`;
 
     document.getElementById('copyKeyBtn').addEventListener('click', copyKey);
@@ -385,9 +396,30 @@
       ch.addEventListener('click', () => insertMention(ch.getAttribute('data-token')));
     });
     const ta = document.getElementById('composerText');
+    // Поведение Enter различается под устройство:
+    //   • Десктоп (есть аппаратная клавиатура): Enter отправляет, Shift+Enter
+    //     — перенос. Это привычка чатов на десктопе (Slack, Discord, Telegram-Web).
+    //   • Мобильный (только touch-клавиатура без Shift): Enter — перенос строки
+    //     (стандарт мобильных мессенджеров). Отправка только кнопкой
+    //     «Отправить» или Ctrl/Cmd+Enter (на случай аппаратной клавы у планшета).
+    // Без этой развилки на iPhone/Android невозможно ввести многострочное
+    // сообщение — там нет Shift-варианта Enter'а.
+    const isTouchOnly = () => {
+      // touch-устройство И отсутствует наведение мыши (точный признак mobile)
+      const noHover = window.matchMedia && window.matchMedia('(hover: none)').matches;
+      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      return noHover || coarse || (window.innerWidth < 600);
+    };
     ta.addEventListener('keydown', (e) => {
-      // Enter — отправка; Shift+Enter — перенос строки. (Ctrl/Cmd+Enter тоже отправляет.)
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+      if (e.key !== 'Enter' || e.isComposing) return;
+      // Ctrl/Cmd+Enter — всегда отправляет (универсальный shortcut на любой клаве).
+      if (e.metaKey || e.ctrlKey) { e.preventDefault(); sendMessage(); return; }
+      // Mobile / touch-only: Enter = перенос строки (default browser behavior)
+      if (isTouchOnly()) return;
+      // Desktop: Shift+Enter = перенос, plain Enter = отправка
+      if (e.shiftKey) return;
+      e.preventDefault();
+      sendMessage();
     });
     // Auto-grow: поле растёт под текст пользователя (до max-height из CSS),
     // не нужно вручную дёргать угол. Срабатывает и на input, и на paste.
@@ -406,6 +438,14 @@
         }, 300);
       }
     });
+    // Контекстная подсказка под полем: на десктопе говорим про Shift+Enter,
+    // на мобильном — что Enter переносит строку.
+    const hint = document.getElementById('composerHint');
+    if (hint) {
+      hint.textContent = isTouchOnly()
+        ? 'Enter — новая строка. Кнопка «Отправить» — отправить.'
+        : 'Enter — отправить · Shift+Enter — новая строка';
+    }
     scrollThreadToBottom();
     lastMsgKey = msgKey(detail.messages);
   }
