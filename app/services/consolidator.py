@@ -82,30 +82,34 @@ async def _daily_consolidate_impl(since_hours: int | None = None, domain: str | 
         # Шаг 2: Анализ
         analysis = await analyze_daily_events(filtered_events, dom)
 
-        # Шаг 3: Сохранение L2-буфера
+        # Шаги 3+4 в одной транзакции: INSERT L2-буфера И mark_events_processed
+        # должны коммититься атомарно. Иначе сбой между ними оставлял события
+        # помеченными как обработанные при пустом L2 (или, наоборот, рождал
+        # дубль L2 на следующем цикле — ON CONFLICT DO UPDATE склеивал бы
+        # source_event_ids и портил confidence).
         buffer_id = _uuid.uuid4()
         today = date.today()
         now = datetime.now(timezone.utc)
+        filtered_event_ids = [e["id"] for e in filtered_events]
         pool = await get_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO l2_daily_buffers (id, date, domain, summary, source_event_ids, confidence, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (date, domain) DO UPDATE
-                SET summary = EXCLUDED.summary,
-                    source_event_ids = l2_daily_buffers.source_event_ids || EXCLUDED.source_event_ids,
-                    confidence = (l2_daily_buffers.confidence + EXCLUDED.confidence) / 2,
-                    created_at = EXCLUDED.created_at
-                """,
-                buffer_id, today, dom, json.dumps(analysis, ensure_ascii=False),
-                [e["id"] for e in filtered_events],
-                analysis.get("confidence", 0.5),
-                now,
-            )
-
-        # Шаг 4: Помечаем события обработанными
-        await mark_events_processed([e["id"] for e in filtered_events])
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO l2_daily_buffers (id, date, domain, summary, source_event_ids, confidence, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (date, domain) DO UPDATE
+                    SET summary = EXCLUDED.summary,
+                        source_event_ids = l2_daily_buffers.source_event_ids || EXCLUDED.source_event_ids,
+                        confidence = (l2_daily_buffers.confidence + EXCLUDED.confidence) / 2,
+                        created_at = EXCLUDED.created_at
+                    """,
+                    buffer_id, today, dom, json.dumps(analysis, ensure_ascii=False),
+                    filtered_event_ids,
+                    analysis.get("confidence", 0.5),
+                    now,
+                )
+                await mark_events_processed(filtered_event_ids, conn=conn)
 
         results.append({"domain": dom, "status": "consolidated", "buffer_id": str(buffer_id)})
 

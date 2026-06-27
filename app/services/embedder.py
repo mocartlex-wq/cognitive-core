@@ -97,14 +97,27 @@ def _get_fastembed():
 
 
 def get_embedding_provider() -> str:
-    """Возвращает имя текущего провайдера ('CUDA'/'CPU'/'unavailable').
+    """Возвращает имя текущего провайдера эмбеддингов.
+
+    Значения:
+      - 'CUDA' / 'CPU' — fastembed работает (норма)
+      - 'not-initialized' — fastembed ещё не разогрет (cold start)
+      - 'hash-fallback' — fastembed недоступен, embed_text() уходит в
+        детерминированный hash-эмбеддинг → KNN работает как случайный
+        поиск. Это **деградированное** состояние, не «всё ок».
+
     Используется в /health и /metrics."""
     if _fastembed_failed:
-        return "unavailable"
+        return "hash-fallback"
     if _fastembed_provider is None:
         # Лениво вызвать инициализацию — но не блокировать health-check долго
         return "not-initialized"
     return _fastembed_provider
+
+
+def is_embedding_degraded() -> bool:
+    """True если KNN сейчас идёт через hash-fallback (семантика сломана)."""
+    return _fastembed_failed
 
 
 def warm_up() -> str:

@@ -26,7 +26,7 @@
 #   - Sleeping agents subscribed via NATS WS get push
 #   - Asker waits via long-poll (up to timeout) — does NOT sleep
 
-import os, sys, json, time, re, secrets, threading, subprocess, http.server
+import hmac, os, sys, json, time, re, secrets, threading, subprocess, http.server
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -36,6 +36,29 @@ LONG_POLL_INTERVAL = 1.0  # seconds
 PROXY_FALLBACK_AFTER_SEC = int(os.environ.get("PROXY_FALLBACK_AFTER", "5"))  # try real agent 5s, then proxy
 ONLINE_THRESHOLD_SEC = 90  # last_seen_at within 90s = online
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+# CORS allowlist — reuse the FastAPI env var so rooms and the main API agree.
+# If unset → fall back to wildcard for dev convenience (no breakage on existing
+# deploys); if set → only echo back origins that appear in the CSV.
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("CORS_ORIGINS_CSV", "").split(",")
+    if o.strip()
+]
+
+
+def _cors_origin_for(request_origin):
+    """Pick the Access-Control-Allow-Origin value for an inbound request.
+
+    Returns '*' when no allowlist is configured (back-compat), the matching
+    origin when it is configured AND the request origin is on it, and None
+    when the allowlist is configured and the origin is not allowed (in which
+    case the header is omitted so the browser blocks the cross-origin call)."""
+    if not _CORS_ORIGINS:
+        return "*"
+    if request_origin and request_origin in _CORS_ORIGINS:
+        return request_origin
+    return None
 
 
 try:
@@ -458,23 +481,42 @@ def post_message(room_id, from_agent, text, msg_type="message", parent_id=None):
 
 
 def list_messages(room_id, since=None, limit=50):
-    where = ""
+    # Parameterized — `since` came from the request query string, so an
+    # f-string concat was a SQL-injection sink (raw timestamptz cast made
+    # the value executable PG syntax even after a naive ' → '' escape).
+    # `limit` is cast to int defensively; `room_id` was validated via the
+    # X-Room-Key auth path but flows through %s anyway for consistency.
+    try:
+        limit_i = int(limit)
+    except (TypeError, ValueError):
+        limit_i = 50
+    limit_i = max(1, min(limit_i, 500))
+
+    # Qualify as m.created_at: agent_states also has a created_at column, so
+    # an unqualified `created_at` binds to the LEFT-JOINed agent_states row,
+    # which is NULL for any from_agent without an agent_states entry -> the
+    # `NULL > ts` predicate silently drops those messages.
     if since:
-        since_e = since.replace("'", "''")
-        # Qualify as m.created_at: agent_states also has a created_at column, so
-        # an unqualified `created_at` binds to the LEFT-JOINed agent_states row,
-        # which is NULL for any from_agent without an agent_states entry -> the
-        # `NULL > ts` predicate silently drops those messages. This broke the
-        # /wait long-poll and /messages?since= for agents lacking a state row.
-        where = f"AND m.created_at > '{since_e}'::timestamptz"
-    rows, _ = pg(
-        f"SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, m.created_at::text, "
-        f"       s.agent_label "
-        f"FROM room_messages m "
-        f"LEFT JOIN agent_states s ON s.agent_id = m.from_agent "
-        f"WHERE m.room_id = '{room_id}'::uuid {where} "
-        f"ORDER BY m.created_at DESC LIMIT {int(limit)};"
-    )
+        sql = (
+            "SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, "
+            "       m.created_at::text, s.agent_label "
+            "FROM room_messages m "
+            "LEFT JOIN agent_states s ON s.agent_id = m.from_agent "
+            "WHERE m.room_id = %s::uuid AND m.created_at > %s::timestamptz "
+            "ORDER BY m.created_at DESC LIMIT %s;"
+        )
+        params = [room_id, since, limit_i]
+    else:
+        sql = (
+            "SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, "
+            "       m.created_at::text, s.agent_label "
+            "FROM room_messages m "
+            "LEFT JOIN agent_states s ON s.agent_id = m.from_agent "
+            "WHERE m.room_id = %s::uuid "
+            "ORDER BY m.created_at DESC LIMIT %s;"
+        )
+        params = [room_id, limit_i]
+    rows, _ = pg(sql, params)
     # display_name: красивое имя (agent_label) если задано, иначе сырой agent_id.
     # Чинит рассогласование «профиль показывает Растр, комната — dsdsd».
     return [
@@ -1891,7 +1933,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = body.encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        cors = _cors_origin_for(self.headers.get("Origin", ""))
+        if cors is not None:
+            self.send_header("Access-Control-Allow-Origin", cors)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Room-Key, X-Agent-Id")
         self.end_headers()
         self.wfile.write(body)
@@ -1913,7 +1958,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        cors = _cors_origin_for(self.headers.get("Origin", ""))
+        if cors is not None:
+            self.send_header("Access-Control-Allow-Origin", cors)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Room-Key, X-Agent-Id")
         self.end_headers()
@@ -2009,7 +2057,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                  "status": room.get("status", "active"),
                                  "conductor_agent_id": room.get("conductor_agent_id"),
                                  "room_mode": room.get("room_mode", "plain")})
-            elif path == "/rooms" and self.headers.get("X-Admin-Key") == os.environ.get("ROOMS_ADMIN_KEY", "admin-default"):
+            elif path == "/rooms":
+                # Admin-only enumerate (requires X-Admin-Key matching env ROOMS_ADMIN_KEY).
+                # Fail closed if the env var is unset/empty — refusing to fall back to a
+                # hardcoded default avoids leaking the full room list on a stock deploy.
+                expected = os.environ.get("ROOMS_ADMIN_KEY", "").strip()
+                provided = self.headers.get("X-Admin-Key", "")
+                if not expected:
+                    self._send(503, {"error": "rooms admin disabled (ROOMS_ADMIN_KEY not configured)"})
+                    return
+                if not provided or not hmac.compare_digest(provided, expected):
+                    self._send(403, {"error": "invalid or missing X-Admin-Key"})
+                    return
                 self._send(200, {"rooms": list_rooms_admin()})
             elif path.startswith("/rooms/") and path.endswith("/wait"):
                 # Server-side long-poll: block (via PG LISTEN) until a new message
