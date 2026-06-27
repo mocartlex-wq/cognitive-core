@@ -51,7 +51,7 @@ MAX_UPLOAD_SIZE_MB = 200  # nginx body_size должен быть >= этого
 MAX_AUDIO_SIZE_MB = 50    # аудио — обычно небольшие файлы
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus"}
+ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus", ".webm"}
 
 
 # ─────────────────────────────────────────────────────────────────────────
