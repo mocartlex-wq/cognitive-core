@@ -719,7 +719,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         path = url.path
-        params = urllib.parse.parse_qs(url.query)
+        # encoding="utf-8" — иначе non-ASCII agent_id из ?agent_id=... возвращается
+        # дважды-кодированным (см. фикс 083d312 в scripts/cognitive-rooms.py).
+        params = urllib.parse.parse_qs(url.query, encoding="utf-8", errors="replace")
         try:
             # Mobile UI routes
             if path == "/ui" or path == "/ui/":
