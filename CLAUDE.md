@@ -118,3 +118,74 @@ asyncpg 0.30 требует JSON-строки для JSONB колонок.
 
 Все проверки в `test_api.py` используют домены `test_api`, `test_bulk` — не удаляй эти данные.
 Daily/Weekly/Monthly тесты вызывают реальный LLM (DeepSeek) — нужно 60 сек таймаут.
+
+> Заметка по числу тестов: CLAUDE.md ранее упоминал «56 тестов» — на 2026-06-14
+> фактически 388 функций в 33 файлах (`pytest --collect-only`). Цифру в команде
+> сборки оставил как было — это не контракт, просто ориентир.
+
+## Deploy runbook для серверного агента (`mcp.me-ai.ru`)
+
+Ветка `claude/festive-newton-WhrlH` содержит аудит-фиксы за 2026-06-14
+(4 раунда: `8449f64` → `a66c4d5` → `dae2a0e` → `ca0e5aa` + последний).
+
+### Безопасный деплой кода (без миграций, без env)
+
+```bash
+cd /opt/cognitive-core
+git fetch origin claude/festive-newton-WhrlH
+git merge --ff-only origin/claude/festive-newton-WhrlH   # или merge в main и pull
+systemctl restart cognitive-api                          # ~5 сек downtime
+# rooms (если в отдельном systemd-юните):
+systemctl restart cognitive-rooms || true
+
+# Проверка после рестарта:
+curl -s https://mcp.me-ai.ru/health | jq '{healthy, embedding, llm_circuit_breakers}'
+```
+
+Все фиксы обратно-совместимы:
+- `CORS_ORIGINS_CSV` пуст → `*` (как было).
+- `ROOMS_ADMIN_KEY` пуст → теперь `503` вместо тихой утечки (это **намеренно**).
+- `COGCORE_KEY_LOOKUP_SECRET` пуст → plaintext-lookup как раньше.
+
+### Опциональный шаг: включить HMAC-lookup для API-ключей
+
+Закрывает риск plaintext-ключей в `agent_keys` при дампе/SQLi.
+
+```bash
+# 1) сгенерировать секрет (≥ 32 байт случайных)
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+# → положить значение в /opt/cognitive-core/.env как
+#   COGCORE_KEY_LOOKUP_SECRET=<тот-самый-секрет>
+#   (Не ротировать без полной переуэйчи ключей.)
+
+# 2) применить alembic-миграцию 0018 (добавляет колонку + индекс)
+docker exec cognitive_api alembic upgrade head
+
+# 3) backfill активных ключей (idempotent, можно повторять)
+docker exec -e DATABASE_URL=$DATABASE_URL cognitive_api \
+    python scripts/backfill_agent_key_hmac.py --dry-run     # сначала dry
+docker exec -e DATABASE_URL=$DATABASE_URL cognitive_api \
+    python scripts/backfill_agent_key_hmac.py               # потом боевой
+
+# 4) рестарт чтобы verify_api_key подхватил env-переменную
+systemctl restart cognitive-api
+
+# Проверка: успешный логин через старый и новый путь (curl с любым валидным
+# X-API-Key) — оба должны вернуть 200. После backfill оба пути активны
+# (dual-lookup), DROP старой колонки — отдельная будущая миграция.
+```
+
+### Откатить (если что-то сломалось)
+
+```bash
+cd /opt/cognitive-core
+git checkout main      # или previous-good-tag
+systemctl restart cognitive-api
+docker exec cognitive_api alembic downgrade -1   # только если 0018 уже применена
+```
+
+### Что НЕ сделано в этой ветке (требует отдельной работы)
+
+- **DROP колонки `api_key`** (после полного успешного backfill и confidence-периода) — отдельная миграция, не в этой ветке.
+- **rooms async refactor** — оказался не нужен: `scripts/cognitive-rooms.py:3010` уже использует `ThreadingHTTPServer` с `_PG_CONN_LOCK`. Bottleneck в аудите был переоценкой.
+- **rooms tests с фикстурами** — отдельный эпик.
