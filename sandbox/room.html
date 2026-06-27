@@ -111,7 +111,15 @@
     border-radius: 9px; border: 1px solid var(--glass-border);
     background: var(--glass-bg-light); color: var(--glass-text);
     box-sizing: border-box; line-height: 1.4;
+    /* Smooth auto-grow: высота меняется плавно при добавлении/удалении строки,
+       а не скачком. cubic-bezier подобран чтобы рост ощущался мгновенным в
+       начале и мягко доезжал к финалу (~120 мс — короче чем «заметная» анимация,
+       но достаточно чтобы устранить «ступеньку»). */
+    transition: height 0.12s cubic-bezier(0.4, 0, 0.2, 1);
   }
+  /* На случай очень быстрого набора (>10 знаков/сек) или вставки большого
+     блока — не показывать промежуточный «прыжок» через 'auto'. */
+  .composer textarea.no-transition { transition: none !important; }
   .composer textarea:focus {
     outline: none; border-color: var(--glass-orb-1);
     box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
@@ -456,12 +464,44 @@
       e.preventDefault();
       sendMessage();
     });
-    // Auto-grow: поле растёт под текст пользователя (до max-height из CSS),
-    // не нужно вручную дёргать угол. Срабатывает и на input, и на paste.
+    // Auto-grow: плавный рост под текст пользователя (до max-height из CSS).
+    // Раньше прямолинейная установка height='auto' → scrollHeight рисовала
+    // в один кадр короткую «ступеньку» — текстарея на миг схлопывалась к
+    // min-height, потом подскакивала. Теперь:
+    //   1. Через requestAnimationFrame — батчим несколько input'ов подряд
+    //      (быстрый набор / paste — один replate), а не дёргаем layout
+    //      на каждый keystroke.
+    //   2. Сначала измеряем целевую высоту во временно-отключённом transition
+    //      (no-transition class), потом снимаем класс и ставим высоту —
+    //      браузер плавно интерполирует CSS transition'ом от старого к новому.
+    //   3. No-op если разница < 2 px (защита от лишних reflow'ов на курсорном
+    //      движении / single-char input в той же строке).
+    let agScheduled = false;
     const autogrow = () => {
-      ta.style.height = 'auto';
-      const cap = parseInt(getComputedStyle(ta).maxHeight, 10) || 240;
-      ta.style.height = Math.min(ta.scrollHeight, cap) + 'px';
+      if (agScheduled) return;
+      agScheduled = true;
+      requestAnimationFrame(() => {
+        agScheduled = false;
+        const cap = parseInt(getComputedStyle(ta).maxHeight, 10) || 240;
+        const prev = ta.offsetHeight;
+        // Замеряем нужную высоту — пытаемся избежать видимого схлопывания:
+        // временно отключаем transition, ставим 'auto', замеряем scrollHeight,
+        // потом возвращаем transition и ставим финальное значение в одной
+        // микротаске. Браузер интерполирует от prev к target.
+        ta.classList.add('no-transition');
+        ta.style.height = 'auto';
+        const target = Math.min(ta.scrollHeight, cap);
+        ta.style.height = prev + 'px';  // не оставляем 'auto' в стиле
+        // Принудительный reflow — иначе следующий ассайн будет «коагулирован»
+        // с предыдущим и transition не сработает.
+        void ta.offsetHeight;
+        ta.classList.remove('no-transition');
+        if (Math.abs(target - prev) < 2) return;  // ничего не двигаем
+        ta.style.height = target + 'px';
+        // Если в текстарее уже прокрутка (выше max-height) — держим курсор в
+        // видимой области, как в нормальном чате.
+        if (target >= cap) ta.scrollTop = ta.scrollHeight;
+      });
     };
     ta.addEventListener('input', autogrow);
     ta.addEventListener('focus', () => {
