@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 # случиться, если домен и так был «тихий»). Теперь: имя домена кладётся
 # в Redis SET, на следующем цикле он явно включается в обход (даже если
 # в основной выборке его нет), при успехе — выгребается из set'а.
+RETRY_KEY_DAILY = "worker:retry:daily"
 RETRY_KEY_WEEKLY = "worker:retry:weekly"
 RETRY_KEY_MONTHLY = "worker:retry:monthly"
 RETRY_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней — больше реальной паузы циклов
@@ -53,9 +54,37 @@ async def _retry_queue_remove(key: str, domain: str) -> None:
 
 
 async def run_daily_cycle():
-    """Ежедневная консолидация L1→L2."""
+    """Ежедневная консолидация L1→L2.
+
+    Сначала прогоняем retry-queue (домены с прошлого сбоя), потом основной
+    daily_consolidate без domain-фильтра. Per-domain failures из обоих
+    кладутся обратно в retry-queue, успешные — выгребаются."""
+    # Сначала ретраим то, что висело с прошлого раза.
+    retry_pending = await _retry_queue_pending(RETRY_KEY_DAILY)
+    if retry_pending:
+        log.info("daily retry-queue domains=%s", sorted(retry_pending))
+        for retry_dom in sorted(retry_pending):
+            try:
+                r = await daily_consolidate(domain=retry_dom)
+                # Если домен ушёл в результаты как «error» — оставляем в очереди.
+                domain_results = r.get("results") or []
+                failed = any(
+                    d.get("status") == "error" and d.get("domain") == retry_dom
+                    for d in domain_results
+                )
+                if not failed:
+                    await _retry_queue_remove(RETRY_KEY_DAILY, retry_dom)
+            except Exception as e:
+                log.warning("daily retry failed domain=%s err=%s", retry_dom, e)
+
     try:
         result = await daily_consolidate()
+        # Любой домен, упавший в основном проходе → ставим в retry-queue.
+        for d in (result.get("results") or []):
+            if d.get("status") == "error":
+                dom = d.get("domain")
+                if dom:
+                    await _retry_queue_add(RETRY_KEY_DAILY, dom)
         await log_audit(
             agent_id="system",
             action="daily_consolidate",
