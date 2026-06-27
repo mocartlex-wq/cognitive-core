@@ -111,10 +111,75 @@
     border-radius: 9px; border: 1px solid var(--glass-border);
     background: var(--glass-bg-light); color: var(--glass-text);
     box-sizing: border-box; line-height: 1.4;
+    /* Smooth auto-grow: высота меняется плавно при добавлении/удалении строки,
+       а не скачком. cubic-bezier подобран чтобы рост ощущался мгновенным в
+       начале и мягко доезжал к финалу (~120 мс — короче чем «заметная» анимация,
+       но достаточно чтобы устранить «ступеньку»). */
+    transition: height 0.12s cubic-bezier(0.4, 0, 0.2, 1);
   }
+  /* На случай очень быстрого набора (>10 знаков/сек) или вставки большого
+     блока — не показывать промежуточный «прыжок» через 'auto'. */
+  .composer textarea.no-transition { transition: none !important; }
   .composer textarea:focus {
     outline: none; border-color: var(--glass-orb-1);
     box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
+  }
+
+  /* Тонкая подсказка под композером — про поведение Enter под устройство. */
+  .composer-hint {
+    font-size: 11.5px; color: var(--glass-text-dim); margin-top: 6px;
+    line-height: 1.35; opacity: 0.7;
+  }
+
+  /* Ряд action-кнопок (mic / file) между textarea и «Отправить» */
+  .composer-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .composer-actions .act {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; padding: 8px 12px; min-height: 38px;
+    border-radius: 9px; cursor: pointer; font-size: 13px;
+    background: var(--glass-bg-light); color: var(--glass-text);
+    border: 1px solid var(--glass-border); font-family: var(--font);
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .composer-actions .act:hover { background: rgba(255,255,255,0.06); }
+  .composer-actions .act:active { filter: brightness(0.9); }
+  .composer-actions .act.recording {
+    background: rgba(255,69,58,0.16); color: #ff6b65;
+    border-color: rgba(255,69,58,0.4);
+    animation: rec-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes rec-pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+  .composer-actions .act .ico { font-size: 16px; line-height: 1; }
+  .composer-actions .rec-timer { font-variant-numeric: tabular-nums; font-size: 12px; opacity: 0.7; }
+
+  @media (max-width: 600px), (pointer: coarse) {
+    .composer-actions .act { padding: 10px 14px; min-height: 44px; font-size: 14px; }
+  }
+
+  /* Мобильная вёрстка композера: складываем кнопку под поле, увеличиваем
+     поле, поднимаем шрифт до 16 px (иначе iOS Safari/Yandex auto-zoom'ит
+     страницу при фокусе на textarea и сбивает прокрутку). Двухстрочный
+     placeholder теперь помещается, кнопка «Отправить» во всю ширину
+     — её не загораживает плавающий FAB-помощник в правом нижнем углу. */
+  @media (max-width: 600px), (pointer: coarse) {
+    .composer { flex-direction: column !important; align-items: stretch !important; gap: 10px; }
+    .composer textarea {
+      min-height: 96px !important; max-height: 240px; font-size: 16px !important;
+      padding: 12px 14px; line-height: 1.45; width: 100%;
+    }
+    .composer .btn {
+      width: 100% !important; padding: 14px 16px !important;
+      font-size: 16px !important; min-height: 50px;
+      /* z-index выше FAB-помощника (2147483000) — чтобы даже если на чьём-то
+         браузере не сработало авто-скрытие FAB при фокусе, кнопка «Отправить»
+         всё равно лежала ПОВЕРХ пузыря и кликалась. */
+      position: relative; z-index: 2147483100;
+    }
+    /* Раньше тут было padding-bottom: env(safe-area-inset-bottom) — это
+       создавало большой зазор между «Отправить» и подсказкой про Enter
+       (юзер прислал скрин с обведённой «пустотой»). iOS-инсет уже учитывает
+       html-уровень body, отдельно отжимать композер не нужно. */
+    .composer-hint { font-size: 12px; opacity: 0.65; margin-top: 4px; }
   }
 
   /* === Кому писать: чипы-получатели над полем ввода === */
@@ -386,8 +451,21 @@
         ${recipientBarHtml(detail.participants)}
         <div class="composer">
           <textarea id="composerText" placeholder="Напишите агенту… (нажмите @имя выше, чтобы адресовать)" maxlength="4000" rows="1"></textarea>
+          <div class="composer-actions">
+            <button type="button" class="act" id="micBtn" title="Записать голосовое сообщение">
+              <span class="ico" aria-hidden="true">🎤</span><span class="lbl">Голос</span>
+              <span class="rec-timer" id="micTimer" style="display:none">0:00</span>
+            </button>
+            <button type="button" class="act" id="fileBtn" title="Прикрепить файл">
+              <span class="ico" aria-hidden="true">📎</span><span class="lbl">Файл</span>
+            </button>
+            <input type="file" id="filePicker" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip,.csv,.xlsx" style="display:none" />
+          </div>
           <button class="btn" id="sendBtn" type="button">Отправить</button>
         </div>
+        <div class="composer-hint" id="composerHint"></div>
+        <!-- composer-build: f305315+ — если этого комментария нет в DOM, у тебя кеш / непрожаренный деплой -->
+
       </div>`;
 
     document.getElementById('copyKeyBtn').addEventListener('click', copyKey);
@@ -397,11 +475,230 @@
     document.querySelectorAll('.rcp-chip').forEach(ch => {
       ch.addEventListener('click', () => insertMention(ch.getAttribute('data-token')));
     });
+    // Файлы: тап → системный picker → читаем blob → base64 → POST /api/media/upload_b64
+    const filePicker = document.getElementById('filePicker');
+    const fileBtn = document.getElementById('fileBtn');
+    if (fileBtn && filePicker) {
+      fileBtn.addEventListener('click', () => filePicker.click());
+      filePicker.addEventListener('change', async (e) => {
+        const f = (e.target.files || [])[0];
+        if (!f) return;
+        await uploadAndInsert(f, '📎');
+        filePicker.value = '';  // позволяем повторно выбрать тот же файл
+      });
+    }
+    // Голос: MediaRecorder, тап-старт → тап-стоп, на остановке грузим WebM/Opus.
+    const micBtn = document.getElementById('micBtn');
+    const micTimer = document.getElementById('micTimer');
+    let mediaRecorder = null, micChunks = [], micStream = null, micStartTs = 0, micTickId = null;
+    if (micBtn) {
+      micBtn.addEventListener('click', async () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();  // onstop почистит и зальёт
+          return;
+        }
+        if (!navigator.mediaDevices || !window.MediaRecorder) {
+          alert('Запись голоса не поддерживается в этом браузере.');
+          return;
+        }
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+          alert('Доступ к микрофону отклонён: ' + (err && err.message || err));
+          return;
+        }
+        // WebM/Opus — единственное что MediaRecorder надёжно отдаёт в Chromium/Yandex.
+        // На сервере webm уже в whitelist (см. ALLOWED_AUDIO_EXT).
+        try {
+          mediaRecorder = new MediaRecorder(micStream, { mimeType: 'audio/webm;codecs=opus' });
+        } catch (err) {
+          mediaRecorder = new MediaRecorder(micStream);  // браузер выберет умолчательный кодек
+        }
+        micChunks = [];
+        mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) micChunks.push(ev.data); };
+        mediaRecorder.onstop = async () => {
+          micBtn.classList.remove('recording');
+          micTimer.style.display = 'none';
+          if (micTickId) { clearInterval(micTickId); micTickId = null; }
+          if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+          if (!micChunks.length) return;
+          const blob = new Blob(micChunks, { type: 'audio/webm' });
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const filename = `voice_${stamp}.webm`;
+          // Превращаем Blob в File с правильным именем — uploadAndInsert берёт name из объекта.
+          const audioFile = new File([blob], filename, { type: 'audio/webm' });
+          await uploadAndInsert(audioFile, '🎤');
+          mediaRecorder = null; micChunks = [];
+        };
+        mediaRecorder.start();
+        micBtn.classList.add('recording');
+        micStartTs = Date.now();
+        micTimer.style.display = 'inline';
+        micTimer.textContent = '0:00';
+        micTickId = setInterval(() => {
+          const sec = Math.floor((Date.now() - micStartTs) / 1000);
+          micTimer.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+          if (sec >= 300) mediaRecorder.stop();  // авто-стоп на 5 мин
+        }, 250);
+      });
+    }
+    // Общий helper: file (или Blob/File) → base64 → POST /api/media/upload_b64 →
+    // на успех вставляем маркер «<emoji> <filename> (media:<id>)» в текстарею.
+    // Маркер видит room — другие участники видят имя файла и могут его открыть.
+    async function uploadAndInsert(file, emoji) {
+      const taL = document.getElementById('composerText');
+      const sendL = document.getElementById('sendBtn');
+      const origSend = sendL ? sendL.textContent : '';
+      if (sendL) { sendL.disabled = true; sendL.textContent = 'Загрузка…'; }
+      try {
+        const b64 = await fileToBase64(file);
+        const r = await fetch('/api/media/upload_b64', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_b64: b64, filename: file.name, kind: 'auto' }),
+        });
+        if (!r.ok) {
+          let detail = r.status;
+          try { detail = (await r.json()).detail || detail; } catch (e) {}
+          alert('Не удалось загрузить файл: ' + detail);
+          return;
+        }
+        const data = await r.json();
+        const mid = data.media_id || '?';
+        const marker = `${emoji} ${file.name} (media:${mid})`;
+        // Вставляем в позицию курсора, добавляем перевод строки если в поле уже текст.
+        if (taL) {
+          const prefix = taL.value && !taL.value.endsWith('\n') ? '\n' : '';
+          taL.value = (taL.value || '') + prefix + marker + '\n';
+          taL.dispatchEvent(new Event('input', { bubbles: true }));
+          taL.focus();
+        }
+      } catch (err) {
+        alert('Ошибка загрузки: ' + (err && err.message || err));
+      } finally {
+        if (sendL) { sendL.disabled = false; sendL.textContent = origSend || 'Отправить'; }
+      }
+    }
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => resolve(String(rd.result).split(',')[1]);  // strip data:...;base64,
+        rd.onerror = () => reject(rd.error);
+        rd.readAsDataURL(file);
+      });
+    }
     const ta = document.getElementById('composerText');
+    // Поведение Enter различается под устройство:
+    //   • Десктоп (есть аппаратная клавиатура): Enter отправляет, Shift+Enter
+    //     — перенос. Это привычка чатов на десктопе (Slack, Discord, Telegram-Web).
+    //   • Мобильный (только touch-клавиатура без Shift): Enter — перенос строки
+    //     (стандарт мобильных мессенджеров). Отправка только кнопкой
+    //     «Отправить» или Ctrl/Cmd+Enter (на случай аппаратной клавы у планшета).
+    // Без этой развилки на iPhone/Android невозможно ввести многострочное
+    // сообщение — там нет Shift-варианта Enter'а.
+    const isTouchOnly = () => {
+      // touch-устройство И отсутствует наведение мыши (точный признак mobile)
+      const noHover = window.matchMedia && window.matchMedia('(hover: none)').matches;
+      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      return noHover || coarse || (window.innerWidth < 600);
+    };
     ta.addEventListener('keydown', (e) => {
-      // Enter — отправка; Shift+Enter — перенос строки. (Ctrl/Cmd+Enter тоже отправляет.)
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+      if (e.key !== 'Enter' || e.isComposing) return;
+      // Ctrl/Cmd+Enter — всегда отправляет (универсальный shortcut на любой клаве).
+      if (e.metaKey || e.ctrlKey) { e.preventDefault(); sendMessage(); return; }
+      // Mobile / touch-only: Enter = перенос строки (default browser behavior)
+      if (isTouchOnly()) return;
+      // Desktop: Shift+Enter = перенос, plain Enter = отправка
+      if (e.shiftKey) return;
+      e.preventDefault();
+      sendMessage();
     });
+    // Auto-grow: плавный рост под текст пользователя (до max-height из CSS).
+    // Раньше прямолинейная установка height='auto' → scrollHeight рисовала
+    // в один кадр короткую «ступеньку» — текстарея на миг схлопывалась к
+    // min-height, потом подскакивала. Теперь:
+    //   1. Через requestAnimationFrame — батчим несколько input'ов подряд
+    //      (быстрый набор / paste — один replate), а не дёргаем layout
+    //      на каждый keystroke.
+    //   2. Сначала измеряем целевую высоту во временно-отключённом transition
+    //      (no-transition class), потом снимаем класс и ставим высоту —
+    //      браузер плавно интерполирует CSS transition'ом от старого к новому.
+    //   3. No-op если разница < 2 px (защита от лишних reflow'ов на курсорном
+    //      движении / single-char input в той же строке).
+    let agScheduled = false;
+    const autogrow = () => {
+      if (agScheduled) return;
+      agScheduled = true;
+      requestAnimationFrame(() => {
+        agScheduled = false;
+        const cap = parseInt(getComputedStyle(ta).maxHeight, 10) || 240;
+        const prev = ta.offsetHeight;
+        // Замеряем нужную высоту — пытаемся избежать видимого схлопывания:
+        // временно отключаем transition, ставим 'auto', замеряем scrollHeight,
+        // потом возвращаем transition и ставим финальное значение в одной
+        // микротаске. Браузер интерполирует от prev к target.
+        ta.classList.add('no-transition');
+        ta.style.height = 'auto';
+        const target = Math.min(ta.scrollHeight, cap);
+        ta.style.height = prev + 'px';  // не оставляем 'auto' в стиле
+        // Принудительный reflow — иначе следующий ассайн будет «коагулирован»
+        // с предыдущим и transition не сработает.
+        void ta.offsetHeight;
+        ta.classList.remove('no-transition');
+        if (Math.abs(target - prev) < 2) return;  // ничего не двигаем
+        ta.style.height = target + 'px';
+        // Если в текстарее уже прокрутка (выше max-height) — держим курсор в
+        // видимой области, как в нормальном чате.
+        if (target >= cap) ta.scrollTop = ta.scrollHeight;
+      });
+    };
+    ta.addEventListener('input', autogrow);
+    ta.addEventListener('focus', () => {
+      // На мобильном при появлении клавиатуры поле уходит за неё; подскроллим
+      // его в видимую область через 300мс (типичное время появления keyboard).
+      // ВАЖНО: scrollIntoView на сам textarea с block:'center' оставляло снизу
+      // большой пустой провал между композером и клавиатурой (юзер прислал
+      // скрин: «Пустота»). Якорим на ПОСЛЕДНИЙ элемент композер-блока (hint
+      // → btn → textarea) с block:'end' — он прилипает прямо к верхнему краю
+      // клавиатуры, никакого мёртвого пространства снизу не остаётся.
+      if (window.innerWidth < 600) {
+        setTimeout(() => {
+          try {
+            const anchor = document.getElementById('composerHint')
+                        || document.getElementById('sendBtn')
+                        || ta;
+            anchor.scrollIntoView({ block: 'end', behavior: 'smooth' });
+          } catch (e) {}
+        }, 300);
+      }
+    });
+    // Дополнительно: на каждый autogrow пересчитываем положение, иначе текстарея
+    // растёт вверх и снова появляется зазор снизу. Только если фокус ещё на нас
+    // и мы на мобильном — десктопу это не нужно.
+    let anchorScheduled = false;
+    const reanchor = () => {
+      if (anchorScheduled || document.activeElement !== ta || window.innerWidth >= 600) return;
+      anchorScheduled = true;
+      requestAnimationFrame(() => {
+        anchorScheduled = false;
+        try {
+          const anchor = document.getElementById('composerHint')
+                      || document.getElementById('sendBtn')
+                      || ta;
+          anchor.scrollIntoView({ block: 'end', behavior: 'auto' });  // без анимации на каждый input
+        } catch (e) {}
+      });
+    };
+    ta.addEventListener('input', reanchor);
+    // Контекстная подсказка под полем: на десктопе говорим про Shift+Enter,
+    // на мобильном — что Enter переносит строку.
+    const hint = document.getElementById('composerHint');
+    if (hint) {
+      hint.textContent = isTouchOnly()
+        ? 'Enter — новая строка. Кнопка «Отправить» — отправить.'
+        : 'Enter — отправить · Shift+Enter — новая строка';
+    }
     scrollThreadToBottom();
     lastMsgKey = msgKey(detail.messages);
   }
