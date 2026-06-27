@@ -507,12 +507,40 @@
     ta.addEventListener('focus', () => {
       // На мобильном при появлении клавиатуры поле уходит за неё; подскроллим
       // его в видимую область через 300мс (типичное время появления keyboard).
+      // ВАЖНО: scrollIntoView на сам textarea с block:'center' оставляло снизу
+      // большой пустой провал между композером и клавиатурой (юзер прислал
+      // скрин: «Пустота»). Якорим на ПОСЛЕДНИЙ элемент композер-блока (hint
+      // → btn → textarea) с block:'end' — он прилипает прямо к верхнему краю
+      // клавиатуры, никакого мёртвого пространства снизу не остаётся.
       if (window.innerWidth < 600) {
         setTimeout(() => {
-          try { ta.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+          try {
+            const anchor = document.getElementById('composerHint')
+                        || document.getElementById('sendBtn')
+                        || ta;
+            anchor.scrollIntoView({ block: 'end', behavior: 'smooth' });
+          } catch (e) {}
         }, 300);
       }
     });
+    // Дополнительно: на каждый autogrow пересчитываем положение, иначе текстарея
+    // растёт вверх и снова появляется зазор снизу. Только если фокус ещё на нас
+    // и мы на мобильном — десктопу это не нужно.
+    let anchorScheduled = false;
+    const reanchor = () => {
+      if (anchorScheduled || document.activeElement !== ta || window.innerWidth >= 600) return;
+      anchorScheduled = true;
+      requestAnimationFrame(() => {
+        anchorScheduled = false;
+        try {
+          const anchor = document.getElementById('composerHint')
+                      || document.getElementById('sendBtn')
+                      || ta;
+          anchor.scrollIntoView({ block: 'end', behavior: 'auto' });  // без анимации на каждый input
+        } catch (e) {}
+      });
+    };
+    ta.addEventListener('input', reanchor);
     // Контекстная подсказка под полем: на десктопе говорим про Shift+Enter,
     // на мобильном — что Enter переносит строку.
     const hint = document.getElementById('composerHint');
