@@ -137,6 +137,10 @@
     .composer .btn {
       width: 100% !important; padding: 14px 16px !important;
       font-size: 16px !important; min-height: 50px;
+      /* z-index выше FAB-помощника (2147483000) — чтобы даже если на чьём-то
+         браузере не сработало авто-скрытие FAB при фокусе, кнопка «Отправить»
+         всё равно лежала ПОВЕРХ пузыря и кликалась. */
+      position: relative; z-index: 2147483100;
     }
     /* iOS safe-area inset снизу — чтобы кнопку «Отправить» не накрыл нижний жест-бар. */
     .composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -386,6 +390,8 @@
           <button class="btn" id="sendBtn" type="button">Отправить</button>
         </div>
         <div class="composer-hint" id="composerHint"></div>
+        <!-- composer-build: f305315+ — если этого комментария нет в DOM, у тебя кеш / непрожаренный деплой -->
+
       </div>`;
 
     document.getElementById('copyKeyBtn').addEventListener('click', copyKey);
