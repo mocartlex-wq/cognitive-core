@@ -38,11 +38,36 @@
   // ─── styles ──────────────────────────────────────────────────────────────
   var CSS =
   "#cogasst-fab{position:fixed;right:24px;bottom:24px;width:58px;height:58px;border:0;border-radius:50%;" +
-    "background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;cursor:pointer;z-index:2147483000;" +
+    "background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;cursor:grab;z-index:2147483000;" +
     "box-shadow:0 10px 28px rgba(99,102,241,.45);display:flex;align-items:center;justify-content:center;" +
-    "transition:transform .15s ease,box-shadow .15s ease;padding:0;}" +
+    "transition:transform .15s ease,box-shadow .15s ease;padding:0;" +
+    // touch-action:none — pointermove не съедается скроллом на мобильном.
+    // user-select:none — двойной тап не выделяет иконку.
+    // -webkit-touch-callout:none — на iOS Safari и в Яндекс.Браузере long-press
+    //   больше не открывает контекстное «Сохранить/Найти в Яндексе» меню.
+    // -webkit-tap-highlight-color:transparent — убирает серый bash на тап.
+    // -webkit-user-drag:none — кнопка не «уезжает» как drag-image при удержании.
+    "touch-action:none;user-select:none;-webkit-user-select:none;" +
+    "-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;" +
+    "-webkit-user-drag:none;}" +
+  "#cogasst-fab.cogasst-dragging{cursor:grabbing;transition:none;}" +
+  // Авто-скрытие FAB пока юзер печатает в инпут/textarea на узком экране —
+  // иначе плавающий пузырь налезает на кнопку «Отправить» и портит вёрстку
+  // композера в комнате. Прозрачность + pointer-events:none гарантируют, что
+  // и клик прошёл сквозь, и визуально кнопка чиста.
+  "#cogasst-fab.cogasst-hidden-by-input{opacity:0;pointer-events:none;transform:scale(.9);}" +
   "#cogasst-fab:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 14px 34px rgba(99,102,241,.55);}" +
-  "#cogasst-fab svg{width:27px;height:27px;}" +
+  // SVG внутри кнопки — pointer-events:none, чтобы все события всегда
+  // адресовались FAB-у, не svg-у (иначе браузер думает что long-press на
+  // картинке и предлагает image-search). Касается особенно Яндекс.Браузера.
+  "#cogasst-fab svg{width:27px;height:27px;pointer-events:none;-webkit-user-drag:none;}" +
+  // Пока пользователь зажимает/тащит FAB — глушим выделение текста по всей
+  // странице. На некоторых браузерах (iOS Safari, Яндекс) даже с user-select
+  // на самой кнопке селект бил по соседнему тексту: жест приходит на body
+  // одновременно. Класс ставится на pointerdown, снимается на pointerup.
+  "body.cogasst-suppress-select,body.cogasst-suppress-select *" +
+    "{user-select:none!important;-webkit-user-select:none!important;" +
+    "-webkit-touch-callout:none!important;}" +
   "#cogasst-fab .cogasst-dot{position:absolute;top:12px;right:12px;width:9px;height:9px;border-radius:50%;" +
     "background:#34c759;box-shadow:0 0 0 3px rgba(52,199,89,.25);}" +
   "#cogasst-panel{position:fixed;right:24px;bottom:92px;width:384px;max-width:calc(100vw - 32px);" +
@@ -58,8 +83,9 @@
   ".cogasst-head .cogasst-ic svg{width:17px;height:17px;}" +
   ".cogasst-title{font-weight:700;font-size:15px;flex:1;line-height:1.15;}" +
   ".cogasst-title small{display:block;font-weight:500;font-size:11px;opacity:.6;}" +
-  ".cogasst-x{background:transparent;border:0;color:inherit;opacity:.55;cursor:pointer;font-size:22px;line-height:1;padding:4px 6px;border-radius:8px;}" +
-  ".cogasst-x:hover{opacity:1;background:rgba(255,255,255,.08);}" +
+  ".cogasst-x,.cogasst-reset{background:transparent;border:0;color:inherit;opacity:.55;cursor:pointer;font-size:22px;line-height:1;padding:4px 6px;border-radius:8px;}" +
+  ".cogasst-x:hover,.cogasst-reset:hover{opacity:1;background:rgba(255,255,255,.08);}" +
+  ".cogasst-reset{font-size:18px;}" +
   ".cogasst-tabs{display:flex;gap:6px;padding:8px 12px 0;}" +
   ".cogasst-tab{font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:9px 9px 0 0;border:0;cursor:pointer;" +
     "background:transparent;color:var(--glass-text,#e9edf5);opacity:.65;}" +
@@ -111,6 +137,7 @@
     '<div class="cogasst-head">' +
       '<div class="cogasst-ic">' + CHAT_SVG + "</div>" +
       '<div class="cogasst-title">Помощники AI<small>Cognitive Core</small></div>' +
+      '<button class="cogasst-reset" title="Сбросить положение в угол" aria-label="Сбросить положение">&#x21BA;</button>' +
       '<button class="cogasst-x" aria-label="Закрыть">&times;</button>' +
     "</div>" +
     '<div class="cogasst-tabs">' +
@@ -131,7 +158,226 @@
       '<button class="cogasst-send" id="cogasst-send" aria-label="Отправить">&#8594;</button>' +
     "</div>";
 
-  function mount() { document.body.appendChild(fab); document.body.appendChild(panel); wire(); }
+  // ─── drag-and-place FAB ────────────────────────────────────────────────────
+  // Раньше FAB был залочен в правом нижнем углу и закрывал кнопку «Отправить»
+  // в комнате на узких экранах. Теперь его можно перетащить пальцем/мышью в
+  // любое место, позиция сохраняется в localStorage. Скрывает click пока идёт
+  // drag (иначе после перетаскивания случайно открывается панель).
+  var FAB_SIZE = 58;        // должен соответствовать CSS width/height
+  var FAB_MARGIN = 8;       // минимальный отступ от края экрана
+  var DRAG_THRESHOLD = 5;   // px: меньше — считаем кликом, не drag'ом
+  var LONG_PRESS_MS = 600;  // ms удержания без движения → reset позиции
+  var POS_KEY = "cogasst_fab_pos";
+  var dragState = null;     // {startX, startY, offX, offY, moved}
+  var clickGuardUntil = 0;  // timestamp до которого подавляем click
+  var longPressTimer = null;
+
+  function loadSavedPos() {
+    try {
+      var raw = localStorage.getItem(POS_KEY);
+      if (!raw) return null;
+      var p = JSON.parse(raw);
+      if (typeof p.x !== "number" || typeof p.y !== "number") return null;
+      return p;
+    } catch (e) { return null; }
+  }
+
+  function clampToViewport(x, y) {
+    var W = window.innerWidth || document.documentElement.clientWidth;
+    var H = window.innerHeight || document.documentElement.clientHeight;
+    var maxX = Math.max(FAB_MARGIN, W - FAB_SIZE - FAB_MARGIN);
+    var maxY = Math.max(FAB_MARGIN, H - FAB_SIZE - FAB_MARGIN);
+    return {
+      x: Math.min(Math.max(x, FAB_MARGIN), maxX),
+      y: Math.min(Math.max(y, FAB_MARGIN), maxY),
+    };
+  }
+
+  function applyFabPos(x, y) {
+    var c = clampToViewport(x, y);
+    fab.style.left = c.x + "px";
+    fab.style.top = c.y + "px";
+    fab.style.right = "auto";
+    fab.style.bottom = "auto";
+  }
+
+  // Восстановить позицию из localStorage (если есть), иначе остаётся CSS-дефолт
+  function restoreFabPos() {
+    var p = loadSavedPos();
+    if (p) applyFabPos(p.x, p.y);
+  }
+
+  // Вернуть FAB в правый-нижний (CSS-default) угол + забыть сохранённую позицию.
+  // Вызывается либо кнопкой ↺ в шапке панели, либо длинным удержанием FAB'а.
+  function resetFabPos() {
+    fab.style.left = ""; fab.style.top = "";
+    fab.style.right = ""; fab.style.bottom = "";
+    panel.style.left = ""; panel.style.top = "";
+    panel.style.right = ""; panel.style.bottom = "";
+    try { localStorage.removeItem(POS_KEY); } catch (e) {}
+  }
+
+  function cancelLongPress() {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  }
+
+  // Привязка панели к текущему положению FAB: панель появляется С ТОЙ ЖЕ
+  // стороны, где FAB, чтобы не уезжать за край экрана. Срабатывает только
+  // когда FAB был перетащен (есть inline left/top); иначе CSS-дефолт.
+  function placePanelNearFab() {
+    if (!fab.style.left && !fab.style.top) return;  // используем CSS-default
+    var rect = fab.getBoundingClientRect();
+    var W = window.innerWidth || 0;
+    var H = window.innerHeight || 0;
+    var pw = Math.min(384, W - 32);
+    var ph = Math.min(620, Math.floor(H * 0.78));
+    // Горизонталь: панель уезжает в сторону центра экрана от FAB
+    var left = (rect.left + rect.width / 2 < W / 2)
+      ? rect.left
+      : Math.max(8, rect.right - pw);
+    // Вертикаль: панель растёт ВВЕРХ от FAB (как было раньше с bottom:92),
+    // если есть место сверху; иначе вниз.
+    var spaceAbove = rect.top;
+    var top = (spaceAbove >= ph + 12)
+      ? (rect.top - ph - 12)
+      : Math.min(rect.bottom + 12, H - ph - 8);
+    panel.style.left = Math.max(8, left) + "px";
+    panel.style.top = Math.max(8, top) + "px";
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+  }
+
+  function onPointerDown(e) {
+    // Не перехватываем правый клик / средний клик мыши
+    if (e.button !== undefined && e.button !== 0) return;
+    var rect = fab.getBoundingClientRect();
+    dragState = {
+      startX: e.clientX, startY: e.clientY,
+      offX: e.clientX - rect.left, offY: e.clientY - rect.top,
+      moved: false,
+    };
+    try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    // Глушим выделение текста на всей странице пока юзер держит палец/мышь
+    // на FAB-е. Снимается на pointerup/cancel. Иначе Яндекс.Браузер на iOS
+    // подсвечивал страницу как «select» и показывал «Найти в Яндексе».
+    document.body.classList.add("cogasst-suppress-select");
+    // Снимаем уже существующее выделение, если оно успело родиться.
+    try {
+      var sel = window.getSelection && window.getSelection();
+      if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    } catch (err) {}
+    // Long-press: если палец/мышь не двинулись за LONG_PRESS_MS, считаем
+    // что юзер хочет сбросить позицию. Таймер сбивается на любом движении
+    // (drag), на pointerup и на pointercancel.
+    cancelLongPress();
+    longPressTimer = setTimeout(function () {
+      longPressTimer = null;
+      if (!dragState || dragState.moved) return;
+      // Уже совершено намерение reset — глотаем последующий click.
+      clickGuardUntil = Date.now() + 700;
+      resetFabPos();
+      // Мягкая тактильная отдача на мобильном (если разрешено браузером).
+      try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) {}
+      // Анимационная подсказка: короткий «пульс» на FAB'е.
+      fab.style.transition = "transform .25s ease";
+      fab.style.transform = "scale(.85)";
+      setTimeout(function () {
+        fab.style.transform = "";
+        setTimeout(function () { fab.style.transition = ""; }, 250);
+      }, 120);
+    }, LONG_PRESS_MS);
+  }
+
+  function onPointerMove(e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+    if (!dragState.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    dragState.moved = true;
+    cancelLongPress();  // движение → это drag, не long-press
+    fab.classList.add("cogasst-dragging");
+    applyFabPos(e.clientX - dragState.offX, e.clientY - dragState.offY);
+    e.preventDefault();
+  }
+
+  function onPointerUp(e) {
+    cancelLongPress();
+    // В любом случае снимаем глушилку селекта (даже если dragState уже null —
+    // например, при pointercancel из браузера-овер-кладывающего собственный
+    // gesture-handler).
+    document.body.classList.remove("cogasst-suppress-select");
+    if (!dragState) return;
+    var moved = dragState.moved;
+    fab.classList.remove("cogasst-dragging");
+    try { fab.releasePointerCapture(e.pointerId); } catch (err) {}
+    dragState = null;
+    if (moved) {
+      // Сохраняем итоговую позицию (уже после clamp, читаем со стиля)
+      var x = parseInt(fab.style.left, 10) || 0;
+      var y = parseInt(fab.style.top, 10) || 0;
+      try { localStorage.setItem(POS_KEY, JSON.stringify({ x: x, y: y })); } catch (err) {}
+      // Подавляем click который синтезируется на pointerup — иначе сразу
+      // откроется панель в новом месте после каждого drag'а.
+      clickGuardUntil = Date.now() + 350;
+    }
+  }
+
+  function wireDrag() {
+    fab.addEventListener("pointerdown", onPointerDown);
+    fab.addEventListener("pointermove", onPointerMove);
+    fab.addEventListener("pointerup", onPointerUp);
+    fab.addEventListener("pointercancel", onPointerUp);
+    // Любой context-menu запрос на FAB (right-click на десктопе, long-press
+    // в мобильных браузерах — Safari iOS, Яндекс, Chrome Android) — глушим.
+    // Long-press у нас закреплён за reset, а не за «сохранить изображение».
+    fab.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    // Дополнительно глушим dragstart на случай, если браузер всё же
+    // попытается утащить SVG как drag-image.
+    fab.addEventListener("dragstart", function (e) { e.preventDefault(); });
+    // Окно меняется — пере-clamp'аем чтобы FAB не оказался за пределами вьюпорта
+    window.addEventListener("resize", function () {
+      if (!fab.style.left) return;
+      var x = parseInt(fab.style.left, 10) || 0;
+      var y = parseInt(fab.style.top, 10) || 0;
+      applyFabPos(x, y);
+    });
+    // Auto-hide while a text input/textarea is focused on a narrow viewport
+    // (mobile): the FAB sits in the bottom-right and overlapped the "Отправить"
+    // button in the room composer. We fade + disable pointer events instead of
+    // removing it entirely so the user doesn't lose the entry point — refocus
+    // outside the input restores it.
+    var NARROW_PX = 600;
+    function isTextInput(el) {
+      if (!el || !el.tagName) return false;
+      if (el.tagName === "TEXTAREA") return true;
+      if (el.tagName !== "INPUT") return false;
+      var t = (el.type || "text").toLowerCase();
+      return /^(text|search|url|email|tel|password|number)$/.test(t);
+    }
+    document.addEventListener("focusin", function (e) {
+      if (window.innerWidth < NARROW_PX && isTextInput(e.target) && !opened) {
+        fab.classList.add("cogasst-hidden-by-input");
+      }
+    });
+    document.addEventListener("focusout", function (e) {
+      // Через короткую задержку — чтобы перенос фокуса между двумя инпутами
+      // не моргал FAB'ом туда-сюда.
+      setTimeout(function () {
+        var a = document.activeElement;
+        if (!isTextInput(a) || window.innerWidth >= NARROW_PX) {
+          fab.classList.remove("cogasst-hidden-by-input");
+        }
+      }, 80);
+    });
+  }
+
+  function mount() {
+    document.body.appendChild(fab);
+    document.body.appendChild(panel);
+    restoreFabPos();
+    wireDrag();
+    wire();
+  }
   if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount);
 
   // ─── helpers ───────────────────────────────────────────────────────────────
@@ -177,7 +423,9 @@
   }
 
   async function openPanel() {
-    opened = true; panel.classList.add("cogasst-on"); fab.style.display = "none";
+    // Если только что закончили drag — игнорируем сопутствующий click.
+    if (Date.now() < clickGuardUntil) return;
+    opened = true; placePanelNearFab(); panel.classList.add("cogasst-on"); fab.style.display = "none";
     greet();
     // Тихо пробуем SSO для режима «Авто» — не блокируем, персоны работают и без входа.
     ensureAuth();
@@ -257,6 +505,12 @@
     sendEl = panel.querySelector("#cogasst-send");
     fab.addEventListener("click", openPanel);
     panel.querySelector(".cogasst-x").addEventListener("click", closePanel);
+    panel.querySelector(".cogasst-reset").addEventListener("click", function () {
+      // Сначала сбрасываем позицию, потом закрываем панель — иначе на доли
+      // секунды FAB всплывёт у старой точки.
+      resetFabPos();
+      closePanel();
+    });
     sendEl.addEventListener("click", send);
     var sel = panel.querySelector("#cogasst-persona");
     if (sel) sel.addEventListener("change", function () {

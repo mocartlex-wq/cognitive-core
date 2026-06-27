@@ -24,18 +24,49 @@ class CircuitState:
 
 
 class CircuitBreaker:
+    """Per-endpoint breaker с exponential backoff + jitter.
+
+    Раньше: фикс. timeout, все одновременные вызовы после остывания
+    били в HALF_OPEN синхронно (thundering herd) и одинаково падали.
+    Теперь: каждый последовательный OPEN удваивает окно (capped at
+    `max_timeout`) и добавляет ±25% jitter, чтобы конкурентные
+    re-entries расходились во времени."""
+
+    # Множитель backoff между последовательными OPEN'ами и потолок.
+    BACKOFF_FACTOR = 2.0
+    MAX_TIMEOUT_FACTOR = 16  # max_timeout = threshold * MAX_TIMEOUT_FACTOR
+
     def __init__(self, threshold: int, timeout: int):
         self.threshold = threshold
-        self.timeout = timeout
+        self.base_timeout = timeout
+        # Эффективный timeout (растёт с каждым OPEN, пока не успешный HALF_OPEN).
+        self.current_timeout = float(timeout)
         self.failures = 0
         self.state = CircuitState.CLOSED
         self.opened_at = 0.0
+        # Счётчик последовательных открытий — управляет backoff'ом.
+        self.consecutive_opens = 0
+
+    def _max_timeout(self) -> float:
+        return float(self.base_timeout) * self.MAX_TIMEOUT_FACTOR
+
+    def _apply_backoff(self) -> None:
+        """Раздуть timeout на текущий открывшийся цикл + добавить jitter.
+
+        Первый OPEN ведёт себя как старый код (timeout = base), каждый
+        последующий удваивает окно — чтобы при персистентном сбое мы не
+        упирались в один и тот же короткий интервал."""
+        exponent = max(0, self.consecutive_opens - 1)
+        raw = self.base_timeout * (self.BACKOFF_FACTOR ** exponent)
+        # Jitter ±25% — рассинхронизирует параллельные re-entries.
+        jitter = 1.0 + (random.random() - 0.5) * 0.5
+        self.current_timeout = min(raw * jitter, self._max_timeout())
 
     def allow(self) -> bool:
         if self.state == CircuitState.CLOSED:
             return True
         if self.state == CircuitState.OPEN:
-            if _time.monotonic() - self.opened_at > self.timeout:
+            if _time.monotonic() - self.opened_at > self.current_timeout:
                 self.state = CircuitState.HALF_OPEN
                 return True
             return False
@@ -44,14 +75,19 @@ class CircuitBreaker:
 
     def record_success(self) -> None:
         self.failures = 0
+        self.consecutive_opens = 0
+        self.current_timeout = float(self.base_timeout)
         self.state = CircuitState.CLOSED
 
     def record_failure(self) -> None:
         self.failures += 1
-        if self.state == CircuitState.HALF_OPEN:
-            self.state = CircuitState.OPEN
-            self.opened_at = _time.monotonic()
-        elif self.failures >= self.threshold:
+        opening = (
+            self.state == CircuitState.HALF_OPEN
+            or self.failures >= self.threshold
+        )
+        if opening:
+            self.consecutive_opens += 1
+            self._apply_backoff()
             self.state = CircuitState.OPEN
             self.opened_at = _time.monotonic()
 
@@ -74,6 +110,8 @@ def get_circuit_states() -> dict:
         key: {
             "state": b.state,
             "failures": b.failures,
+            "consecutive_opens": b.consecutive_opens,
+            "current_timeout_s": round(b.current_timeout, 1),
             "opened_seconds_ago": round(_time.monotonic() - b.opened_at, 1) if b.state != CircuitState.CLOSED else None,
         }
         for key, b in _breakers.items()

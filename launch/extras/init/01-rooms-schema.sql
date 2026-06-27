@@ -31,6 +31,17 @@ CREATE TABLE IF NOT EXISTS public.rooms (
 -- пустой БД, но эти ALTER безопасны и при ручном применении к живой схеме).
 ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS conductor_agent_id text;
 ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS room_mode text NOT NULL DEFAULT 'plain';
+-- Multi-tenant ownership (PR #102 + alembic 0003). В проде эти ALTER исполняет
+-- alembic 0003, но в CI rooms-schema.sql применяется ПОСЛЕ alembic (см.
+-- .github/workflows/ci.yml db-tests step), поэтому миграция 0003 видит ещё
+-- несуществующую `rooms` и no-op'ит. Дублируем колонки здесь — это и есть
+-- единственное место истины при cold-start через init-SQL.
+-- Без owner_user_id `tests/test_user_rooms_crud.py` бьёт «column does not exist»
+-- на POST /user/rooms (см. подробный docstring в шапке того файла).
+ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS owner_user_id UUID;
+ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE INDEX IF NOT EXISTS idx_rooms_owner ON public.rooms(owner_user_id)
+    WHERE owner_user_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.room_participants (
     room_id      uuid        NOT NULL REFERENCES public.rooms(id) ON DELETE CASCADE,

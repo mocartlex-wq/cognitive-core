@@ -1,6 +1,7 @@
 ﻿import hashlib
 import io
 import json
+import logging
 import uuid as _uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -12,6 +13,8 @@ from app.services.analyzer import analyze_daily_events, analyze_weekly
 from app.services.curator import monthly_audit, pre_daily_filter, pre_weekly_check
 from app.services.ingestor import get_unprocessed_events, mark_events_processed
 from app.services.operative import index_domain_vectors
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -64,50 +67,63 @@ async def _daily_consolidate_impl(since_hours: int | None = None, domain: str | 
     results = []
 
     for dom in domains:
-        dom_events = [e for e in events if e["domain"] == dom]
+        # Per-domain isolation: один сбойный домен (LLM timeout, баг в анализаторе,
+        # DB-конфликт) НЕ должен обрывать весь dailylet цикла. Раньше: первый
+        # raise в pre_daily_filter/analyze_daily_events/INSERT выкидывал ВСЕХ
+        # последующих доменов даже если они здоровые. Теперь: failure пишется
+        # в results и цикл идёт дальше. weekly/monthly уже работают так.
+        try:
+            dom_events = [e for e in events if e["domain"] == dom]
 
-        # Шаг 1: Куратор — фильтрация шума
-        curator_result = await pre_daily_filter(dom_events, dom)
-        if curator_result.get("skip"):
-            results.append({"domain": dom, "status": "skipped", "reason": curator_result.get("reason")})
-            continue
+            # Шаг 1: Куратор — фильтрация шума
+            curator_result = await pre_daily_filter(dom_events, dom)
+            if curator_result.get("skip"):
+                results.append({"domain": dom, "status": "skipped", "reason": curator_result.get("reason")})
+                continue
 
-        filtered_ids = set(curator_result.get("filtered_event_ids", []))
-        filtered_events = [e for e in dom_events if str(e["id"]) in filtered_ids]
+            filtered_ids = set(curator_result.get("filtered_event_ids", []))
+            filtered_events = [e for e in dom_events if str(e["id"]) in filtered_ids]
 
-        if not filtered_events:
-            # Используем все события если куратор ничего не оставил
-            filtered_events = dom_events
+            if not filtered_events:
+                # Используем все события если куратор ничего не оставил
+                filtered_events = dom_events
 
-        # Шаг 2: Анализ
-        analysis = await analyze_daily_events(filtered_events, dom)
+            # Шаг 2: Анализ
+            analysis = await analyze_daily_events(filtered_events, dom)
 
-        # Шаг 3: Сохранение L2-буфера
-        buffer_id = _uuid.uuid4()
-        today = date.today()
-        now = datetime.now(timezone.utc)
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO l2_daily_buffers (id, date, domain, summary, source_event_ids, confidence, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (date, domain) DO UPDATE
-                SET summary = EXCLUDED.summary,
-                    source_event_ids = l2_daily_buffers.source_event_ids || EXCLUDED.source_event_ids,
-                    confidence = (l2_daily_buffers.confidence + EXCLUDED.confidence) / 2,
-                    created_at = EXCLUDED.created_at
-                """,
-                buffer_id, today, dom, json.dumps(analysis, ensure_ascii=False),
-                [e["id"] for e in filtered_events],
-                analysis.get("confidence", 0.5),
-                now,
-            )
+            # Шаги 3+4 в одной транзакции: INSERT L2-буфера И mark_events_processed
+            # должны коммититься атомарно. Иначе сбой между ними оставлял события
+            # помеченными как обработанные при пустом L2 (или, наоборот, рождал
+            # дубль L2 на следующем цикле — ON CONFLICT DO UPDATE склеивал бы
+            # source_event_ids и портил confidence).
+            buffer_id = _uuid.uuid4()
+            today = date.today()
+            now = datetime.now(timezone.utc)
+            filtered_event_ids = [e["id"] for e in filtered_events]
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        """
+                        INSERT INTO l2_daily_buffers (id, date, domain, summary, source_event_ids, confidence, created_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (date, domain) DO UPDATE
+                        SET summary = EXCLUDED.summary,
+                            source_event_ids = l2_daily_buffers.source_event_ids || EXCLUDED.source_event_ids,
+                            confidence = (l2_daily_buffers.confidence + EXCLUDED.confidence) / 2,
+                            created_at = EXCLUDED.created_at
+                        """,
+                        buffer_id, today, dom, json.dumps(analysis, ensure_ascii=False),
+                        filtered_event_ids,
+                        analysis.get("confidence", 0.5),
+                        now,
+                    )
+                    await mark_events_processed(filtered_event_ids, conn=conn)
 
-        # Шаг 4: Помечаем события обработанными
-        await mark_events_processed([e["id"] for e in filtered_events])
-
-        results.append({"domain": dom, "status": "consolidated", "buffer_id": str(buffer_id)})
+            results.append({"domain": dom, "status": "consolidated", "buffer_id": str(buffer_id)})
+        except Exception as e:
+            log.warning("daily consolidation failed domain=%s err=%s: %s", dom, type(e).__name__, e)
+            results.append({"domain": dom, "status": "error", "error": f"{type(e).__name__}: {e}"})
 
     return {"status": "ok", "results": results}
 
@@ -283,6 +299,15 @@ async def _maybe_snapshot(domain: str) -> _uuid.UUID | None:
         hash_changed = last["snapshot_hash"] != current_hash
 
         if weeks_elapsed < settings.l4_full_snapshot_interval_weeks and not hash_changed:
+            # Раньше — тихий None: /health показывал «last_l4_snapshot 13 дней
+            # назад», operator не понимал, баг это или by-design. Теперь явно
+            # логируем причину, чтобы не было ложной паники в инцидент-чате.
+            log.info(
+                "l4_snapshot_skipped domain=%s weeks_elapsed=%.2f "
+                "interval_weeks=%d hash_changed=%s",
+                domain, weeks_elapsed,
+                settings.l4_full_snapshot_interval_weeks, hash_changed,
+            )
             return None
 
     # Создаём полный снапшот

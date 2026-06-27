@@ -25,7 +25,7 @@
 #   - Sleeping agents subscribed via NATS WS get push
 #   - Asker waits via long-poll (up to timeout) — does NOT sleep
 
-import os, sys, json, time, secrets, threading, subprocess, http.server
+import hmac, os, sys, json, time, secrets, threading, subprocess, http.server
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -35,6 +35,23 @@ LONG_POLL_INTERVAL = 1.0  # seconds
 PROXY_FALLBACK_AFTER_SEC = int(os.environ.get("PROXY_FALLBACK_AFTER", "5"))  # try real agent 5s, then proxy
 ONLINE_THRESHOLD_SEC = 90  # last_seen_at within 90s = online
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+# CORS allowlist (public reference): без CORS_ORIGINS_CSV → '*' для удобства
+# демо-запуска; с CSV — echo только разрешённых, остальные cross-origin блокирует
+# браузер. Безопасный дефолт для open-source клонов.
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("CORS_ORIGINS_CSV", "").split(",")
+    if o.strip()
+]
+
+
+def _cors_origin_for(request_origin):
+    if not _CORS_ORIGINS:
+        return "*"
+    if request_origin and request_origin in _CORS_ORIGINS:
+        return request_origin
+    return None
 
 
 try:
@@ -198,15 +215,31 @@ def post_message(room_id, from_agent, text, msg_type="message", parent_id=None):
 
 
 def list_messages(room_id, since=None, limit=50):
-    where = ""
+    # Параметризация через %s — `since` шёл из query string, raw-cast в
+    # timestamptz делал значение исполняемым PG-синтаксисом даже после
+    # ' → '' escape (SQL-injection vector).
+    try:
+        limit_i = int(limit)
+    except (TypeError, ValueError):
+        limit_i = 50
+    limit_i = max(1, min(limit_i, 500))
     if since:
-        since_e = since.replace("'", "''")
-        where = f"AND created_at > '{since_e}'::timestamptz"
-    rows, _ = pg(
-        f"SELECT id::text, from_agent, text, msg_type, parent_id::text, created_at::text "
-        f"FROM room_messages WHERE room_id = '{room_id}'::uuid {where} "
-        f"ORDER BY created_at DESC LIMIT {int(limit)};"
-    )
+        sql = (
+            "SELECT id::text, from_agent, text, msg_type, parent_id::text, created_at::text "
+            "FROM room_messages "
+            "WHERE room_id = %s::uuid AND created_at > %s::timestamptz "
+            "ORDER BY created_at DESC LIMIT %s;"
+        )
+        params = [room_id, since, limit_i]
+    else:
+        sql = (
+            "SELECT id::text, from_agent, text, msg_type, parent_id::text, created_at::text "
+            "FROM room_messages "
+            "WHERE room_id = %s::uuid "
+            "ORDER BY created_at DESC LIMIT %s;"
+        )
+        params = [room_id, limit_i]
+    rows, _ = pg(sql, params)
     return [
         {"id": r[0], "from_agent": r[1], "text": r[2], "msg_type": r[3], "parent_id": r[4], "created_at": r[5]}
         for r in rows if len(r) >= 6
@@ -642,7 +675,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = body.encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        cors = _cors_origin_for(self.headers.get("Origin", ""))
+        if cors is not None:
+            self.send_header("Access-Control-Allow-Origin", cors)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Room-Key, X-Agent-Id")
         self.end_headers()
         self.wfile.write(body)
@@ -664,7 +700,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        cors = _cors_origin_for(self.headers.get("Origin", ""))
+        if cors is not None:
+            self.send_header("Access-Control-Allow-Origin", cors)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Room-Key, X-Agent-Id")
         self.end_headers()
@@ -680,7 +719,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         path = url.path
-        params = urllib.parse.parse_qs(url.query)
+        # encoding="utf-8" — иначе non-ASCII agent_id из ?agent_id=... возвращается
+        # дважды-кодированным (см. фикс 083d312 в scripts/cognitive-rooms.py).
+        params = urllib.parse.parse_qs(url.query, encoding="utf-8", errors="replace")
         try:
             # Mobile UI routes
             if path == "/ui" or path == "/ui/":
@@ -708,7 +749,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             if path == "/health":
                 self._send(200, {"status": "ok", "service": "cogcore-rooms"})
-            elif path == "/rooms" and self.headers.get("X-Admin-Key") == os.environ.get("ROOMS_ADMIN_KEY", "admin-default"):
+            elif path == "/rooms":
+                # Admin enumerate — fail-closed if ROOMS_ADMIN_KEY unset.
+                # Public reference impl: never fall back to "admin-default".
+                expected = os.environ.get("ROOMS_ADMIN_KEY", "").strip()
+                provided = self.headers.get("X-Admin-Key", "")
+                if not expected:
+                    self._send(503, {"error": "rooms admin disabled (ROOMS_ADMIN_KEY not configured)"})
+                    return
+                if not provided or not hmac.compare_digest(provided, expected):
+                    self._send(403, {"error": "invalid or missing X-Admin-Key"})
+                    return
                 self._send(200, {"rooms": list_rooms_admin()})
             elif path.startswith("/rooms/") and path.endswith("/messages"):
                 room_id = path.split("/")[2]

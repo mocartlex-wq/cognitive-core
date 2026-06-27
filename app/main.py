@@ -517,7 +517,7 @@ async def health():
     from app.db.postgres import get_pool
     from app.db.redis import get_redis
     from app.db.s3 import get_s3
-    from app.services.embedder import EMBEDDING_MODEL_NAME, get_embedding_provider
+    from app.services.embedder import EMBEDDING_MODEL_NAME, get_embedding_provider, is_embedding_degraded
     from app.services.llm_client import get_circuit_states
     from app.services.metrics import get_llm_stats, update_layer_size
 
@@ -609,7 +609,11 @@ async def health():
     except Exception as e:
         deep["disk_error"] = str(e)[:100]
 
-    all_ok = all(v == "ok" for v in status.values())
+    # KNN деградирован если fastembed упал и embed_text() ушёл в hash-fallback.
+    # В этом состоянии семантический поиск возвращает мусор; /health обязан
+    # сигналить это в healthy=false, иначе monitoring молча проспит инцидент.
+    embedding_degraded = is_embedding_degraded()
+    all_ok = all(v == "ok" for v in status.values()) and not embedding_degraded
 
     uptime_seconds = 0
     if _start_time:
@@ -630,6 +634,7 @@ async def health():
         "embedding": {
             "model": EMBEDDING_MODEL_NAME,
             "provider": get_embedding_provider(),
+            "degraded": embedding_degraded,
         },
         "system": {
             "python": sys.version,

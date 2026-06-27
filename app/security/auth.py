@@ -3,6 +3,7 @@ from fastapi import HTTPException, Request
 from app.config import settings
 from app.db.postgres import get_pool
 from app.db.redis import get_redis
+from app.security.key_hash import compute_key_hmac, is_key_hashing_enabled
 
 
 async def verify_api_key(request: Request) -> str:
@@ -11,6 +12,12 @@ async def verify_api_key(request: Request) -> str:
     Two-tier lookup:
       1. agent_keys table (per-agent issued via POST /agents/register)
       2. Legacy settings.agent_api_keys env (backwards compat for old clients)
+
+    When COGCORE_KEY_LOOKUP_SECRET is configured (see app/security/key_hash.py),
+    Tier-1 lookup checks BOTH the new api_key_hmac column and the legacy
+    plaintext column. This lets a deployment roll out hashed lookups gradually
+    — backfill populates the new column; un-backfilled rows still match via
+    the plaintext path until the owner removes that column in a later migration.
     """
     api_key = request.headers.get("X-API-Key")
     if not api_key:
@@ -20,13 +27,7 @@ async def verify_api_key(request: Request) -> str:
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT agent_id FROM agent_keys
-                WHERE api_key = $1 AND revoked_at IS NULL
-                """,
-                api_key,
-            )
+            row = await _lookup_agent_key(conn, api_key)
             if row:
                 # Update last_used_at (fire-and-forget — no need to await separately)
                 await conn.execute(
@@ -49,6 +50,37 @@ async def verify_api_key(request: Request) -> str:
             return aid
 
     raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+async def _lookup_agent_key(conn, api_key: str):
+    """Look up an agent_keys row by either HMAC hash (when configured) or
+    the plaintext column. Returns the row dict-like or None.
+
+    The SQL guards against a missing api_key_hmac column on stock schemas
+    that haven't run the (future) migration yet — falls back to a
+    plaintext-only query in that case."""
+    if is_key_hashing_enabled():
+        key_hmac = compute_key_hmac(api_key)
+        try:
+            return await conn.fetchrow(
+                """
+                SELECT agent_id FROM agent_keys
+                WHERE revoked_at IS NULL
+                  AND (api_key_hmac = $2 OR api_key = $1)
+                LIMIT 1
+                """,
+                api_key, key_hmac,
+            )
+        except Exception:
+            # Column not yet present on this deployment — fall through.
+            pass
+    return await conn.fetchrow(
+        """
+        SELECT agent_id FROM agent_keys
+        WHERE api_key = $1 AND revoked_at IS NULL
+        """,
+        api_key,
+    )
 
 
 async def check_rate_limit(agent_id: str) -> bool:

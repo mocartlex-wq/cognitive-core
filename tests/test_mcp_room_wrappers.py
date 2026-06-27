@@ -127,7 +127,10 @@ async def test_room_join_passes_room_key_as_header(mock_resolve_agent, mock_asyn
     call = mock_async_client["calls"][-1]
     assert call["url"].endswith("/rid-7/join")
     assert call["headers"].get("X-Room-Key") == "rk_secret"
-    assert call["headers"].get("X-Agent-Id") == "цувуцу"
+    # Cyrillic agent_id can't go in an HTTP header → routed to query params;
+    # identity also travels in the JSON body.
+    assert "X-Agent-Id" not in call["headers"]
+    assert call["params"]["agent_id"] == "цувуцу"
     assert call["json"]["agent_id"] == "цувуцу"
 
 
@@ -165,7 +168,8 @@ async def test_room_read_with_since_and_limit(mock_resolve_agent, mock_async_cli
     call = mock_async_client["calls"][-1]
     assert call["method"] == "GET"
     assert call["url"].endswith("/rid-1/messages")
-    assert call["params"] == {"limit": 100, "since": "2026-05-26T00:00:00Z"}
+    # Cyrillic agent_id is routed to query params (can't go in an HTTP header).
+    assert call["params"] == {"limit": 100, "since": "2026-05-26T00:00:00Z", "agent_id": "цувуцу"}
 
 
 # ───────── room_ask ─────────
@@ -222,11 +226,35 @@ async def test_room_answer_requires_all_fields(mock_resolve_agent, mock_async_cl
 
 # ───────── room_pending ─────────
 @pytest.mark.asyncio
-async def test_room_pending_propagates_agent_id_header(mock_resolve_agent, mock_async_client):
+async def test_room_pending_propagates_agent_id(mock_resolve_agent, mock_async_client):
     req = _make_request()
     await mcp_protocol._dispatch_tool(req, "room_pending", {"room_id": "rid-1", "room_key": "rk_x"})
     call = mock_async_client["calls"][-1]
     assert call["method"] == "GET"
     assert call["url"].endswith("/rid-1/pending")
-    assert call["headers"].get("X-Agent-Id") == "цувуцу"
+    # Cyrillic agent_id can't go in an HTTP header → routed to query params.
+    assert "X-Agent-Id" not in call["headers"]
+    assert call["params"]["agent_id"] == "цувуцу"
     assert call["headers"].get("X-Room-Key") == "rk_x"
+
+
+# ───────── non-latin-1 agent_id (regression) ─────────
+@pytest.mark.asyncio
+async def test_call_rooms_routes_non_latin1_agent_id_to_query(mock_async_client):
+    """Regression (observed live 2026-06-14): a non-latin-1 agent_id such as the
+    Cyrillic "сервер_память" must never be placed in an HTTP header — httpx raises
+    UnicodeEncodeError and breaks every room call. It is routed to the query string
+    instead, while ASCII ids keep using the X-Agent-Id header (back-compat)."""
+    # Non-latin-1 id → query param, never a header; all header values stay encodable.
+    await mcp_protocol._call_rooms("GET", "/r1/messages", room_key="rk", agent_id="сервер_память")
+    call = mock_async_client["calls"][-1]
+    assert "X-Agent-Id" not in call["headers"]
+    assert call["params"]["agent_id"] == "сервер_память"
+    for value in call["headers"].values():
+        value.encode("latin-1")  # must not raise UnicodeEncodeError
+
+    # ASCII id → unchanged behavior: header set, no query param injected.
+    await mcp_protocol._call_rooms("GET", "/r1/messages", room_key="rk", agent_id="bob")
+    call = mock_async_client["calls"][-1]
+    assert call["headers"]["X-Agent-Id"] == "bob"
+    assert call["params"] is None
