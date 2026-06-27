@@ -45,6 +45,11 @@
     // drag не работает; user-select:none — иначе двойной тап выделяет иконку.
     "touch-action:none;user-select:none;-webkit-user-select:none;}" +
   "#cogasst-fab.cogasst-dragging{cursor:grabbing;transition:none;}" +
+  // Авто-скрытие FAB пока юзер печатает в инпут/textarea на узком экране —
+  // иначе плавающий пузырь налезает на кнопку «Отправить» и портит вёрстку
+  // композера в комнате. Прозрачность + pointer-events:none гарантируют, что
+  // и клик прошёл сквозь, и визуально кнопка чиста.
+  "#cogasst-fab.cogasst-hidden-by-input{opacity:0;pointer-events:none;transform:scale(.9);}" +
   "#cogasst-fab:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 14px 34px rgba(99,102,241,.55);}" +
   "#cogasst-fab svg{width:27px;height:27px;}" +
   "#cogasst-fab .cogasst-dot{position:absolute;top:12px;right:12px;width:9px;height:9px;border-radius:50%;" +
@@ -299,6 +304,34 @@
       var x = parseInt(fab.style.left, 10) || 0;
       var y = parseInt(fab.style.top, 10) || 0;
       applyFabPos(x, y);
+    });
+    // Auto-hide while a text input/textarea is focused on a narrow viewport
+    // (mobile): the FAB sits in the bottom-right and overlapped the "Отправить"
+    // button in the room composer. We fade + disable pointer events instead of
+    // removing it entirely so the user doesn't lose the entry point — refocus
+    // outside the input restores it.
+    var NARROW_PX = 600;
+    function isTextInput(el) {
+      if (!el || !el.tagName) return false;
+      if (el.tagName === "TEXTAREA") return true;
+      if (el.tagName !== "INPUT") return false;
+      var t = (el.type || "text").toLowerCase();
+      return /^(text|search|url|email|tel|password|number)$/.test(t);
+    }
+    document.addEventListener("focusin", function (e) {
+      if (window.innerWidth < NARROW_PX && isTextInput(e.target) && !opened) {
+        fab.classList.add("cogasst-hidden-by-input");
+      }
+    });
+    document.addEventListener("focusout", function (e) {
+      // Через короткую задержку — чтобы перенос фокуса между двумя инпутами
+      // не моргал FAB'ом туда-сюда.
+      setTimeout(function () {
+        var a = document.activeElement;
+        if (!isTextInput(a) || window.innerWidth >= NARROW_PX) {
+          fab.classList.remove("cogasst-hidden-by-input");
+        }
+      }, 80);
     });
   }
 

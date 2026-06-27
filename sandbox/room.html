@@ -117,6 +117,22 @@
     box-shadow: 0 0 0 3px rgba(88,166,255,0.10);
   }
 
+  /* Мобильная вёрстка композера: складываем кнопку под поле, увеличиваем
+     поле, поднимаем шрифт до 16 px (иначе iOS Safari/Yandex auto-zoom'ит
+     страницу при фокусе на textarea и сбивает прокрутку). Двухстрочный
+     placeholder теперь помещается, кнопка «Отправить» во всю ширину
+     — её не загораживает плавающий FAB-помощник в правом нижнем углу. */
+  @media (max-width: 600px) {
+    .composer { flex-direction: column; align-items: stretch; gap: 10px; }
+    .composer textarea {
+      min-height: 84px; max-height: 220px; font-size: 16px;
+      padding: 12px 14px; line-height: 1.45;
+    }
+    .composer .btn { width: 100%; padding: 13px 14px; font-size: 15px; min-height: 46px; }
+    /* iOS safe-area inset снизу — чтобы кнопку «Отправить» не накрыл нижний жест-бар. */
+    .composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  }
+
   /* === Кому писать: чипы-получатели над полем ввода === */
   .rcp-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
   .rcp-label { font-size: 12.5px; color: var(--glass-text-dim); margin-right: 2px; }
@@ -372,6 +388,23 @@
     ta.addEventListener('keydown', (e) => {
       // Enter — отправка; Shift+Enter — перенос строки. (Ctrl/Cmd+Enter тоже отправляет.)
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+    });
+    // Auto-grow: поле растёт под текст пользователя (до max-height из CSS),
+    // не нужно вручную дёргать угол. Срабатывает и на input, и на paste.
+    const autogrow = () => {
+      ta.style.height = 'auto';
+      const cap = parseInt(getComputedStyle(ta).maxHeight, 10) || 240;
+      ta.style.height = Math.min(ta.scrollHeight, cap) + 'px';
+    };
+    ta.addEventListener('input', autogrow);
+    ta.addEventListener('focus', () => {
+      // На мобильном при появлении клавиатуры поле уходит за неё; подскроллим
+      // его в видимую область через 300мс (типичное время появления keyboard).
+      if (window.innerWidth < 600) {
+        setTimeout(() => {
+          try { ta.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+        }, 300);
+      }
     });
     scrollThreadToBottom();
     lastMsgKey = msgKey(detail.messages);
