@@ -53,8 +53,13 @@ class TestCircuitBreakerTimeout:
         cb.record_failure()
         assert cb.state == CircuitState.OPEN
 
-        # Advance time past timeout
-        with patch("app.services.llm_client._time.monotonic", return_value=cb.opened_at + 11):
+        # Advance time past the ACTUAL effective timeout. _apply_backoff() даёт
+        # current_timeout джиттер ±25% (тут 7.5..12.5с) — фиксированное «+11»
+        # флакало, когда джиттер выпадал > 11с (реальные падения на CI).
+        with patch(
+            "app.services.llm_client._time.monotonic",
+            return_value=cb.opened_at + cb.current_timeout + 1,
+        ):
             allowed = cb.allow()
             assert allowed is True
             assert cb.state == CircuitState.HALF_OPEN
