@@ -73,6 +73,9 @@ class Settings(BaseSettings):
 
     # Циклы
     retention_days: int = 14
+    # Потолок для НЕконсолидированных L1 (processed_to_l2=false): обычный retention
+    # их не трогает (см. /memory/cleanup), удаляем только совсем брошенные.
+    retention_unprocessed_days: int = 90
     daily_hours: int = 24
     weekly_days: int = 7
 

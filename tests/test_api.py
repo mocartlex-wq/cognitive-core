@@ -191,7 +191,34 @@ class TestCleanup:
     async def test_cleanup(self, client, headers):
         r = await client.post("/memory/cleanup", json={}, headers=headers)
         assert r.status_code == 200
-        assert r.json()["status"] == "cleaned"
+        body = r.json()
+        assert body["status"] == "cleaned"
+        assert "deleted_stale_unprocessed" in body
+
+    async def test_cleanup_keeps_unprocessed(self, client, headers):
+        """Retention не удаляет события, не прошедшие в L2 (processed_to_l2=false).
+
+        Регресс июня 2026: при активности < MIN_EVENTS_FOR_DAILY куратор скипал
+        консолидацию, а prune удалял неанализированный опыт по общему TTL.
+        """
+        r = await client.post("/events", json={
+            "source_agent": "test_runner",
+            "domain": "test_api",
+            "payload": {"note": "unprocessed event must survive cleanup"},
+        }, headers=headers)
+        assert r.status_code == 200
+        event_id = r.json()["id"]
+
+        r = await client.post("/memory/cleanup", json={}, headers=headers)
+        assert r.status_code == 200
+
+        from app.db.postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id FROM l1_raw_events WHERE id = $1::uuid", event_id
+            )
+        assert row is not None, "cleanup удалил необработанное событие"
 
 
 class TestEdgeCases:
