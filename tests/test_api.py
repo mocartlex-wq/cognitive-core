@@ -212,13 +212,13 @@ class TestCleanup:
         r = await client.post("/memory/cleanup", json={}, headers=headers)
         assert r.status_code == 200
 
-        from app.db.postgres import get_pool
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT id FROM l1_raw_events WHERE id = $1::uuid", event_id
-            )
-        assert row is not None, "cleanup удалил необработанное событие"
+        # Проверка через API (НЕ через get_pool: прямой pool в тест-процессе
+        # привязывает singleton к event-loop'у этого теста и ломает поздние
+        # db-тесты ошибкой «attached to a different loop»).
+        r = await client.get("/dashboard/recent-events?limit=50", headers=headers)
+        assert r.status_code == 200
+        ids = {item["id"] for item in r.json().get("items", [])}
+        assert event_id in ids, "cleanup удалил необработанное событие"
 
 
 class TestEdgeCases:
