@@ -323,11 +323,13 @@ from app.api.onboard import router as onboard_router
 from app.api.operative import router as operative_router
 from app.api.rules import router as rules_router
 from app.api.tools import router as tools_router
+from app.api.trading import router as trading_router
 
 app.include_router(events_router)
 app.include_router(operative_router)
 app.include_router(memory_router)
 app.include_router(tools_router)
+app.include_router(trading_router)
 app.include_router(dashboard_router)
 app.include_router(demo_router)
 app.include_router(agents_router)
@@ -465,6 +467,12 @@ async def connect_mobile_page():
 async def pricing_page():
     """Phase 5B — публичная landing с тарифами (Free / Pro / Enterprise)."""
     return _html("pricing.html")
+
+
+@app.get("/ui/trading")
+async def trading_page():
+    """Trading dashboard: портфель, котировки+сентимент, ордера, история."""
+    return _html("trading.html")
 
 
 @app.get("/ui/welcome")
