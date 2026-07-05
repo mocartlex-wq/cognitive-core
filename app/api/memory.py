@@ -358,7 +358,15 @@ async def restore_redis(request: Request, domain: str | None = None):
 
 @router.post("/cleanup")
 async def run_cleanup(request: Request):
-    """Очистка устаревших L1-событий."""
+    """Очистка устаревших L1-событий.
+
+    Обычный retention применяется ТОЛЬКО к событиям, уже прошедшим в L2
+    (processed_to_l2 = TRUE) — иначе при низкой активности (< MIN_EVENTS_FOR_DAILY
+    событий/день куратор скипает консолидацию) prune удалял бы опыт, который ещё
+    ни разу не анализировался (реальная потеря: июнь 2026, ~2 недели событий).
+    Для необработанных действует страховочный потолок retention_unprocessed_days,
+    чтобы брошенные домены не копились вечно.
+    """
     await verify_api_key(request)
 
     pool = await get_pool()
@@ -367,10 +375,24 @@ async def run_cleanup(request: Request):
             """
             DELETE FROM l1_raw_events
             WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
+              AND processed_to_l2 = TRUE
             """,
             str(settings.retention_days),
         )
-        # Убираем отметку deleted
         deleted = int(result.split()[-1]) if result else 0
 
-    return {"status": "cleaned", "deleted_events": deleted}
+        result_stale = await conn.execute(
+            """
+            DELETE FROM l1_raw_events
+            WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
+              AND processed_to_l2 = FALSE
+            """,
+            str(settings.retention_unprocessed_days),
+        )
+        deleted_stale = int(result_stale.split()[-1]) if result_stale else 0
+
+    return {
+        "status": "cleaned",
+        "deleted_events": deleted,
+        "deleted_stale_unprocessed": deleted_stale,
+    }
