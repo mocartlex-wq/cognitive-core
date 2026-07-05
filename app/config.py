@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     llm_circuit_threshold: int = 3   # consecutive failures to trip OPEN
     llm_circuit_timeout: int = 60    # seconds in OPEN before half-open probe
 
+    # TTL last-known-good ответа LLM в Redis (graceful degradation при
+    # полной недоступности провайдеров). In-memory зеркало живёт до рестарта.
+    llm_cache_ttl_days: int = 7
+
     # Язык
     system_language: str = "ru"  # ru / en / zh
 

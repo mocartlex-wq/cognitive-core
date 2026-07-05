@@ -6,8 +6,23 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 
+# In-memory fallback'и на случай недоступного Redis (например, юнит-тесты
+# без инфраструктуры). Основное хранилище обоих — Redis (переживает рестарт):
+#   llm:cache:{function}:{domain}  — last-known-good ответ (graceful degradation)
+#   llm:ab:{function}              — HINCRBY-счётчики A/B статистики
 _response_cache: dict[str, dict[str, str]] = {}
 _ab_stats: dict[str, dict[str, int]] = {}  # {function: {"a_success": N, "b_success": N, "a_fail": N, "b_fail": N}}
+
+_AB_FIELDS = ("a_success", "b_success", "a_fail", "b_fail")
+
+
+async def _redis_or_none():
+    """Redis-клиент либо None — вызывающий код обязан уметь жить без него."""
+    try:
+        from app.db.redis import get_redis
+        return await get_redis()
+    except Exception:
+        return None
 
 
 # ─── Circuit Breaker ──────────────────────────────────────────────────────────
@@ -207,18 +222,18 @@ class LLMClient:
                 duration = _time.monotonic() - start
                 if result:
                     breaker.record_success()
-                    self._cache_response(domain, result)
-                    _track_ab(self.function_name, is_ab, True)
+                    await self._cache_response(domain, result)
+                    await _track_ab(self.function_name, is_ab, True)
                     from app.services.metrics import track_llm
                     track_llm(self.function_name, mdl, "success", duration)
                     return result
             except Exception:
                 breaker.record_failure()
-                _track_ab(self.function_name, is_ab, False)
+                await _track_ab(self.function_name, is_ab, False)
 
         # All fresh attempts exhausted — try last-known-good cached response.
         # Graceful degradation: caller gets stale-but-valid data instead of crash.
-        cached = self._get_cached(domain)
+        cached = await self._get_cached(domain)
         if cached:
             from app.services.metrics import log_event
             log_event(
@@ -280,43 +295,89 @@ class LLMClient:
             text = text[start:end + 1]
         return json.loads(text)
 
-    def _cache_response(self, domain: str, data: dict) -> None:
+    async def _cache_response(self, domain: str, data: dict) -> None:
+        """Last-known-good ответ: Redis (переживает рестарт) + in-memory зеркало."""
         key = f"{self.function_name}:{domain}"
+        payload = json.dumps(data)
         if self.function_name not in _response_cache:
             _response_cache[self.function_name] = {}
-        _response_cache[self.function_name][key] = json.dumps(data)
+        _response_cache[self.function_name][key] = payload
 
-    def _get_cached(self, domain: str) -> dict | None:
+        r = await _redis_or_none()
+        if r:
+            try:
+                await r.set(
+                    f"llm:cache:{key}", payload,
+                    ex=settings.llm_cache_ttl_days * 86400,
+                )
+            except Exception:
+                pass  # кэш — best-effort, in-memory копия уже есть
+
+    async def _get_cached(self, domain: str) -> dict | None:
         key = f"{self.function_name}:{domain}"
         cached = _response_cache.get(self.function_name, {}).get(key)
+        if not cached:
+            r = await _redis_or_none()
+            if r:
+                try:
+                    cached = await r.get(f"llm:cache:{key}")
+                except Exception:
+                    cached = None
         if cached:
             return json.loads(cached)
         return None
 
 
-def _track_ab(function: str, is_b: bool, success: bool):
-    """Обновляет A/B статистику."""
-    if function not in _ab_stats:
-        _ab_stats[function] = {"a_success": 0, "b_success": 0, "a_fail": 0, "b_fail": 0}
+async def _track_ab(function: str, is_b: bool, success: bool):
+    """Обновляет A/B статистику: Redis HINCRBY (durable) + in-memory fallback."""
     variant = "b" if is_b else "a"
     outcome = "success" if success else "fail"
-    _ab_stats[function][f"{variant}_{outcome}"] += 1
+    field = f"{variant}_{outcome}"
+
+    if function not in _ab_stats:
+        _ab_stats[function] = {k: 0 for k in _AB_FIELDS}
+    _ab_stats[function][field] += 1
+
+    r = await _redis_or_none()
+    if r:
+        try:
+            await r.hincrby(f"llm:ab:{function}", field, 1)
+        except Exception:
+            pass  # счётчик уже инкрементирован in-memory
 
 
-def get_ab_stats() -> dict:
-    """Возвращает A/B статистику по всем функциям."""
-    result = {}
-    for func, stats in _ab_stats.items():
-        a_total = stats["a_success"] + stats["a_fail"]
-        b_total = stats["b_success"] + stats["b_fail"]
-        result[func] = {
-            **stats,
-            "a_total": a_total,
-            "b_total": b_total,
-            "a_success_rate": round(stats["a_success"] / a_total, 3) if a_total > 0 else None,
-            "b_success_rate": round(stats["b_success"] / b_total, 3) if b_total > 0 else None,
-        }
-    return result
+def _ab_summary(stats: dict) -> dict:
+    a_total = stats["a_success"] + stats["a_fail"]
+    b_total = stats["b_success"] + stats["b_fail"]
+    return {
+        **stats,
+        "a_total": a_total,
+        "b_total": b_total,
+        "a_success_rate": round(stats["a_success"] / a_total, 3) if a_total > 0 else None,
+        "b_success_rate": round(stats["b_success"] / b_total, 3) if b_total > 0 else None,
+    }
+
+
+async def get_ab_stats() -> dict:
+    """A/B статистика по всем функциям. Первичный источник — Redis
+    (накопленная за все рестарты), fallback — in-memory за текущий процесс."""
+    merged: dict[str, dict[str, int]] = {
+        func: dict(stats) for func, stats in _ab_stats.items()
+    }
+
+    r = await _redis_or_none()
+    if r:
+        try:
+            async for key in r.scan_iter(match="llm:ab:*", count=100):
+                func = key.split("llm:ab:", 1)[1]
+                raw = await r.hgetall(key)
+                # Redis — источник истины: in-memory значения уже влиты туда
+                # через HINCRBY, простое взятие Redis-значений не даст дублей.
+                merged[func] = {k: int(raw.get(k, 0)) for k in _AB_FIELDS}
+        except Exception:
+            pass  # остаёмся на in-memory снимке
+
+    return {func: _ab_summary(stats) for func, stats in merged.items()}
 
 
 def get_llm_client(function: str) -> LLMClient:
