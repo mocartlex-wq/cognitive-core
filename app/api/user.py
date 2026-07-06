@@ -367,6 +367,19 @@ async def get_my_room_detail(room_id: str, request: Request):
         except Exception as e:
             logger.info("room_detail messages_skip room=%s err=%s", room_id, e)
 
+    # Эфемерный «кто печатает» — ключи typing:{room}:{agent} с TTL (см.
+    # POST /agents/typing). Redis сам выкидывает протухшие, тут только SCAN.
+    typing: list[str] = []
+    try:
+        from app.db.redis import get_redis
+        r = await get_redis()
+        async for key in r.scan_iter(match=f"typing:{room_id}:*", count=50):
+            label = await r.get(key)
+            if label:
+                typing.append(label)
+    except Exception as e:
+        logger.info("room_detail typing_skip room=%s err=%s", room_id, e)
+
     created = room["created_at"]
     return {
         "id": room["id"],
@@ -377,6 +390,7 @@ async def get_my_room_detail(room_id: str, request: Request):
         "message_count": message_count,
         "participants": participants,
         "messages": messages,
+        "typing": typing,
     }
 
 

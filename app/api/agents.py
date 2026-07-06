@@ -148,3 +148,38 @@ async def list_agents(request: Request):
     await verify_api_key(request)
     items = await list_all_agents()
     return {"count": len(items), "items": items}
+
+
+class TypingInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    room_id: str = Field(..., min_length=8, max_length=64)
+    ttl_seconds: int = Field(25, ge=3, le=120)
+
+
+@router.post("/typing")
+async def set_typing(body: TypingInput, request: Request):
+    """Эфемерный сигнал «агент печатает» для UI комнаты.
+
+    Агент дёргает этот эндпоинт, когда увидел сообщение и готовит ответ.
+    Состояние живёт в Redis с TTL (по умолчанию 25с) — истекает само, историю
+    комнаты не засоряет. UI комнаты (owner-view /user/rooms/{id}/detail)
+    подхватывает список печатающих в обычном 5с-поллинге.
+    """
+    await verify_api_key(request)
+    agent_id = getattr(request.state, "agent_id", None) or "agent"
+    # display_name как в комнате: agent_label если задан, иначе agent_id
+    label = agent_id
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT agent_label FROM agent_states WHERE agent_id = $1", agent_id
+            )
+            if row and row["agent_label"]:
+                label = row["agent_label"]
+    except Exception:
+        pass
+    from app.db.redis import get_redis
+    r = await get_redis()
+    await r.set(f"typing:{body.room_id}:{agent_id}", label, ex=body.ttl_seconds)
+    return {"ok": True, "agent_id": agent_id, "label": label, "ttl": body.ttl_seconds}
