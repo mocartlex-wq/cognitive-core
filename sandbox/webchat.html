@@ -69,7 +69,7 @@ const isMe = a => (a||'').startsWith('owner');
 async function loadRooms(){
   try{
     const r = await fetch('/user/rooms', J);
-    if(r.status===401){ location.href='/ui/login?return=/ui/chat'; return; }
+    if(r.status===401){ location.href='/ui/login?return=/chat'; return; }
     const d = await r.json();
     const items = d.items||[];
     roomSel.innerHTML = items.map(x=>`<option value="${x.id}">${H(x.name)}</option>`).join('');

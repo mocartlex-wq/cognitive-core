@@ -204,7 +204,7 @@ _TOPNAV_ITEMS = (
     # плавающее окно (на всех страницах), а командные чаты — «Комнаты».
     # Страница /ui/team остаётся доступной по прямой ссылке.
     ("/ui", "Комнаты", "rooms"),
-    ("/ui/chat", "Чат", "chat"),
+    ("/chat", "Чат", "chat"),
     ("/ui/profile", "Профиль", "profile"),
     ("/sandbox", "API", "api"),
 )
@@ -431,10 +431,11 @@ async def profile_page():
     return _html("profile.html")
 
 
-@app.get("/ui/chat")
+@app.get("/chat")
 async def webchat_page():
     """Веб-чат: единая страница-обёртка над комнатами владельца (session-auth,
-    room-picker). Отдельная от /ui/room точка для быстрого чата с агентами."""
+    room-picker). На /chat (а не /ui/chat), чтобы nginx рутил в cognitive_api
+    по дефолтному `location /`, минуя rooms-сервис (:9098), который забирает /ui/*."""
     return _html("webchat.html")
 
 
