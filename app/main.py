@@ -204,6 +204,7 @@ _TOPNAV_ITEMS = (
     # плавающее окно (на всех страницах), а командные чаты — «Комнаты».
     # Страница /ui/team остаётся доступной по прямой ссылке.
     ("/ui", "Комнаты", "rooms"),
+    ("/ui/chat", "Чат", "chat"),
     ("/ui/profile", "Профиль", "profile"),
     ("/sandbox", "API", "api"),
 )
@@ -212,6 +213,7 @@ _PAGE_ACTIVE = {
     "pricing.html": "pricing",
     "index.html": "api",
     "dashboard.html": "rooms",
+    "webchat.html": "chat",
     "profile.html": "profile",
 }
 
@@ -427,6 +429,13 @@ async def room_page():
 async def profile_page():
     """Профиль — мои комнаты, помощники, устройства."""
     return _html("profile.html")
+
+
+@app.get("/ui/chat")
+async def webchat_page():
+    """Веб-чат: единая страница-обёртка над комнатами владельца (session-auth,
+    room-picker). Отдельная от /ui/room точка для быстрого чата с агентами."""
+    return _html("webchat.html")
 
 
 @app.get("/ui/admin/errors")
