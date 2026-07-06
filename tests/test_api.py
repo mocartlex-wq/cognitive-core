@@ -32,6 +32,20 @@ class TestHealth:
         assert "system" in data
         assert "python" in data["system"]
 
+    async def test_health_consolidation_staleness(self, client):
+        """Deep-health exposes L2 staleness + consolidation_stalled flag.
+
+        Guards the June-2026 regression: L1→L2 stall must be observable.
+        The flag stays False under low activity (few/no unprocessed L1) —
+        только реальный застой (лаг >48ч + накопленные L1) должен алертить.
+        """
+        r = await client.get("/health")
+        deep = r.json()["deep"]
+        assert "l1_unprocessed" in deep
+        assert "l2_staleness_hours" in deep
+        assert "consolidation_stalled" in deep
+        assert isinstance(deep["consolidation_stalled"], bool)
+
     async def test_metrics(self, client):
         r = await client.get("/metrics")
         assert r.status_code == 200

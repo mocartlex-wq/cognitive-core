@@ -550,6 +550,34 @@ async def health():
             deep["last_l2_buffer"] = last_l2.isoformat() if last_l2 else None
             deep["last_l3_knowledge"] = last_l3.isoformat() if last_l3 else None
             deep["last_l4_snapshot"] = last_l4.isoformat() if last_l4 else None
+
+            # ── Consolidation staleness alert ────────────────────────────────
+            # Signal that silently missed the June-2026 3-week L1→L2 stall.
+            # Warn ONLY when L2 lags >48h AND enough unconsolidated L1 is waiting
+            # to justify a daily run — low activity alone (the curator legitimately
+            # skips days under min_events_for_daily) must NOT trip the alert.
+            unprocessed_l1 = await conn.fetchval(
+                "SELECT COUNT(*) FROM l1_raw_events WHERE processed_to_l2 = FALSE"
+            )
+            deep["l1_unprocessed"] = unprocessed_l1 or 0
+            if last_l2:
+                l2_dt = datetime(last_l2.year, last_l2.month, last_l2.day, tzinfo=timezone.utc)
+                lag_h = (datetime.now(timezone.utc) - l2_dt).total_seconds() / 3600
+                deep["l2_staleness_hours"] = round(lag_h, 1)
+                deep["consolidation_stalled"] = bool(
+                    lag_h > 48 and (unprocessed_l1 or 0) >= settings.min_events_for_daily
+                )
+            else:
+                deep["l2_staleness_hours"] = None
+                deep["consolidation_stalled"] = False
+            if deep["consolidation_stalled"]:
+                log_event(
+                    "warning",
+                    "consolidation stalled: L2 lagging with unconsolidated L1 waiting",
+                    l2_staleness_hours=deep["l2_staleness_hours"],
+                    l1_unprocessed=deep["l1_unprocessed"],
+                    min_events_for_daily=settings.min_events_for_daily,
+                )
             # Новое: счётчики аккаунтов/сессий (если таблицы созданы 0003-миграцией)
             try:
                 accs = await conn.fetchval("SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL")
