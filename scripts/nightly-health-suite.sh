@@ -170,6 +170,29 @@ else
   pass T7 "orchestrator processed $COUNT messages in last 4h"
 fi
 
+# ─── Consolidation trigger (RELIABILITY FIX 2026-07-06) ──────────
+# The in-app scheduler (app/worker.py scheduler_loop) fires daily/weekly
+# consolidation only ONCE per api restart, then never on its 02:00 schedule
+# (proven: daily_consolidate audit entries cluster only at restart times, with
+# multi-day gaps — e.g. 2026-06-14 → 06-27 had zero runs). That silently starved
+# L1→L2 consolidation. This rock-solid 4h systemd timer now drives it instead.
+# In-container invocation carries full app context; the consolidator's advisory
+# lock makes it safe against the in-app scheduler / concurrent runs. Non-blocking:
+# a consolidation hiccup must not fail the health suite.
+DAILY_OUT=$(sudo docker exec cognitive_api python -c \
+  "import asyncio,json;from app.worker import run_daily_cycle;print(json.dumps(asyncio.run(run_daily_cycle()))[:200])" 2>&1) \
+  && pass T8 "daily consolidation triggered: ${DAILY_OUT:0:120}" \
+  || warn T8 "daily consolidation trigger failed: ${DAILY_OUT:0:160}"
+
+# Weekly L2→L3 synthesis — heavier (LLM per domain), so once per week: Monday,
+# only in the first 4h slot (00:00–03:59 UTC) to avoid 6× runs across the day.
+if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%H)" -lt 4 ]; then
+  WEEKLY_OUT=$(sudo docker exec cognitive_api python -c \
+    "import asyncio,json;from app.worker import run_weekly_cycle;print(json.dumps(asyncio.run(run_weekly_cycle()))[:200])" 2>&1) \
+    && pass T9 "weekly consolidation triggered: ${WEEKLY_OUT:0:120}" \
+    || warn T9 "weekly consolidation trigger failed: ${WEEKLY_OUT:0:160}"
+fi
+
 # ─── Summary ────────────────────────────────────────────────────
 log "════════ nightly suite done: PASS=$PASS WARN=$WARN FAIL=$FAIL ════════"
 
