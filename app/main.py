@@ -258,7 +258,7 @@ _CHAT_BUTTON_TAG = (
     "margin:0 8px;border-radius:999px;background:#0a84ff;color:#fff;font-weight:600;"
     "font-size:14px;text-decoration:none;white-space:nowrap';"
     "var tt=tb.querySelector('.theme-toggle');"
-    "if(tt)tb.insertBefore(a,tt);else tb.appendChild(a);"
+    "if(tt&&tt.parentNode){tt.parentNode.insertBefore(a,tt);}else{tb.appendChild(a);}"
     "})();</script>"
 )
 
