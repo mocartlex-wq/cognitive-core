@@ -147,16 +147,14 @@ async function loadRooms(){
     const r = await fetch('/user/rooms', J);
     if(r.status===401){ location.href='/ui/login?return=/chat'; return; }
     const d = await r.json();
-    const items = d.items||[];
-    // Владелец видит все свои комнаты; читать историю можем только в своих
-    // (детали чужих комнат отдают 403). Показываем все, но помечаем не-свои.
-    roomSel.innerHTML = items.map(x=>
-      `<option value="${x.id}">${H(x.name)}${x.is_owner===false?' (участник)':''}</option>`).join('');
+    // Читать историю через сессию можно только в СВОИХ комнатах (чужие →403).
+    // Поэтому в списке показываем только те, что реально открываются.
+    const items = (d.items||[]).filter(x=>x.is_owner!==false);
+    roomSel.innerHTML = items.map(x=>`<option value="${x.id}">${H(x.name)}</option>`).join('');
+    roomSel.style.display = items.length>1 ? '' : 'none';  // одна комната — скрываем выбор
     if(items.length){
-      // По умолчанию — первая комната, где ты владелец (там точно читается).
-      const own = items.find(x=>x.is_owner!==false) || items[0];
-      roomId = own.id; roomSel.value = roomId; await refresh(true);
-    } else log.innerHTML = '<div class="empty">Нет комнат. Создай в Профиле.</div>';
+      roomId = items[0].id; roomSel.value = roomId; await refresh(true);
+    } else log.innerHTML = '<div class="empty">У тебя пока нет своих комнат. Создай в Профиле → «Мои комнаты».</div>';
   }catch(e){ log.innerHTML = '<div class="empty">Ошибка загрузки</div>'; }
 }
 
