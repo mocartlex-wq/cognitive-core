@@ -204,7 +204,6 @@ _TOPNAV_ITEMS = (
     # плавающее окно (на всех страницах), а командные чаты — «Комнаты».
     # Страница /ui/team остаётся доступной по прямой ссылке.
     ("/ui", "Комнаты", "rooms"),
-    ("/chat", "Чат", "chat"),
     ("/ui/profile", "Профиль", "profile"),
     ("/sandbox", "API", "api"),
 )
@@ -246,13 +245,33 @@ def _html(path: str):
 # на /ui/ask и /ui/login, общается с оркестратором по SSO-cookie сайта.
 _ASSISTANT_WIDGET_TAG = '<script src="/static/assistant-widget.js?v=20260530e" defer></script>'
 
+# Кнопка «Чат» в правой части top-bar (перед переключателем темы) — единый вход
+# в веб-чат /chat со ВСЕХ страниц. Инжектится JS'ом, чтобы не править header
+# каждой страницы отдельно (2026-07-06). No-op, если .top-bar нет.
+_CHAT_BUTTON_TAG = (
+    "<script>(function(){"
+    "var tb=document.querySelector('.top-bar');if(!tb)return;"
+    "if(tb.querySelector('.topbar-chat'))return;"
+    "var a=document.createElement('a');a.href='/chat';a.className='topbar-chat';"
+    "a.title='Веб-чат';a.innerHTML='\\uD83D\\uDCAC \\u0427\\u0430\\u0442';"
+    "a.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:7px 15px;"
+    "margin:0 8px;border-radius:999px;background:#0a84ff;color:#fff;font-weight:600;"
+    "font-size:14px;text-decoration:none;white-space:nowrap';"
+    "var tt=tb.querySelector('.theme-toggle');"
+    "if(tt)tb.insertBefore(a,tt);else tb.appendChild(a);"
+    "})();</script>"
+)
+
 
 def _inject_assistant_widget(content: str) -> str:
-    if "assistant-widget.js" in content:
+    if "</body>" not in content:
         return content
-    if "</body>" in content:
-        return content.replace("</body>", _ASSISTANT_WIDGET_TAG + "</body>", 1)
-    return content
+    tags = ""
+    if "assistant-widget.js" not in content:
+        tags += _ASSISTANT_WIDGET_TAG
+    if "topbar-chat" not in content:
+        tags += _CHAT_BUTTON_TAG
+    return content.replace("</body>", tags + "</body>", 1) if tags else content
 
 
 # Favicon — браузеры автоматически запрашивают /favicon.ico на каждой странице.
