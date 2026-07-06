@@ -849,15 +849,34 @@
   }
 
   // «Агент печатает…»: detail.typing = массив label'ов (Redis TTL, сам гаснет).
-  // Показ/скрытие бара; при нескольких печатающих — перечисляем через запятую.
+  // Как в Claude Code: живой секундомер «Память печатает… 33s» — таймер
+  // клиентский, стартует при появлении бара, тикает раз в секунду, сбрасывается
+  // когда все перестали печатать.
+  let typingSince = 0;
+  let typingTick = null;
+  let typingLabels = [];
+  function renderTypingText() {
+    const txt = document.getElementById('typingText');
+    if (!txt || !typingLabels.length) return;
+    const secs = Math.max(1, Math.round((Date.now() - typingSince) / 1000));
+    txt.textContent = typingLabels.join(', ')
+      + (typingLabels.length === 1 ? ' печатает… ' : ' печатают… ') + secs + 's';
+  }
   function updateTypingBar(typing) {
     const bar = document.getElementById('typingBar');
-    const txt = document.getElementById('typingText');
-    if (!bar || !txt) return;
+    if (!bar) return;
     const list = Array.isArray(typing) ? typing.filter(Boolean) : [];
-    if (!list.length) { bar.hidden = true; return; }
-    txt.textContent = list.join(', ') + (list.length === 1 ? ' печатает…' : ' печатают…');
+    if (!list.length) {
+      bar.hidden = true;
+      typingSince = 0; typingLabels = [];
+      if (typingTick) { clearInterval(typingTick); typingTick = null; }
+      return;
+    }
+    typingLabels = list;
+    if (!typingSince) typingSince = Date.now();
+    renderTypingText();
     bar.hidden = false;
+    if (!typingTick) typingTick = setInterval(renderTypingText, 1000);
   }
 
   // Лёгкий рефреш только треда (для poll + после отправки) — не дёргает
