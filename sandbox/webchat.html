@@ -29,7 +29,16 @@
   .them .bubble{background:rgba(255,255,255,.08);border-bottom-left-radius:5px}
   .me .bubble{background:#0a84ff;color:#fff;border-bottom-right-radius:5px}
   @keyframes pop{from{transform:scale(.97);opacity:.5}to{transform:scale(1);opacity:1}}
-  .composer{display:flex;gap:8px;padding:10px;border-top:1px solid rgba(255,255,255,.08)}
+  .composer{display:flex;gap:6px;padding:10px;border-top:1px solid rgba(255,255,255,.08);align-items:flex-end}
+  .icon-btn{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.05);color:var(--text,#fff);font-size:18px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:background .15s}
+  .icon-btn:hover{background:rgba(255,255,255,.1)}
+  .icon-btn.recording{background:#ff453a;border-color:#ff453a;animation:pulse 1.1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+  #micTimer{font-size:11px;margin-left:2px}
+  .media-link{color:#0a84ff;text-decoration:none;font-weight:600}
+  .media-link:hover{text-decoration:underline}
   #box{flex:1;resize:none;min-height:40px;max-height:130px;border-radius:14px;padding:10px 14px;
     font-size:16px;font-family:inherit;line-height:1.35;background:rgba(255,255,255,.05);
     color:var(--text,#fff);border:1px solid rgba(255,255,255,.12);outline:none}
@@ -51,6 +60,9 @@
   <div class="chat-card glass">
     <div id="log"><div class="empty">Загрузка…</div></div>
     <div class="composer">
+      <input type="file" id="filePicker" hidden>
+      <button id="fileBtn" class="icon-btn" title="Прикрепить файл">📎</button>
+      <button id="micBtn" class="icon-btn" title="Записать голос">🎤<span id="micTimer"></span></button>
       <textarea id="box" rows="1" placeholder="Сообщение… (@Память чтобы адресовать)" enterkeyhint="send"></textarea>
       <button id="send" disabled title="Отправить">↑</button>
     </div>
@@ -68,6 +80,9 @@ const seen = new Set();
 const J = {credentials:'include'};
 const H = s => (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const isMe = a => (a||'').startsWith('owner');
+// Маркер «(media:<id>)» → кликабельная ссылка на карточку файла.
+const renderText = s => H(s).replace(/\(media:([a-f0-9-]{6,})\)/g,
+  '<a class="media-link" href="/api/media/info/$1" target="_blank" rel="noopener">открыть ↗</a>');
 
 async function loadRooms(){
   try{
@@ -94,7 +109,7 @@ function render(m){
   }
   const row=document.createElement('div');
   row.className='row '+(mine?'me':'them'); row.dataset.who=m.from_agent;
-  row.innerHTML='<div class="bubble">'+H(m.text)+'</div>';
+  row.innerHTML='<div class="bubble">'+renderText(m.text)+'</div>';
   log.appendChild(row);
   return true;
 }
@@ -123,6 +138,65 @@ async function submit(){
   }catch(e){}
   setTimeout(()=>refresh(false), 400);
 }
+
+// ─── Прикрепления (паттерн от оригинала: /api/media/upload_b64, base64 JSON) ───
+const fileBtn = document.getElementById('fileBtn');
+const filePicker = document.getElementById('filePicker');
+const micBtn = document.getElementById('micBtn');
+const micTimer = document.getElementById('micTimer');
+
+function fileToB64(file){
+  return new Promise((res,rej)=>{ const r=new FileReader();
+    r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error);
+    r.readAsDataURL(file); });
+}
+async function uploadAndInsert(file, emoji){
+  send.disabled=true; const ph=box.placeholder; box.placeholder='Загрузка…';
+  try{
+    const b64=await fileToB64(file);
+    const r=await fetch('/api/media/upload_b64',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({file_b64:b64, filename:file.name, kind:'auto'})});
+    if(!r.ok){ let d=r.status; try{ d=(await r.json()).detail||d; }catch(e){}
+      alert('Не удалось загрузить: '+d); return; }
+    const mid=(await r.json()).media_id||'?';
+    const marker=`${emoji} ${file.name} (media:${mid})`;
+    box.value=(box.value?box.value.replace(/\n?$/,'\n'):'')+marker+'\n';
+    box.dispatchEvent(new Event('input',{bubbles:true})); box.focus();
+  }catch(e){ alert('Ошибка: '+(e&&e.message||e)); }
+  finally{ box.placeholder=ph; send.disabled=!box.value.trim(); }
+}
+fileBtn.addEventListener('click',()=>filePicker.click());
+filePicker.addEventListener('change',async e=>{
+  const f=(e.target.files||[])[0]; if(f) await uploadAndInsert(f,'📎'); filePicker.value='';
+});
+
+let rec=null, chunks=[], stream=null, t0=0, tick=null;
+micBtn.addEventListener('click',async ()=>{
+  if(rec && rec.state==='recording'){ rec.stop(); return; }
+  if(!navigator.mediaDevices || !window.MediaRecorder){ alert('Запись не поддерживается'); return; }
+  try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch(err){ alert('Микрофон отклонён: '+(err&&err.message||err)); return; }
+  try{ rec=new MediaRecorder(stream,{mimeType:'audio/webm;codecs=opus'}); }
+  catch(e){ rec=new MediaRecorder(stream); }
+  chunks=[];
+  rec.ondataavailable=ev=>{ if(ev.data&&ev.data.size) chunks.push(ev.data); };
+  rec.onstop=async ()=>{
+    micBtn.classList.remove('recording'); micTimer.textContent='';
+    if(tick){ clearInterval(tick); tick=null; }
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    if(!chunks.length) return;
+    const blob=new Blob(chunks,{type:'audio/webm'});
+    const stamp=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    await uploadAndInsert(new File([blob],`voice_${stamp}.webm`,{type:'audio/webm'}),'🎤');
+    rec=null; chunks=[];
+  };
+  rec.start(); micBtn.classList.add('recording'); t0=Date.now(); micTimer.textContent='0:00';
+  tick=setInterval(()=>{ const s=Math.floor((Date.now()-t0)/1000);
+    micTimer.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+    if(s>=300) rec.stop();
+  },250);
+});
 
 function autosize(){ box.style.height='auto'; box.style.height=Math.min(box.scrollHeight,130)+'px'; }
 box.addEventListener('input',()=>{ autosize(); send.disabled=!box.value.trim(); });
