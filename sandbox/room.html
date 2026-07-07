@@ -506,6 +506,21 @@
         filePicker.value = '';  // позволяем повторно выбрать тот же файл
       });
     }
+    // Вставка из буфера (Ctrl+V): скрин или скопированный файл падает прямо
+    // в композер — грузим так же, как через кнопку «Файл». Текстовая вставка
+    // (без файлов) идёт обычным путём, мы её не трогаем.
+    ta.addEventListener('paste', async (e) => {
+      const files = Array.from((e.clipboardData && e.clipboardData.files) || []);
+      if (!files.length) return;
+      e.preventDefault();
+      for (const f of files) {
+        const emoji = (f.type || '').startsWith('image/') ? '🖼' : '📎';
+        // У вставленных скринов имя часто «image.png» без уникальности — добавим метку времени.
+        const named = f.name && f.name !== 'image.png' ? f
+          : new File([f], `paste-${Date.now()}.png`, { type: f.type || 'image/png' });
+        await uploadAndInsert(named, emoji);
+      }
+    });
     // Голос: MediaRecorder, тап-старт → тап-стоп, на остановке грузим WebM/Opus.
     const micBtn = document.getElementById('micBtn');
     const micTimer = document.getElementById('micTimer');

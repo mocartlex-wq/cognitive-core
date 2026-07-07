@@ -82,7 +82,9 @@
     background:rgba(20,20,22,.72);backdrop-filter:blur(20px);border-top:.5px solid var(--line)}
   .comp .ib{color:var(--sent);font-size:22px}
   .comp .in{flex:1;background:rgba(255,255,255,.08);border:.5px solid var(--line);border-radius:18px;
-    padding:8px 14px;color:var(--mut);font-size:15px}
+    padding:8px 14px;color:#fff;font-size:15px;font-family:inherit;outline:none;min-width:0}
+  .comp .in::placeholder{color:var(--mut)}
+  .comp .ib,.comp .snd{cursor:pointer;user-select:none}
   .comp .snd{width:34px;height:34px;border-radius:50%;background:var(--sent);color:#fff;
     display:flex;align-items:center;justify-content:center;font-weight:700}
   .home{width:130px;height:5px;border-radius:3px;background:rgba(255,255,255,.5);margin:6px auto 8px}
@@ -137,9 +139,9 @@
         </div>
 
         <div class="comp">
-          <span class="ib">📎</span><span class="ib">🎤</span>
-          <div class="in">Сообщение…</div>
-          <div class="snd">↑</div>
+          <span class="ib" id="pAtt" title="Файл">📎</span><span class="ib" id="pMic" title="Голос">🎤</span>
+          <input class="in" id="pIn" placeholder="Сообщение…" enterkeyhint="send">
+          <div class="snd" id="pSnd">↑</div>
         </div>
         <div class="home"></div>
       </div>
@@ -162,5 +164,32 @@
       </div>
     </div>
   </div>
+
+<script>
+// Живой прототип — печатаешь, отправляешь, «агент» отвечает (демо, без сервера).
+(function(){
+  var log=document.getElementById('log'), inp=document.getElementById('pIn'), snd=document.getElementById('pSnd');
+  var replies=["Принял, сейчас гляну 👀","Готово ✅","Секунду, поднимаю данные…","Отправил в комнату.","Понял — @Аналитик подключаю."];
+  var esc=function(s){return (s||'').replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});};
+  function scroll(){ log.scrollTop=log.scrollHeight; }
+  function bubble(side,html){ var w=document.createElement('div'); w.className='row '+side;
+    w.innerHTML='<div class="b">'+html+'</div>'; log.appendChild(w); scroll(); return w; }
+  function reply(){
+    var t=document.createElement('div'); t.className='row them';
+    t.innerHTML='<div class="b"><span class="dots"><i></i><i></i><i></i></span></div>';
+    log.appendChild(t); scroll();
+    setTimeout(function(){ t.remove();
+      var who=document.createElement('div'); who.className='who'; who.textContent='Память'; log.appendChild(who);
+      bubble('them', replies[Math.floor(Math.random()*replies.length)]);
+    }, 1100);
+  }
+  function send(){ var v=(inp.value||'').trim(); if(!v) return; inp.value='';
+    bubble('me', esc(v)); setTimeout(reply, 350); }
+  snd.onclick=send;
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); send(); }});
+  document.getElementById('pAtt').onclick=function(){ bubble('me','<span class="att"><span class="ic">📎</span> документ.pdf</span>'); setTimeout(reply,350); };
+  document.getElementById('pMic').onclick=function(){ bubble('me','<span class="att"><span class="ic">🎤</span> голосовое · 0:04</span>'); setTimeout(reply,350); };
+})();
+</script>
 </body>
 </html>
