@@ -18,6 +18,25 @@
     background:rgba(94,92,230,.18);color:#8f8dff;border:1px solid rgba(94,92,230,.32)}
   .head h1{font-size:30px;margin:16px 0 8px;font-weight:800;letter-spacing:-.5px}
   .head p{max-width:620px;margin:0 auto;color:var(--mut);font-size:15px;line-height:1.55}
+
+  /* Секция установки (QR + шаги + ссылка) — первой */
+  .install{max-width:720px;margin:22px auto 4px;display:flex;gap:22px;flex-wrap:wrap;
+    align-items:center;justify-content:center;
+    background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:20px;padding:22px}
+  .qr-card{flex:0 0 auto;text-align:center}
+  .qr{background:#fff;border-radius:14px;padding:11px;display:inline-block}
+  .qr img{display:block;width:150px;height:150px}
+  .qr-cap{color:var(--mut);font-size:12px;margin-top:8px}
+  .ins-steps{flex:1;min-width:250px}
+  .ins-steps h3{margin:0 0 12px;font-size:16px}
+  .step{display:flex;gap:11px;margin-bottom:12px}
+  .step .n{font-size:20px;flex:0 0 auto}
+  .step b{font-size:14px} .step span{display:block;color:var(--mut);font-size:13px;line-height:1.5;margin-top:1px}
+  .step b span{color:var(--sent)}
+  .open-btn{display:inline-block;margin-top:6px;padding:11px 20px;border-radius:12px;
+    background:var(--sent);color:#fff;text-decoration:none;font-weight:600;font-size:15px}
+  .link-line{color:var(--mut);font-size:12.5px;margin-top:10px}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--ink)}
   .cols{display:flex;gap:26px;justify-content:center;align-items:flex-start;
     padding:26px 20px 60px;flex-wrap:wrap}
   .side{width:300px;flex:0 0 auto}
@@ -94,10 +113,25 @@
 </head>
 <body>
   <div class="head">
-    <span class="badge">Интерактивный прототип · iOS 18</span>
-    <h1>Чат Cognitive Core — прототип</h1>
-    <p>Так веб-приложение выглядит на iPhone через Safari. Живой холст для проработки дизайна —
-       правим здесь, потом переносим в рабочий <b>/chat</b>. Данные ниже — демонстрационные.</p>
+    <span class="badge">Веб-приложение · iOS 18</span>
+    <h1>Приложение Cognitive Core</h1>
+    <p>Устанавливается на iPhone и Android без магазина — открой в браузере и добавь
+       на экран «Домой». Обновляется само. Ниже — как это выглядит.</p>
+  </div>
+
+  <!-- 1) QR + установка + ссылка -->
+  <div class="install">
+    <div class="qr-card">
+      <div class="qr"><img src="/static/chat-qr.png" alt="QR"></div>
+      <div class="qr-cap">Наведи камеру телефона</div>
+    </div>
+    <div class="ins-steps">
+      <h3>Как установить</h3>
+      <div class="step"><span class="n">🍎</span><div><b>iPhone / iPad</b><span>Открой ссылку в <b>Safari</b> → «Поделиться» → <b>«На экран „Домой“»</b>.</span></div></div>
+      <div class="step"><span class="n">🤖</span><div><b>Android</b><span>Открой в <b>Chrome</b> → меню ⋮ → <b>«Установить приложение»</b>.</span></div></div>
+      <a class="open-btn" href="/chat">Открыть приложение →</a>
+      <div class="link-line">Прямая ссылка: <span class="mono">mcp.me-ai.ru/chat</span></div>
+    </div>
   </div>
 
   <div class="cols">

@@ -253,7 +253,7 @@ _CHAT_BUTTON_TAG = (
     "var tb=document.querySelector('.top-bar');if(!tb)return;"
     "if(tb.querySelector('.topbar-chat'))return;"
     "var a=document.createElement('a');a.href='/static/chat-prototype.html';a.className='topbar-chat';"
-    "a.title='Веб-чат';a.innerHTML='\\uD83D\\uDCAC \\u0427\\u0430\\u0442';"
+    "a.title='Веб-приложение';a.innerHTML='\\uD83D\\uDCF1 \\u041F\\u0440\\u0438\\u043B\\u043E\\u0436\\u0435\\u043D\\u0438\\u0435';"
     "a.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:7px 15px;"
     "margin:0 8px;border-radius:999px;background:#0a84ff;color:#fff;font-weight:600;"
     "font-size:14px;text-decoration:none;white-space:nowrap';"
