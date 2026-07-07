@@ -744,8 +744,15 @@
   }
 
   function scrollThreadToBottom() {
+    // Синхронный скролл сразу после innerHTML промахивался: layout ещё не
+    // посчитан (шрифты/картинки), scrollHeight занижен → тред открывался на
+    // ПЕРВОМ сообщении. Скроллим трижды: сейчас, после первого кадра и ещё
+    // раз после 300мс (дозагрузка контента) — идемпотентно и дёшево.
     const t = document.getElementById('threadScroll');
-    if (t) t.scrollTop = t.scrollHeight;
+    if (!t) return;
+    const go = () => { t.scrollTop = t.scrollHeight; };
+    go();
+    requestAnimationFrame(() => { go(); setTimeout(go, 300); });
   }
 
   // ── actions ───────────────────────────────────────────────────────────
