@@ -108,6 +108,55 @@
     display:flex;align-items:center;justify-content:center;font-weight:700}
   .home{width:130px;height:5px;border-radius:3px;background:rgba(255,255,255,.5);margin:6px auto 8px}
 
+  /* Экраны + таб-бар */
+  .app{flex:1;min-height:0;display:flex}
+  .view{display:none;flex-direction:column;flex:1;min-width:0}
+  .view.active{display:flex}
+  .vhdr{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;
+    background:rgba(20,20,22,.72);backdrop-filter:blur(20px);border-bottom:.5px solid var(--line)}
+  .vhdr b{font-size:20px;font-weight:700} .vplus{color:var(--sent);font-size:28px;line-height:.7;cursor:pointer}
+  .tabbar{display:flex;flex:0 0 auto;background:rgba(20,20,22,.85);backdrop-filter:blur(20px);
+    border-top:.5px solid var(--line)}
+  .tab{flex:1;text-align:center;padding:7px 0 3px;font-size:21px;color:var(--mut);cursor:pointer;user-select:none}
+  .tab span{display:block;font-size:10px;margin-top:1px} .tab.active{color:var(--sent)}
+
+  /* Список комнат */
+  .rlist{flex:1;overflow-y:auto}
+  .rrow{display:flex;gap:12px;align-items:center;padding:11px 14px;border-bottom:.5px solid var(--line);cursor:pointer}
+  .rrow:active{background:rgba(255,255,255,.06)}
+  .rav{width:44px;height:44px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;
+    justify-content:center;font-size:20px;color:#fff}
+  .rmain{flex:1;min-width:0} .rname{font-weight:600;font-size:15px}
+  .rlast{color:var(--mut);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rmeta{display:flex;flex-direction:column;align-items:flex-end;gap:5px;font-size:12px;color:var(--mut)}
+  .rbadge{background:var(--sent);color:#fff;font-size:11px;min-width:18px;height:18px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;padding:0 5px}
+
+  /* Профиль */
+  .pbody{flex:1;overflow-y:auto;padding:14px}
+  .pcard{display:flex;gap:14px;align-items:center;background:rgba(255,255,255,.04);border-radius:14px;padding:14px;margin-bottom:14px}
+  .pav{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#5e5ce6,#0a84ff);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px}
+  .pname{font-weight:700;font-size:16px} .pmeta{color:var(--mut);font-size:13px;margin-top:2px}
+  .pgrp{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:14px 4px 6px}
+  .prow{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);
+    padding:12px 14px;border-bottom:.5px solid var(--line)}
+  .pl{display:flex;align-items:center;gap:11px;font-size:15px} .pic{width:24px;text-align:center}
+  .pval{color:var(--mut);font-size:14px} .parr{color:var(--mut);font-size:20px}
+  .prow.tap{cursor:pointer} .prow.tap:active{background:rgba(255,255,255,.08)}
+  .toggle{width:44px;height:26px;border-radius:13px;background:rgba(255,255,255,.18);position:relative;cursor:pointer;transition:background .2s;flex:0 0 auto}
+  .toggle:after{content:'';position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;background:#fff;transition:transform .2s}
+  .toggle.on{background:#30d158} .toggle.on:after{transform:translateX(18px)}
+
+  /* Светлая тема телефона */
+  .screen.light{--scr:#fff;--recv:#e5e5ea;--ink:#000;background:#fff;color:#000}
+  .screen.light .them .b{color:#000}
+  .screen.light .chdr,.screen.light .vhdr,.screen.light .comp,.screen.light .tabbar{background:rgba(245,245,247,.86)}
+  .screen.light .statusbar,.screen.light .chdr b,.screen.light .rname,.screen.light .pname,
+  .screen.light .vhdr b,.screen.light .pl,.screen.light .comp .in{color:#000}
+  .screen.light .pcard,.screen.light .prow,.screen.light .comp .in{background:rgba(0,0,0,.05)}
+  .screen.light .rrow,.screen.light .prow{border-color:rgba(0,0,0,.08)}
+
   @media (max-width:1040px){ .side{display:none} }
 </style>
 </head>
@@ -142,6 +191,7 @@
         <div class="item"><span class="tag n">NEW</span><div><b>iMessage-пузыри</b><span>Хвостики, группировка подряд, пружинная анимация — как в iOS 18.</span></div></div>
         <div class="item"><span class="tag n">NEW</span><div><b>Прикрепления</b><span>📎 фото/файлы и 🎤 голосовые прямо в пузыре.</span></div></div>
         <div class="item"><span class="tag n">NEW</span><div><b>Индикатор набора</b><span>Три точки «печатает…», пока агент отвечает.</span></div></div>
+        <div class="item"><span class="tag n">NEW</span><div><b>Комнаты и Профиль</b><span>Таб-бар снизу: список чатов + настройки (аккаунт, тема, уведомления). Тапай вкладки и комнаты.</span></div></div>
         <div class="item"><span class="tag u">UPD</span><div><b>Full-screen на iPhone</b><span>100dvh + safe-area, «на экран Домой» — как нативное.</span></div></div>
       </div>
     </div>
@@ -152,30 +202,66 @@
         <div class="island"></div>
         <div class="statusbar"><span>9:41</span><span class="r">5G ▪ 100%</span></div>
 
-        <div class="chdr">
-          <span class="bk">‹</span>
-          <div class="peer"><div class="ava">🧠</div><div><b>Память</b><small>агенты на связи</small></div></div>
-          <span style="font-size:19px">📱</span>
+        <div class="app">
+          <!-- ЭКРАН: ЧАТ -->
+          <div class="view active" id="vChat">
+            <div class="chdr">
+              <span class="bk">‹</span>
+              <div class="peer"><div class="ava">🧠</div><div><b id="chatName">Память</b><small>агенты на связи</small></div></div>
+              <span style="font-size:19px">📱</span>
+            </div>
+            <div class="log" id="log">
+              <div class="tstamp">Сегодня 9:38</div>
+              <div class="who">Память</div>
+              <div class="row them"><div class="b">Привет! Я на связи. Чем помочь?</div></div>
+              <div class="row me"><div class="b">покажи задачи по проекту РЖД</div></div>
+              <div class="row me grp"><div class="b att"><span class="ic">📎</span> смета_ржд.xlsx</div></div>
+              <div class="who">Память</div>
+              <div class="row them"><div class="b">Нашёл 3 задачи. Сметы приложил, дедлайн ближайшей — сегодня 18:00.</div></div>
+              <div class="row them grp"><div class="b att"><span class="ic">🎤</span> голосовое · 0:12</div></div>
+              <div class="row me"><div class="b">спасибо 👍</div></div>
+            </div>
+            <div class="comp">
+              <span class="ib" id="pAtt" title="Файл">📎</span><span class="ib" id="pMic" title="Голос">🎤</span>
+              <input class="in" id="pIn" placeholder="Сообщение…" enterkeyhint="send">
+              <div class="snd" id="pSnd">↑</div>
+            </div>
+          </div>
+
+          <!-- ЭКРАН: КОМНАТЫ -->
+          <div class="view" id="vRooms">
+            <div class="vhdr"><b>Комнаты</b><span class="vplus" title="Создать">+</span></div>
+            <div class="rlist">
+              <div class="rrow" data-name="Память"><div class="rav" style="background:linear-gradient(135deg,#5e5ce6,#0a84ff)">🧠</div><div class="rmain"><div class="rname">Память</div><div class="rlast">Нашёл 3 задачи, дедлайн 18:00</div></div><div class="rmeta"><span>9:38</span><span class="rbadge">2</span></div></div>
+              <div class="rrow" data-name="Аналитик"><div class="rav" style="background:linear-gradient(135deg,#30d158,#0a84ff)">📊</div><div class="rmain"><div class="rname">Аналитик</div><div class="rlast">Отчёт по неделе готов</div></div><div class="rmeta"><span>вчера</span></div></div>
+              <div class="rrow" data-name="Проект РЖД"><div class="rav" style="background:linear-gradient(135deg,#ff9f0a,#ff453a)">🚄</div><div class="rmain"><div class="rname">Проект РЖД</div><div class="rlast">Смета отправлена на подпись</div></div><div class="rmeta"><span>вчера</span></div></div>
+              <div class="rrow" data-name="Общий чат"><div class="rav" style="background:linear-gradient(135deg,#8e8e93,#48484a)">#</div><div class="rmain"><div class="rname">Общий чат</div><div class="rlast">3 участника · @-адресация</div></div><div class="rmeta"><span>пн</span></div></div>
+            </div>
+          </div>
+
+          <!-- ЭКРАН: ПРОФИЛЬ -->
+          <div class="view" id="vProfile">
+            <div class="vhdr"><b>Профиль</b></div>
+            <div class="pbody">
+              <div class="pcard">
+                <div class="pav">АЛ</div>
+                <div><div class="pname">Алексей</div><div class="pmeta">mozartlex@yandex.ru · Владелец</div></div>
+              </div>
+              <div class="pgrp">Общие</div>
+              <div class="prow"><div class="pl"><span class="pic">🔔</span>Push-уведомления</div><div class="toggle on"></div></div>
+              <div class="prow"><div class="pl"><span class="pic">🌙</span>Тёмная тема</div><div class="toggle on" id="thToggle"></div></div>
+              <div class="prow"><div class="pl"><span class="pic">🔄</span>Версия</div><div class="pval">v0.6.0</div></div>
+              <div class="pgrp">Аккаунт</div>
+              <div class="prow tap"><div class="pl"><span class="pic">👥</span>Войти под другим</div><span class="parr">›</span></div>
+              <div class="prow tap"><div class="pl"><span class="pic" style="color:#ff453a">⎋</span><span style="color:#ff453a">Выйти</span></div></div>
+            </div>
+          </div>
         </div>
 
-        <div class="log" id="log">
-          <div class="tstamp">Сегодня 9:38</div>
-          <div class="who">Память</div>
-          <div class="row them"><div class="b">Привет! Я на связи. Чем помочь?</div></div>
-          <div class="row me"><div class="b">покажи задачи по проекту РЖД</div></div>
-          <div class="row me grp"><div class="b att"><span class="ic">📎</span> смета_ржд.xlsx</div></div>
-          <div class="who">Память</div>
-          <div class="row them"><div class="b">Нашёл 3 задачи. Сметы приложил, дедлайн ближайшей — сегодня 18:00.</div></div>
-          <div class="row them grp"><div class="b att"><span class="ic">🎤</span> голосовое · 0:12</div></div>
-          <div class="row me"><div class="b">спасибо 👍</div></div>
-          <div class="who">Память</div>
-          <div class="row them"><div class="b"><span class="dots"><i></i><i></i><i></i></span></div></div>
-        </div>
-
-        <div class="comp">
-          <span class="ib" id="pAtt" title="Файл">📎</span><span class="ib" id="pMic" title="Голос">🎤</span>
-          <input class="in" id="pIn" placeholder="Сообщение…" enterkeyhint="send">
-          <div class="snd" id="pSnd">↑</div>
+        <div class="tabbar">
+          <div class="tab active" data-v="vChat">💬<span>Чат</span></div>
+          <div class="tab" data-v="vRooms">👥<span>Комнаты</span></div>
+          <div class="tab" data-v="vProfile">⚙️<span>Профиль</span></div>
         </div>
         <div class="home"></div>
       </div>
@@ -223,6 +309,26 @@
   inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); send(); }});
   document.getElementById('pAtt').onclick=function(){ bubble('me','<span class="att"><span class="ic">📎</span> документ.pdf</span>'); setTimeout(reply,350); };
   document.getElementById('pMic').onclick=function(){ bubble('me','<span class="att"><span class="ic">🎤</span> голосовое · 0:04</span>'); setTimeout(reply,350); };
+
+  // ── Навигация: вкладки, комнаты, настройки, тема ──
+  var tabs=[].slice.call(document.querySelectorAll('.tab'));
+  var views={}; [].forEach.call(document.querySelectorAll('.view'),function(v){views[v.id]=v;});
+  function go(id){
+    tabs.forEach(function(t){ t.classList.toggle('active', t.getAttribute('data-v')===id); });
+    Object.keys(views).forEach(function(k){ views[k].classList.toggle('active', k===id); });
+  }
+  tabs.forEach(function(t){ t.onclick=function(){ go(t.getAttribute('data-v')); }; });
+  // Комната → открыть чат под её именем
+  [].forEach.call(document.querySelectorAll('.rrow'),function(r){
+    r.onclick=function(){ document.getElementById('chatName').textContent=r.getAttribute('data-name'); go('vChat'); };
+  });
+  // Тумблеры
+  [].forEach.call(document.querySelectorAll('.toggle'),function(t){ t.onclick=function(){ t.classList.toggle('on'); }; });
+  // Тёмная/светлая тема телефона
+  var th=document.getElementById('thToggle');
+  if(th) th.addEventListener('click',function(){
+    document.querySelector('.screen').classList.toggle('light', !th.classList.contains('on'));
+  });
 })();
 </script>
 </body>
