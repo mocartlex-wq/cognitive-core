@@ -154,37 +154,6 @@
   .app.light #box{background:rgba(0,0,0,.05)}
   .app.light .pcard,.app.light .pgrp{background:rgba(0,0,0,.05)}
   .app.light .rrow:active,.app.light .prow.btn:active{background:rgba(0,0,0,.05)}
-
-  /* ── Шит техподдержки ── */
-  .sheet{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;
-    background:rgba(0,0,0,.5)}
-  .sheet.open{display:flex}
-  .sheet-card{width:100%;max-width:820px;background:#1c1c1e;border-radius:18px 18px 0 0;
-    padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 16px);max-height:88vh;overflow-y:auto;
-    animation:slideup .25s cubic-bezier(.2,.9,.3,1.1)}
-  @keyframes slideup{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
-  .app.light .sheet-card{background:#f2f2f7}
-  .sheet-card h3{margin:2px 0 4px;font-size:19px}
-  .sheet-card .sub{color:var(--mut);font-size:13px;line-height:1.5;margin-bottom:13px}
-  #supText{width:100%;min-height:92px;resize:vertical;border-radius:12px;padding:11px 13px;
-    font-size:15px;font-family:inherit;background:rgba(255,255,255,.08);color:var(--ink);
-    border:.5px solid var(--hair);outline:none}
-  .app.light #supText{background:rgba(0,0,0,.05)}
-  .sup-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin:11px 0}
-  .sup-th{position:relative;width:66px;height:66px;border-radius:10px;overflow:hidden;background:#000}
-  .sup-th img{width:100%;height:100%;object-fit:cover;display:block}
-  .sup-th button{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;
-    border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;cursor:pointer;line-height:1;padding:0}
-  .sup-add{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:11px;
-    border:1px dashed var(--hair);background:none;color:var(--sent);font-size:14px;cursor:pointer;font-family:inherit}
-  .sup-status{font-size:13px;color:var(--mut);margin-top:9px;text-align:center;min-height:16px}
-  .sheet-foot{display:flex;gap:10px;margin-top:14px}
-  .sheet-foot button{flex:1;padding:12px;border-radius:12px;border:none;font-size:15px;font-weight:600;
-    cursor:pointer;font-family:inherit}
-  #supCancel{background:rgba(255,255,255,.1);color:var(--ink)}
-  .app.light #supCancel{background:rgba(0,0,0,.08)}
-  #supSend{background:var(--sent);color:#fff}
-  #supSend:disabled{opacity:.5}
 </style>
 </head>
 <body>
@@ -230,35 +199,19 @@
   </nav>
 </div>
 
-<!-- Шит техподдержки -->
-<div class="sheet" id="supSheet">
-  <div class="sheet-card">
-    <h3>🛟 Техподдержка</h3>
-    <div class="sub">Опиши проблему и приложи скрины — сообщение придёт агенту «Память» с уведомлением.</div>
-    <textarea id="supText" placeholder="Что случилось? Что ожидал и что произошло…"></textarea>
-    <div class="sup-thumbs" id="supThumbs"></div>
-    <input type="file" id="supFile" accept="image/*" multiple hidden>
-    <button type="button" class="sup-add" id="supAdd">📷 Добавить скрин</button>
-    <div class="sup-status" id="supStatus"></div>
-    <div class="sheet-foot">
-      <button type="button" id="supCancel">Отмена</button>
-      <button type="button" id="supSend">Отправить</button>
-    </div>
-  </div>
-</div>
-
 <script>
 const app = document.getElementById('app');
 const log = document.getElementById('log');
 const box = document.getElementById('box');
 const send = document.getElementById('send');
-let roomId = null, rooms = [];
+let roomId = null, rooms = [], supportRoomId = null;
 const seen = new Set();
 const J = {credentials:'include'};
 const H = s => (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const isMe = a => (a||'').startsWith('owner');
 const initials = s => (s||'?').trim().replace(/^[@#]/,'').slice(0,2).toUpperCase();
-const renderText = s => H(s).replace(/\(media:([a-f0-9-]{6,})\)/g,
+// @dsdsd — служебный маршрут-токен техподдержки: в отображении вырезаем.
+const renderText = s => H((s||'').replace(/\s*@dsdsd\b/gi,'')).replace(/\(media:([a-f0-9-]{6,})\)/g,
   '<a class="media-link" href="/api/media/info/$1" target="_blank" rel="noopener">открыть ↗</a>');
 
 /* ─── Навигация по вкладкам ─── */
@@ -278,14 +231,20 @@ async function loadRooms(){
     if(r.status===401){ location.href='/ui/login?return=/chat'; return; }
     const d = await r.json();
     rooms = (d.items||[]).filter(x=>x.is_owner!==false);
+    // Комната техподдержки — служебная, прячем её из списка «Комнаты».
+    const sr=rooms.find(x=>(x.name||'').indexOf('🛟')===0 || x.name==='Техподдержка');
+    supportRoomId = sr ? sr.id : null;
     renderRoomList();
     await autoOpen();
   }catch(e){ document.getElementById('rlist').innerHTML='<div class="empty">Ошибка загрузки комнат</div>'; }
 }
+// Обычные комнаты (без служебной техподдержки).
+function realRooms(){ return rooms.filter(x=> x.id!==supportRoomId && (x.name||'').indexOf('🛟')!==0 && x.name!=='Техподдержка'); }
 function renderRoomList(){
   const el = document.getElementById('rlist');
-  if(!rooms.length){ el.innerHTML='<div class="empty">У тебя пока нет своих комнат.</div>'; return; }
-  el.innerHTML = rooms.map(x=>
+  const list = realRooms();
+  if(!list.length){ el.innerHTML='<div class="empty">У тебя пока нет своих комнат.</div>'; return; }
+  el.innerHTML = list.map(x=>
     `<div class="rrow" data-id="${x.id}" data-name="${H(x.name)}">
        <div class="rav">${H(initials(x.name))}</div>
        <div class="rmain"><div class="rname">${H(x.name)}</div>
@@ -298,7 +257,7 @@ function renderRoomList(){
 }
 // Открыть первую ДОСТУПНУЮ комнату (пропускаем те, что дают 403).
 async function autoOpen(){
-  for(const it of rooms){
+  for(const it of realRooms()){
     try{ const r=await fetch(`/user/rooms/${it.id}/detail`, J);
       if(r.ok){ setRoom(it.id, it.name); paint(await r.json(), true); return; } }catch(e){}
   }
@@ -309,6 +268,7 @@ function setRoom(id,name){
   roomId=id;
   document.getElementById('chatName').textContent=name||'Чат';
   document.getElementById('chatAva').textContent=initials(name);
+  document.getElementById('chatStatus').textContent='агенты на связи';
 }
 async function openRoom(id,name){
   setRoom(id,name); go('vChat'); seen.clear(); log.innerHTML='<div class="empty">Загрузка…</div>';
@@ -362,8 +322,10 @@ async function refresh(reset){
 async function submit(){
   const t=box.value.trim(); if(!t||!roomId) return;
   box.value=''; autosize(); send.disabled=true;
+  // В ветке техподдержки добавляем скрытый @dsdsd — сообщение уходит мне в inbox с уведомлением.
+  const out = (roomId===supportRoomId) ? (t+' @dsdsd') : t;
   try{ await fetch(`/user/rooms/${roomId}/post`,{...J,method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}); }catch(e){}
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({text:out})}); }catch(e){}
   await refresh(false); showTyping(); setTimeout(()=>refresh(false),800);
 }
 
@@ -486,58 +448,30 @@ function buildProfile(u){
     location.href='/ui/login';
   });
   const rs=document.getElementById('rSupport');
-  if(rs) rs.addEventListener('click',openSup);
+  if(rs) rs.addEventListener('click',openSupport);
 }
 
-/* ─── Техподдержка (сообщение агенту «Память» + скрины) ─── */
-const supSheet=document.getElementById('supSheet');
-let supFiles=[]; // {file,url}
-function openSup(){ setSup(''); supSheet.classList.add('open'); }
-function closeSup(){ supSheet.classList.remove('open'); }
-function setSup(t){ document.getElementById('supStatus').textContent=t||''; }
-function renderThumbs(){
-  const c=document.getElementById('supThumbs');
-  c.innerHTML=supFiles.map((s,i)=>`<div class="sup-th"><img src="${s.url}"><button type="button" data-i="${i}">✕</button></div>`).join('');
-  c.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ supFiles.splice(+b.getAttribute('data-i'),1); renderThumbs(); }));
-}
-document.getElementById('supAdd').addEventListener('click',()=>document.getElementById('supFile').click());
-document.getElementById('supFile').addEventListener('change',e=>{
-  [...(e.target.files||[])].forEach(f=>{ if(f.type.indexOf('image/')===0) supFiles.push({file:f,url:URL.createObjectURL(f)}); });
-  e.target.value=''; renderThumbs();
-});
-document.getElementById('supCancel').addEventListener('click',closeSup);
-supSheet.addEventListener('click',e=>{ if(e.target===supSheet) closeSup(); });
-document.getElementById('supSend').addEventListener('click',async ()=>{
-  const text=document.getElementById('supText').value.trim();
-  if(!text && !supFiles.length){ setSup('Напиши сообщение или приложи скрин'); return; }
-  const sBtn=document.getElementById('supSend'); sBtn.disabled=true; setSup('Отправляю…');
+/* ─── Техподдержка: отдельная ветка-диалог со мной (не мешается в основной чат) ─── */
+async function ensureSupportRoom(){
+  if(supportRoomId) return supportRoomId;
+  const sr=rooms.find(x=>(x.name||'').indexOf('🛟')===0 || x.name==='Техподдержка');
+  if(sr){ supportRoomId=sr.id; return supportRoomId; }
   try{
-    let target=roomId;
-    if(!target){
-      const r=await fetch('/user/rooms',{...J,method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name:'Техподдержка'})});
-      if(r.ok) target=(await r.json()).id;
-    }
-    if(!target){ setSup('Нет комнаты для отправки'); sBtn.disabled=false; return; }
-    const markers=[];
-    for(const s of supFiles){
-      const b64=await fileToB64(s.file);
-      const rr=await fetch('/api/media/upload_b64',{method:'POST',credentials:'same-origin',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({file_b64:b64,filename:s.file.name,kind:'auto'})});
-      if(rr.ok){ const mid=(await rr.json()).media_id; if(mid) markers.push(`📷 ${s.file.name} (media:${mid})`); }
-    }
-    // @dsdsd — резолв упоминания (Case 1 моста) → сообщение попадает в мой agent_inbox с уведомлением.
-    const msg='🛟 Техподдержка @dsdsd\n'+(text||'(без текста)')+(markers.length?'\n'+markers.join('\n'):'');
-    const pr=await fetch(`/user/rooms/${target}/post`,{...J,method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({text:msg})});
-    if(!pr.ok){ setSup('Ошибка отправки ('+pr.status+')'); sBtn.disabled=false; return; }
-    setSup('Отправлено ✓ Агент получит уведомление');
-    document.getElementById('supText').value=''; supFiles.forEach(s=>URL.revokeObjectURL(s.url)); supFiles=[]; renderThumbs();
-    if(target===roomId) refresh(false);
-    setTimeout(()=>{ closeSup(); sBtn.disabled=false; }, 1500);
-  }catch(e){ setSup('Ошибка: '+(e&&e.message||e)); sBtn.disabled=false; }
-});
+    const r=await fetch('/user/rooms',{...J,method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:'🛟 Техподдержка'})});
+    if(r.ok){ const d=await r.json(); supportRoomId=d.id; rooms.push({id:d.id,name:'🛟 Техподдержка',is_owner:true}); }
+  }catch(e){}
+  return supportRoomId;
+}
+async function openSupport(){
+  const id=await ensureSupportRoom();
+  if(!id){ alert('Не удалось открыть техподдержку'); return; }
+  setRoom(id,'🛟 Техподдержка');
+  document.getElementById('chatAva').textContent='🛟';
+  document.getElementById('chatStatus').textContent='техподдержка · отвечу здесь';
+  go('vChat'); seen.clear(); log.innerHTML='<div class="empty">Напиши сообщение — можно со скринами (📎). Это отдельная ветка, отвечу здесь.</div>';
+  await refresh(true);
+}
 window.addEventListener('appinstalled',()=>{ buildProfile(lastUser); });
 
 /* ─── Старт ─── */
