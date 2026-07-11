@@ -526,7 +526,8 @@ document.getElementById('supSend').addEventListener('click',async ()=>{
         body:JSON.stringify({file_b64:b64,filename:s.file.name,kind:'auto'})});
       if(rr.ok){ const mid=(await rr.json()).media_id; if(mid) markers.push(`📷 ${s.file.name} (media:${mid})`); }
     }
-    const msg='🛟 Техподдержка\n'+(text||'(без текста)')+(markers.length?'\n'+markers.join('\n'):'');
+    // @dsdsd — резолв упоминания (Case 1 моста) → сообщение попадает в мой agent_inbox с уведомлением.
+    const msg='🛟 Техподдержка @dsdsd\n'+(text||'(без текста)')+(markers.length?'\n'+markers.join('\n'):'');
     const pr=await fetch(`/user/rooms/${target}/post`,{...J,method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify({text:msg})});
     if(!pr.ok){ setSup('Ошибка отправки ('+pr.status+')'); sBtn.disabled=false; return; }
