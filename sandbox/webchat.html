@@ -476,6 +476,7 @@ function buildProfile(u){
   });
   // Аккаунт
   document.getElementById('rSwitch').addEventListener('click',async ()=>{
+    if(!confirm('Выйти из текущего аккаунта и войти под другим?')) return;
     try{ await fetch('/auth/logout',{method:'POST',credentials:'include'}); }catch(e){}
     location.href='/ui/login?return=/chat';
   });
