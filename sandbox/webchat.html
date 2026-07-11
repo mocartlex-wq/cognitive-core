@@ -154,6 +154,37 @@
   .app.light #box{background:rgba(0,0,0,.05)}
   .app.light .pcard,.app.light .pgrp{background:rgba(0,0,0,.05)}
   .app.light .rrow:active,.app.light .prow.btn:active{background:rgba(0,0,0,.05)}
+
+  /* ── Шит техподдержки ── */
+  .sheet{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;
+    background:rgba(0,0,0,.5)}
+  .sheet.open{display:flex}
+  .sheet-card{width:100%;max-width:820px;background:#1c1c1e;border-radius:18px 18px 0 0;
+    padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 16px);max-height:88vh;overflow-y:auto;
+    animation:slideup .25s cubic-bezier(.2,.9,.3,1.1)}
+  @keyframes slideup{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
+  .app.light .sheet-card{background:#f2f2f7}
+  .sheet-card h3{margin:2px 0 4px;font-size:19px}
+  .sheet-card .sub{color:var(--mut);font-size:13px;line-height:1.5;margin-bottom:13px}
+  #supText{width:100%;min-height:92px;resize:vertical;border-radius:12px;padding:11px 13px;
+    font-size:15px;font-family:inherit;background:rgba(255,255,255,.08);color:var(--ink);
+    border:.5px solid var(--hair);outline:none}
+  .app.light #supText{background:rgba(0,0,0,.05)}
+  .sup-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin:11px 0}
+  .sup-th{position:relative;width:66px;height:66px;border-radius:10px;overflow:hidden;background:#000}
+  .sup-th img{width:100%;height:100%;object-fit:cover;display:block}
+  .sup-th button{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;
+    border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;cursor:pointer;line-height:1;padding:0}
+  .sup-add{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:11px;
+    border:1px dashed var(--hair);background:none;color:var(--sent);font-size:14px;cursor:pointer;font-family:inherit}
+  .sup-status{font-size:13px;color:var(--mut);margin-top:9px;text-align:center;min-height:16px}
+  .sheet-foot{display:flex;gap:10px;margin-top:14px}
+  .sheet-foot button{flex:1;padding:12px;border-radius:12px;border:none;font-size:15px;font-weight:600;
+    cursor:pointer;font-family:inherit}
+  #supCancel{background:rgba(255,255,255,.1);color:var(--ink)}
+  .app.light #supCancel{background:rgba(0,0,0,.08)}
+  #supSend{background:var(--sent);color:#fff}
+  #supSend:disabled{opacity:.5}
 </style>
 </head>
 <body>
@@ -197,6 +228,23 @@
     <button class="tab" data-v="vRooms" type="button">👥<span>Комнаты</span></button>
     <button class="tab" data-v="vProfile" type="button">⚙️<span>Профиль</span></button>
   </nav>
+</div>
+
+<!-- Шит техподдержки -->
+<div class="sheet" id="supSheet">
+  <div class="sheet-card">
+    <h3>🛟 Техподдержка</h3>
+    <div class="sub">Опиши проблему и приложи скрины — сообщение придёт агенту «Память» с уведомлением.</div>
+    <textarea id="supText" placeholder="Что случилось? Что ожидал и что произошло…"></textarea>
+    <div class="sup-thumbs" id="supThumbs"></div>
+    <input type="file" id="supFile" accept="image/*" multiple hidden>
+    <button type="button" class="sup-add" id="supAdd">📷 Добавить скрин</button>
+    <div class="sup-status" id="supStatus"></div>
+    <div class="sheet-foot">
+      <button type="button" id="supCancel">Отмена</button>
+      <button type="button" id="supSend">Отправить</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -407,6 +455,9 @@ function buildProfile(u){
          <span class="pval">${appVer?('v'+H(appVer)):'Cognitive Core'}</span></div>
      </div>
      <div class="pgrp">
+       <div class="prow btn" id="rSupport"><div class="pl"><span class="pic">🛟</span>Техподдержка</div><span class="parr">›</span></div>
+     </div>
+     <div class="pgrp">
        <div class="prow btn" id="rSwitch"><div class="pl"><span class="pic">🔀</span>Войти под другим</div><span class="parr">›</span></div>
        <div class="prow btn danger" id="rLogout"><div class="pl"><span class="pic">🚪</span>Выйти</div><span class="parr">›</span></div>
      </div>
@@ -433,7 +484,58 @@ function buildProfile(u){
     try{ await fetch('/auth/logout',{method:'POST',credentials:'include'}); }catch(e){}
     location.href='/ui/login';
   });
+  const rs=document.getElementById('rSupport');
+  if(rs) rs.addEventListener('click',openSup);
 }
+
+/* ─── Техподдержка (сообщение агенту «Память» + скрины) ─── */
+const supSheet=document.getElementById('supSheet');
+let supFiles=[]; // {file,url}
+function openSup(){ setSup(''); supSheet.classList.add('open'); }
+function closeSup(){ supSheet.classList.remove('open'); }
+function setSup(t){ document.getElementById('supStatus').textContent=t||''; }
+function renderThumbs(){
+  const c=document.getElementById('supThumbs');
+  c.innerHTML=supFiles.map((s,i)=>`<div class="sup-th"><img src="${s.url}"><button type="button" data-i="${i}">✕</button></div>`).join('');
+  c.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ supFiles.splice(+b.getAttribute('data-i'),1); renderThumbs(); }));
+}
+document.getElementById('supAdd').addEventListener('click',()=>document.getElementById('supFile').click());
+document.getElementById('supFile').addEventListener('change',e=>{
+  [...(e.target.files||[])].forEach(f=>{ if(f.type.indexOf('image/')===0) supFiles.push({file:f,url:URL.createObjectURL(f)}); });
+  e.target.value=''; renderThumbs();
+});
+document.getElementById('supCancel').addEventListener('click',closeSup);
+supSheet.addEventListener('click',e=>{ if(e.target===supSheet) closeSup(); });
+document.getElementById('supSend').addEventListener('click',async ()=>{
+  const text=document.getElementById('supText').value.trim();
+  if(!text && !supFiles.length){ setSup('Напиши сообщение или приложи скрин'); return; }
+  const sBtn=document.getElementById('supSend'); sBtn.disabled=true; setSup('Отправляю…');
+  try{
+    let target=roomId;
+    if(!target){
+      const r=await fetch('/user/rooms',{...J,method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:'Техподдержка'})});
+      if(r.ok) target=(await r.json()).id;
+    }
+    if(!target){ setSup('Нет комнаты для отправки'); sBtn.disabled=false; return; }
+    const markers=[];
+    for(const s of supFiles){
+      const b64=await fileToB64(s.file);
+      const rr=await fetch('/api/media/upload_b64',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({file_b64:b64,filename:s.file.name,kind:'auto'})});
+      if(rr.ok){ const mid=(await rr.json()).media_id; if(mid) markers.push(`📷 ${s.file.name} (media:${mid})`); }
+    }
+    const msg='🛟 Техподдержка\n'+(text||'(без текста)')+(markers.length?'\n'+markers.join('\n'):'');
+    const pr=await fetch(`/user/rooms/${target}/post`,{...J,method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({text:msg})});
+    if(!pr.ok){ setSup('Ошибка отправки ('+pr.status+')'); sBtn.disabled=false; return; }
+    setSup('Отправлено ✓ Агент получит уведомление');
+    document.getElementById('supText').value=''; supFiles.forEach(s=>URL.revokeObjectURL(s.url)); supFiles=[]; renderThumbs();
+    if(target===roomId) refresh(false);
+    setTimeout(()=>{ closeSup(); sBtn.disabled=false; }, 1500);
+  }catch(e){ setSup('Ошибка: '+(e&&e.message||e)); sBtn.disabled=false; }
+});
 window.addEventListener('appinstalled',()=>{ buildProfile(lastUser); });
 
 /* ─── Старт ─── */
