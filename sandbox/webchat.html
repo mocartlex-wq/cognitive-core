@@ -106,6 +106,17 @@
     display:flex;align-items:center;justify-content:center}
   #send:disabled{opacity:0;transform:scale(.5);pointer-events:none;width:0;margin:0}
   .hint{display:none}
+  /* Баннер установки PWA */
+  .pwa-bar,.pwa-ios{flex:0 0 auto;display:flex;align-items:center;gap:10px;
+    margin:0 10px 6px;padding:9px 12px;border-radius:13px;font-size:14px;
+    background:rgba(10,132,255,.14);border:1px solid rgba(10,132,255,.32);color:#fff}
+  .pwa-ios{display:block;line-height:1.5;position:relative;padding-right:34px}
+  .pwa-txt{flex:1 1 auto;font-weight:600}
+  .pwa-bar #pwaInstall{flex:0 0 auto;padding:7px 15px;border-radius:10px;border:none;
+    background:#0a84ff;color:#fff;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit}
+  #pwaClose,#iosClose{flex:0 0 auto;width:26px;height:26px;border-radius:50%;border:none;
+    background:rgba(255,255,255,.1);color:#fff;cursor:pointer;font-size:13px;line-height:1}
+  #iosClose{position:absolute;top:7px;right:7px}
 </style>
 </head>
 <body>
@@ -118,6 +129,16 @@
     </div>
     <select id="roomSel" aria-label="Комната"></select>
     <a href="/static/chat-install.html" class="back instl" title="Установить на телефон" style="font-size:19px">📱</a>
+  </div>
+
+  <div class="pwa-bar" id="pwaBar" hidden>
+    <span class="pwa-txt">📲 Установить как приложение</span>
+    <button type="button" id="pwaInstall">Установить</button>
+    <button type="button" id="pwaClose" aria-label="Скрыть">✕</button>
+  </div>
+  <div class="pwa-ios" id="iosHint" hidden>
+    Нажми <b>«Поделиться»</b> внизу Safari → <b>«На экран „Домой“»</b>, и «Память» появится как приложение.
+    <button type="button" id="iosClose" aria-label="Скрыть">✕</button>
   </div>
 
   <div class="chat-card">
@@ -291,6 +312,32 @@ roomSel.addEventListener('change',()=>{ roomId=roomSel.value; refresh(true); });
 
 loadRooms();
 setInterval(()=>refresh(false), 4000);
+</script>
+<script>
+// Установка PWA: Chrome/Android — системный диалог; iPhone/Safari — подсказка про «На экран Домой».
+(function(){
+  var bar=document.getElementById('pwaBar'), ios=document.getElementById('iosHint'),
+      btn=document.getElementById('pwaInstall'), x=document.getElementById('pwaClose'),
+      ix=document.getElementById('iosClose');
+  var deferred=null, KEY='pwa-hide-until';
+  var standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  var isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  function snoozed(){ try{ return Date.now() < +(localStorage.getItem(KEY)||0); }catch(e){ return false; } }
+  function snooze(){ try{ localStorage.setItem(KEY, Date.now()+7*864e5); }catch(e){} }
+  if(standalone||snoozed()) return;
+  // Android/desktop Chrome: ждём событие и показываем баннер
+  window.addEventListener('beforeinstallprompt',function(e){ e.preventDefault(); deferred=e; if(bar) bar.hidden=false; });
+  if(btn) btn.addEventListener('click',async function(){
+    if(!deferred) return; deferred.prompt();
+    try{ var c=await deferred.userChoice; if(c&&c.outcome==='accepted'){ bar.hidden=true; } }catch(e){}
+    deferred=null;
+  });
+  if(x) x.addEventListener('click',function(){ bar.hidden=true; snooze(); });
+  // iPhone/Safari: beforeinstallprompt не бывает — показываем подсказку
+  if(isIOS && ios){ ios.hidden=false; }
+  if(ix) ix.addEventListener('click',function(){ ios.hidden=true; snooze(); });
+  window.addEventListener('appinstalled',function(){ if(bar) bar.hidden=true; if(ios) ios.hidden=true; });
+})();
 </script>
 <script src="/static/theme.js?v=20260613"></script>
 </body>

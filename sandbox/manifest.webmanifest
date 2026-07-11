@@ -5,7 +5,7 @@
   "lang": "ru",
   "dir": "ltr",
   "start_url": "/chat?src=pwa",
-  "scope": "/chat",
+  "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",

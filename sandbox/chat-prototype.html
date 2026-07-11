@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Память">
+<meta name="theme-color" content="#0b0b0f">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 <title>Приложение · Cognitive Core</title>
 <style>
   :root{
@@ -34,7 +40,12 @@
   .step b{font-size:14px} .step span{display:block;color:var(--mut);font-size:13px;line-height:1.5;margin-top:1px}
   .step b span{color:var(--sent)}
   .open-btn{display:inline-block;margin-top:6px;padding:11px 20px;border-radius:12px;
-    background:var(--sent);color:#fff;text-decoration:none;font-weight:600;font-size:15px}
+    background:var(--sent);color:#fff;text-decoration:none;font-weight:600;font-size:15px;
+    border:none;cursor:pointer;font-family:inherit}
+  .ins-btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .open-btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:var(--ink)}
+  .ios-hint{margin-top:10px;padding:10px 13px;border-radius:11px;font-size:13px;line-height:1.5;
+    color:var(--ink);background:rgba(10,132,255,.12);border:1px solid rgba(10,132,255,.28)}
   .link-line{color:var(--mut);font-size:12.5px;margin-top:10px}
   .mono{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--ink)}
   .cols{display:flex;gap:26px;justify-content:center;align-items:flex-start;
@@ -178,7 +189,13 @@
       <h3>Как установить</h3>
       <div class="step"><span class="n">🍎</span><div><b>iPhone / iPad</b><span>Открой ссылку в <b>Safari</b> → «Поделиться» → <b>«На экран „Домой“»</b>.</span></div></div>
       <div class="step"><span class="n">🤖</span><div><b>Android</b><span>Открой в <b>Chrome</b> → меню ⋮ → <b>«Установить приложение»</b>.</span></div></div>
-      <a class="open-btn" href="/chat">Открыть приложение →</a>
+      <div class="ins-btns">
+        <button type="button" class="open-btn" id="pwaInstall">📲 Установить приложение</button>
+        <a class="open-btn ghost" href="/chat">Открыть →</a>
+      </div>
+      <div class="ios-hint" id="iosHint" hidden>
+        На iPhone: нажми <b>«Поделиться»</b> <span class="mono">⎋</span> внизу Safari → <b>«На экран „Домой“»</b> → «Добавить». Иконка появится как «Память».
+      </div>
       <div class="link-line">Прямая ссылка: <span class="mono">mcp.me-ai.ru/chat</span></div>
     </div>
   </div>
@@ -329,6 +346,23 @@
   if(th) th.addEventListener('click',function(){
     document.querySelector('.screen').classList.toggle('light', !th.classList.contains('on'));
   });
+})();
+</script>
+<script>
+// Установка PWA: Android/Chrome — системный диалог; iPhone/Safari — подсказка.
+(function(){
+  var btn=document.getElementById('pwaInstall'), hint=document.getElementById('iosHint');
+  if(!btn) return;
+  var deferred=null;
+  var standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  var isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(standalone){ btn.textContent='✓ Приложение установлено'; btn.disabled=true; btn.style.opacity=.6; return; }
+  window.addEventListener('beforeinstallprompt',function(e){ e.preventDefault(); deferred=e; btn.textContent='📲 Установить приложение'; });
+  btn.addEventListener('click',async function(){
+    if(deferred){ deferred.prompt(); try{ await deferred.userChoice; }catch(e){} deferred=null; return; }
+    if(hint){ hint.hidden=!hint.hidden; btn.textContent=hint.hidden?'📲 Установить приложение':(isIOS?'Инструкция ниже ↓':'Инструкция ниже ↓'); }
+  });
+  window.addEventListener('appinstalled',function(){ btn.textContent='✓ Установлено'; btn.disabled=true; btn.style.opacity=.6; if(hint) hint.hidden=true; });
 })();
 </script>
 </body>
