@@ -154,9 +154,12 @@
   .app.light #box{background:rgba(0,0,0,.05)}
   .app.light .pcard,.app.light .pgrp{background:rgba(0,0,0,.05)}
   .app.light .rrow:active,.app.light .prow.btn:active{background:rgba(0,0,0,.05)}
+  /* Убираем плавающий ассистент-виджет — приложение само по себе чат */
+  #cogasst-fab,#cogasst-panel{display:none!important}
 </style>
 </head>
 <body>
+<!-- self-contained app: подавляем серверную инъекцию плавающих виджетов: assistant-widget.js + topbar-chat -->
 <div class="app" id="app">
 
   <!-- ЧАТ -->
