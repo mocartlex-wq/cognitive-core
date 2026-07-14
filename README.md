@@ -10,11 +10,11 @@
 
 1. Email + OTP → [`/ui/login`](https://mcp.me-ai.ru/ui/login)
 2. «🪄 Передать помощнику» в [`/ui/profile`](https://mcp.me-ai.ru/ui/profile) → 1-клик настройка для Claude Code / Cursor / ChatGPT
-3. После рестарта твоего AI-клиента — 29 MCP-инструментов (`cognitive_remember`, `cognitive_recall`, `room_post`, `cognitive_video_generate`, `cognitive_media_upload_init`...)
+3. После рестарта твоего AI-клиента — 32 MCP-инструмента (`cognitive_remember`, `cognitive_recall`, `room_post`, `cognitive_video_generate`, `cognitive_media_upload_init`...)
 
 Free tier: 10k событий/день, 1 GB медиа, 10 агентов. Pro (490₽/мес или $5/mo) — 10x всё + приоритетная поддержка. Тарифы: [`/ui/pricing`](https://mcp.me-ai.ru/ui/pricing).
 
-## 📦 Что внутри (2026-05-26)
+## 📦 Что внутри (2026-07-05)
 
 | Феичер | Endpoint / Tool | Документация |
 |---|---|---|
@@ -75,11 +75,11 @@ DOMAIN=cognitive.example.com EMAIL=admin@example.com bash install-server.sh
 
 10 минут — рабочий HTTPS-стек с авто-бэкапами, MCP SSE для удалённых клиентов, systemd auto-start. См. [`DEPLOY-SERVER.md`](DEPLOY-SERVER.md).
 
-[![Version](https://img.shields.io/badge/version-v0.5.0--rc1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.6.0-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)](https://fastapi.tiangolo.com/)
 [![Postgres 16 + pgvector](https://img.shields.io/badge/postgres-16+pgvector-336791.svg)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-114%20passing-success.svg)](#тестирование)
+[![Tests](https://img.shields.io/badge/tests-369%20passing-success.svg)](#тестирование)
 [![Stress](https://img.shields.io/badge/stress-171%20ev%2Fs%20p95%20111ms-success.svg)](scripts/stress_test.py)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -171,7 +171,7 @@ docker compose up -d --build
 
 # 4. Проверить
 curl http://localhost:9001/health
-# {"healthy":true,"version":"0.2.0",...}
+# {"healthy":true,"version":"0.6.0",...}
 
 # 5. Загрузить демо-данные (опционально — можно из UI)
 python scripts/seed_demo.py --full
@@ -327,9 +327,10 @@ curl -X POST http://localhost:9001/memory/restore-redis \
 | v0.2.0 | ✅ | MVP: 5 слоёв, 13 эндпоинтов, 69 тестов |
 | v0.2.5 | ✅ | UX: главная, дашборд, песочница, общий дизайн |
 | v0.3.0 | ✅ | Reliability: pgvector, advisory lock, hot-reload |
-| v0.4.0 | 🔄 | Reach: MCP-сервер, GitHub publish, видео-демо |
-| v0.5.0 | ⏳ | Production: Alembic, TLS, CI, бэкапы, runbook |
-| v1.0.0 | ⏳ | Scale: мультитенантность, Celery, шардирование, Ollama+GPU |
+| v0.4.0 | ✅ | Reach: MCP-сервер, Apple Glass UI, pgvector HNSW |
+| v0.5.0 | ✅ | Production: Alembic, TLS, CI, бэкапы, smoke+rollback |
+| v0.6.0 | ✅ | Multi-tenant SaaS: изоляция, биллинг, комнаты, media, wake-channels |
+| v1.0.0 | ⏳ | Scale: Celery, шардирование, Ollama+GPU, public launch |
 | v2.0.0 | ⏳ | Advanced: граф знаний, temporal queries, активное обучение |
 
 Полный план — [roadmap.md](roadmap.md).

@@ -296,9 +296,9 @@ async def metrics():
 
 @app.get("/ab-stats")
 async def ab_stats():
-    """A/B статистика по моделям."""
+    """A/B статистика по моделям (durable: Redis, переживает рестарт)."""
     from app.services.llm_client import get_ab_stats
-    return get_ab_stats()
+    return await get_ab_stats()
 
 
 @app.exception_handler(ValueError)

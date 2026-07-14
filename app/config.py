@@ -73,12 +73,19 @@ class Settings(BaseSettings):
 
     # Циклы
     retention_days: int = 14
+    # Потолок для НЕконсолидированных L1 (processed_to_l2=false): обычный retention
+    # их не трогает (см. /memory/cleanup), удаляем только совсем брошенные.
+    retention_unprocessed_days: int = 90
     daily_hours: int = 24
     weekly_days: int = 7
 
     # LLM circuit breaker (per provider+model)
     llm_circuit_threshold: int = 3   # consecutive failures to trip OPEN
     llm_circuit_timeout: int = 60    # seconds in OPEN before half-open probe
+
+    # TTL last-known-good ответа LLM в Redis (graceful degradation при
+    # полной недоступности провайдеров). In-memory зеркало живёт до рестарта.
+    llm_cache_ttl_days: int = 7
 
     # Язык
     system_language: str = "ru"  # ru / en / zh

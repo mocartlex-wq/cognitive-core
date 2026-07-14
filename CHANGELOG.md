@@ -2,18 +2,80 @@
 
 ## Unreleased
 
-### Added — Rooms: per-room авто-ответ агента (room auto-responder)
+### Added — Wake-channels: провайдер-агностик каналы пробуждения агентов (#191–#201)
 
-- Владелец может привязать агента к авто-ответам в КОНКРЕТНОЙ комнате
-  (`room_participants.auto_respond`, миграция 0017). Когда включено, демон
-  `cognitive-agent-runtime` будит агента на ПРЯМОЕ @упоминание в этой комнате и
-  постит ответ обратно через его `wake_channel` (deepseek/claude_routine/managed)
-  — БЕЗ включения полного 24/7-«дежурного» (`standin_enabled`).
-- Триггер — только прямое @упоминание (копии дирижёру и безадресные сообщения не
-  будят). Привязка строго per-room: включение в одной комнате не влияет на другие.
-- API `POST /user/rooms/{room_id}/participants/{agent_id}/auto-respond` (owner-scoped);
-  состояние `auto_respond` теперь отдаётся в `GET /user/rooms/{id}/detail`.
-- UI-тумблер «Авто-ответ» у каждого участника в `/ui/room`.
+- Демон `scripts/cognitive-agent-runtime.py` обобщён: 24/7 stand-in для ЛЮБОГО
+  opted-in агента (#191), UI-тумблер per-agent (#192).
+- Per-agent `wake_channel` диспетчер (#193): `deepseek` / `claude_routine` /
+  `managed` (Claude API напрямую, #195) / `custom_llm` (любой OpenAI-совместимый
+  endpoint, #196) / `webhook` (один центральный waker для всех агентов, #199).
+- Секреты каналов шифруются Fernet (`COGCORE_CONFIG_KEY`) (#196); UI-селектор
+  канала на карточке агента (#194); test-connection кнопка + быстрый рефреш (#198).
+- Ретраи транзиентных DNS/URL ошибок в демоне (#197); агенты отвечают своим
+  голосом — маркер авто-ответа убран (#201).
+- Docs: Agent Loop — стандарт подключения любого агента к комнатам (#200).
+
+### Added — Rooms: conductor-роутинг и участие агентов
+
+- Безадресные сообщения владельца в комнате с дирижёром → дирижёру (#190).
+- Per-room авто-ответ агента (`room_participants.auto_respond`, миграция 0017):
+  демон будит агента на прямое @упоминание в конкретной комнате и постит ответ
+  через его `wake_channel` — без полного 24/7 stand-in (#214). Копии дирижёру и
+  безадресные сообщения не будят. API
+  `POST /user/rooms/{room_id}/participants/{agent_id}/auto-respond` + состояние в
+  `GET /user/rooms/{id}/detail` + UI-тумблер «Авто-ответ» в `/ui/room`.
+- Owner-side «добавить моего агента в комнату»: endpoint + picker в room.html (#226).
+- Композер комнаты: Enter отправляет, Shift+Enter — перенос строки (#207).
+
+### Added — Shared Brain: несколько устройств = один агент (#205, #206)
+
+- `agent_states.brain_id` + таблица `brains`: устройства одного владельца делят
+  state/history/память как единый агент. UI-кнопка привязки устройства к brain.
+
+### Added — Skills в recall (#209, #210)
+
+- `cognitive_resume` автоматически подмешивает топ-2 релевантных навыка из
+  L3 `domain='skills'`.
+
+### Fixed — Стабильность multi-worker (#202–#204, #208)
+
+- MCP SSE-транспорт стал multi-worker-safe: сессии через Redis pub/sub
+  (`mcp:sse:{sid}`) — клиент больше не рвётся, когда POST попадает в чужой
+  из 4 uvicorn-воркеров (#204).
+- `pg_advisory_xact_lock` сериализует `init_db` DDL между воркерами — раньше
+  2-3 из 4 крэшились на старте (#203).
+- Пустые env-строки трактуются как отсутствующие (mcp_protocol/outbox) (#202).
+- Eager warm-up embedding-модели на старте: первый `cognitive_recall` после
+  рестарта больше не таймаутится на холодной загрузке (#208).
+
+### Fixed — Deploy и cron (#211–#213, #224)
+
+- fastembed-кэш вынесен в persistent volume в prod.yml — recall не деградирует
+  до hash-fallback после recreate контейнера (#211).
+- Auto-deploy разблокирован: чужой `nginx/conf.d/ai-crm.conf` исключён из
+  dirty-tree guard (#212).
+- subscription-cron честно читает `DATABASE_URL` из env (#213); фикс
+  module-level `import os` (NameError в main()) (#224).
+
+### Fixed — UI-раунд (#215–#223, #225)
+
+- Карточка агента: ширина channel-select ограничена, имя/мета во всю строку
+  (#215, #216); диалоги agent/claim показывают реальную ошибку вместо
+  `[object Object]`, пробелы в agent_id блокируются (#222); занятый agent_id →
+  подсказка свободного (base-N) вместо тупика 409 (#223).
+- Нейронный фон: видимость/мягкость аксонов + cache-bust glass.css и theme.js
+  (#217–#220); степпер connect-мастера изолирован от утечки `.step` из
+  shared.css (#221); room-invite — одна кнопка generate+copy (#225).
+
+### Security — Демон: границы чужого домена (#227, #228)
+
+- `/opt/ai-crm` удалён из WRITE-whitelist агент-демона (`git_pull` +
+  `docker_restart`): ad-hoc деплой ai-crm трижды ронял прод — теперь только
+  штатный `deploy/update.sh` (#227); упоминание убрано и из описания тула (#228).
+
+### Added — Audit-раунд + мобильный UI + deploy-MCP (#229)
+
+- Итоги аудит-раунда, мобильные фиксы UI и MCP-инструменты деплоя.
 
 ## v0.6.0 (2026-05-28) — Multi-tenant platform release
 

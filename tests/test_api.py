@@ -191,7 +191,34 @@ class TestCleanup:
     async def test_cleanup(self, client, headers):
         r = await client.post("/memory/cleanup", json={}, headers=headers)
         assert r.status_code == 200
-        assert r.json()["status"] == "cleaned"
+        body = r.json()
+        assert body["status"] == "cleaned"
+        assert "deleted_stale_unprocessed" in body
+
+    async def test_cleanup_keeps_unprocessed(self, client, headers):
+        """Retention не удаляет события, не прошедшие в L2 (processed_to_l2=false).
+
+        Регресс июня 2026: при активности < MIN_EVENTS_FOR_DAILY куратор скипал
+        консолидацию, а prune удалял неанализированный опыт по общему TTL.
+        """
+        r = await client.post("/events", json={
+            "source_agent": "test_runner",
+            "domain": "test_api",
+            "payload": {"note": "unprocessed event must survive cleanup"},
+        }, headers=headers)
+        assert r.status_code == 200
+        event_id = r.json()["id"]
+
+        r = await client.post("/memory/cleanup", json={}, headers=headers)
+        assert r.status_code == 200
+
+        # Проверка через API (НЕ через get_pool: прямой pool в тест-процессе
+        # привязывает singleton к event-loop'у этого теста и ломает поздние
+        # db-тесты ошибкой «attached to a different loop»).
+        r = await client.get("/dashboard/recent-events?limit=50", headers=headers)
+        assert r.status_code == 200
+        ids = {item["id"] for item in r.json().get("items", [])}
+        assert event_id in ids, "cleanup удалил необработанное событие"
 
 
 class TestEdgeCases:
