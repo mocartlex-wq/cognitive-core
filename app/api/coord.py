@@ -225,12 +225,30 @@ async def search_journal(
 ):
     """«Это уже делали?» — поиск по журналу ДО начала работы.
 
-    Ищет по свежему L1 напрямую (не дожидаясь ночной консолидации в L3):
-    ILIKE по задаче/результату/файлам. Дорогой семантический recall остаётся
-    отдельным инструментом (cognitive_recall) для смысловых запросов.
+    Ищет по свежему L1 напрямую (не дожидаясь ночной консолидации в L3).
+
+    МОРФОЛОГИЯ (правка по замечанию сессии AI-CRM 2026-08-09): человек ищет
+    своими словами, а не цитатой. Буквальный ILIKE находил запись по точной
+    подстроке, но не по «копирование воронки перенос полей» ↔ «копирование
+    воронок (настройки + поля)» — расходятся словоформы. Русский snowball
+    тоже не спасает: «копирование»→«копирован» стеммится, а «воронок»→
+    «воронки» нет (беглая гласная).
+
+    Поэтому пословное сходство pg_trgm: каждое значимое слово запроса ищется
+    через word_similarity() по тексту записи; запись считается найденной,
+    если совпала половина слов (минимум одно). На разобранном кейсе:
+    воронки 0.63, копирование 1.0, полей 0.5 — три из четырёх, лишнее
+    «перенос» 0.13 корректно отсеивается. Точный ILIKE остаётся как
+    OR-ветка, чтобы не потерять поиск по id/пути/цитате.
     """
     await verify_api_key(request)
     agent_id = getattr(request.state, "agent_id", None) or "unknown"
+
+    stop = {"для", "как", "что", "это", "или", "при", "над", "под", "the", "and", "for"}
+    words = [w.strip(".,;:()[]«»\"'") for w in q.lower().split()]
+    words = [w for w in words if len(w) >= 3 and w not in stop][:12]
+    need = max(1, (len(words) + 1) // 2)  # половина слов, округляя вверх
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         owner_row = await conn.fetchrow(
@@ -238,17 +256,23 @@ async def search_journal(
         )
         owner_uid = owner_row["owner_user_id"] if owner_row else None
         sql = """
-            SELECT id::text, timestamp, source_agent, raw_payload
+            SELECT id::text, timestamp, source_agent, raw_payload,
+                   (SELECT count(*) FROM unnest($4::text[]) AS w
+                     WHERE word_similarity(w, lower(raw_payload::text)) >= 0.4) AS hits
               FROM l1_raw_events
              WHERE domain = $1
                AND timestamp > NOW() - ($2 || ' days')::INTERVAL
-               AND raw_payload::text ILIKE '%' || $3 || '%'
+               AND (
+                    raw_payload::text ILIKE '%' || $3 || '%'
+                    OR (SELECT count(*) FROM unnest($4::text[]) AS w
+                         WHERE word_similarity(w, lower(raw_payload::text)) >= 0.4) >= $5
+               )
         """
-        args: list[Any] = [JOURNAL_DOMAIN, str(days), q]
+        args: list[Any] = [JOURNAL_DOMAIN, str(days), q, words or [q.lower()], need]
         if owner_uid is not None:
-            sql += " AND owner_user_id = $4"
+            sql += " AND owner_user_id = $6"
             args.append(owner_uid)
-        sql += " ORDER BY timestamp DESC LIMIT 50"
+        sql += " ORDER BY hits DESC, timestamp DESC LIMIT 50"
         rows = await conn.fetch(sql, *args)
 
     items = []
@@ -263,6 +287,7 @@ async def search_journal(
             "by": r0["source_agent"],
             "task": p.get("task"), "actor": p.get("actor"),
             "result": (p.get("result") or "")[:300], "files": p.get("files", []),
+            "matched_words": r0["hits"], "of_words": len(words),
         })
     return {
         "query": q, "found": len(items),
