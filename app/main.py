@@ -609,7 +609,20 @@ async def health():
                     for r0 in backlog_rows
                 ]
             if last_l2:
-                l2_dt = datetime(last_l2.year, last_l2.month, last_l2.day, tzinfo=timezone.utc)
+                # Считаем от МОМЕНТА создания буфера, а не от полуночи его даты.
+                # l2_daily_buffers.date — это дата среза (без времени), поэтому
+                # прежний расчёт давал «отставание 18ч» сразу после успешного
+                # прогона в 18:00 — метрика пугала, хотя конвейер только что
+                # отработал. created_at отражает реальность; на порог 48ч это
+                # влияет в безопасную сторону (значение уменьшилось).
+                last_l2_at = await conn.fetchval(
+                    "SELECT MAX(created_at) FROM l2_daily_buffers"
+                )
+                l2_dt = last_l2_at or datetime(
+                    last_l2.year, last_l2.month, last_l2.day, tzinfo=timezone.utc
+                )
+                if l2_dt.tzinfo is None:
+                    l2_dt = l2_dt.replace(tzinfo=timezone.utc)
                 lag_h = (datetime.now(timezone.utc) - l2_dt).total_seconds() / 3600
                 deep["l2_staleness_hours"] = round(lag_h, 1)
                 deep["consolidation_stalled"] = bool(
