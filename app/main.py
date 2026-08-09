@@ -591,6 +591,23 @@ async def health():
                 "SELECT COUNT(*) FROM l1_raw_events WHERE processed_to_l2 = FALSE"
             )
             deep["l1_unprocessed"] = unprocessed_l1 or 0
+            # Разбивка очереди по доменам — видно, какой хвост тает, а какой
+            # застрял (обещано ревьюеру AI-CRM при разборе застоя). Только
+            # верхушка: длинный хвост из десятков доменов по 1 событию сам по
+            # себе не диагностичен, а ответ /health раздувает.
+            if (unprocessed_l1 or 0) > 0:
+                backlog_rows = await conn.fetch(
+                    """
+                    SELECT domain, COUNT(*) AS cnt, MIN(timestamp)::date AS oldest
+                      FROM l1_raw_events WHERE processed_to_l2 = FALSE
+                     GROUP BY domain ORDER BY cnt DESC LIMIT 5
+                    """
+                )
+                deep["l1_backlog_top"] = [
+                    {"domain": r0["domain"], "count": r0["cnt"],
+                     "oldest": r0["oldest"].isoformat() if r0["oldest"] else None}
+                    for r0 in backlog_rows
+                ]
             if last_l2:
                 l2_dt = datetime(last_l2.year, last_l2.month, last_l2.day, tzinfo=timezone.utc)
                 lag_h = (datetime.now(timezone.utc) - l2_dt).total_seconds() / 3600
