@@ -336,6 +336,7 @@ async def value_error_handler(request: Request, exc: ValueError):
 # ─────────────────────────────────────────────────────────────────────────
 from app.api.agents import router as agents_router
 from app.api.agents_collab import router as agents_collab_router
+from app.api.coord import router as coord_router
 from app.api.dashboard import router as dashboard_router
 from app.api.demo import router as demo_router
 from app.api.events import router as events_router
@@ -353,6 +354,7 @@ app.include_router(dashboard_router)
 app.include_router(demo_router)
 app.include_router(agents_router)
 app.include_router(agents_collab_router)
+app.include_router(coord_router)
 app.include_router(onboard_router)
 app.include_router(rules_router)
 from app.api.replication import router as replication_router
