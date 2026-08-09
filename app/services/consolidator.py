@@ -46,24 +46,56 @@ def _to_uuid(val) -> _uuid.UUID:
     return _uuid.UUID(str(val))
 
 
-async def daily_consolidate(since_hours: int | None = None, domain: str | None = None) -> dict:
+async def daily_consolidate(
+    since_hours: int | None = None,
+    domain: str | None = None,
+    backfill: bool = False,
+    max_domains: int = 5,
+    max_events_per_domain: int = 60,
+) -> dict:
     """L1 → L2: фильтрация + анализ + сохранение дневного буфера.
     Защищён advisory lock — при параллельном вызове на тот же domain
-    второй вернёт {status: 'lock_held'} вместо дубля."""
+    второй вернёт {status: 'lock_held'} вместо дубля.
+
+    backfill=True — догоняющий режим: снимает временное окно и разгребает
+    накопленный хвост пачками (см. _daily_consolidate_impl).
+    """
     lock_key = f"daily:{domain or 'all'}"
     async with _advisory_lock(lock_key) as got:
         if not got:
             return {"status": "lock_held", "domain": domain, "lock": lock_key}
-        return await _daily_consolidate_impl(since_hours, domain)
+        return await _daily_consolidate_impl(
+            since_hours, domain, backfill, max_domains, max_events_per_domain
+        )
 
 
-async def _daily_consolidate_impl(since_hours: int | None = None, domain: str | None = None) -> dict:
-    hours = since_hours or settings.daily_hours
+async def _daily_consolidate_impl(
+    since_hours: int | None = None,
+    domain: str | None = None,
+    backfill: bool = False,
+    max_domains: int = 5,
+    max_events_per_domain: int = 60,
+) -> dict:
+    # Обычный режим смотрит на окно последних daily_hours часов. У этого окна
+    # есть структурный изъян: событие, не попавшее в консолидацию за сутки,
+    # выпадает из него НАВСЕГДА. Вместе с порогом MIN_EVENTS_FOR_DAILY (домен
+    # с 1-2 событиями в день скипается) это давало ловушку — на проде так
+    # накопилось 585 необработанных L1 с мая, при исправно работающем таймере.
+    #
+    # backfill снимает окно (берём весь хвост) и режет работу на порции, чтобы
+    # один прогон не выжег LLM-бюджет и не упёрся в таймаут: не более
+    # max_domains доменов за раз, и не более max_events_per_domain событий на
+    # домен. Остаток догоняется следующими прогонами — очередь тает ступенями.
+    hours = 365 * 24 if backfill else (since_hours or settings.daily_hours)
     events = await get_unprocessed_events(hours, domain)
     if not events:
         return {"status": "no_events", "buffer_id": None}
 
     domains = {e["domain"] for e in events}
+    if backfill:
+        # Сначала домены с самым длинным хвостом — очередь тает быстрее.
+        by_size = sorted(domains, key=lambda d: sum(1 for e in events if e["domain"] == d), reverse=True)
+        domains = set(by_size[:max_domains])
     results = []
 
     for dom in domains:
@@ -74,6 +106,10 @@ async def _daily_consolidate_impl(since_hours: int | None = None, domain: str | 
         # в results и цикл идёт дальше. weekly/monthly уже работают так.
         try:
             dom_events = [e for e in events if e["domain"] == dom]
+            if backfill and len(dom_events) > max_events_per_domain:
+                # Разгребаем с самых старых — они дольше всех ждут и первыми
+                # рискуют упереться в 90-дневный потолок хранения.
+                dom_events = sorted(dom_events, key=lambda e: e["timestamp"])[:max_events_per_domain]
 
             # Шаг 1: Куратор — фильтрация шума
             curator_result = await pre_daily_filter(dom_events, dom)

@@ -31,6 +31,39 @@ async def trigger_daily(since_hours: int | None = None, domain: str | None = Non
     return result
 
 
+@router.post("/consolidate/backfill")
+async def trigger_backfill(
+    request: Request,
+    max_domains: int = 5,
+    max_events_per_domain: int = 60,
+    domain: str | None = None,
+):
+    """Догнать накопленный хвост L1, который выпал из суточного окна.
+
+    Обычный daily смотрит только последние daily_hours часов — событие, не
+    попавшее туда за сутки, не консолидируется уже никогда. Этот режим снимает
+    окно и разгребает очередь порциями. Вызывать повторно, пока
+    backlog_remaining не станет 0 (безопасно: advisory lock не даст двум
+    прогонам столкнуться).
+    """
+    await verify_api_key(request)
+    result = await daily_consolidate(
+        domain=domain, backfill=True,
+        max_domains=max_domains, max_events_per_domain=max_events_per_domain,
+    )
+    # Сколько ещё осталось — чтобы вызывающий видел, тает ли очередь.
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            remaining = await conn.fetchval(
+                "SELECT COUNT(*) FROM l1_raw_events WHERE processed_to_l2 = FALSE"
+            )
+        result["backlog_remaining"] = remaining or 0
+    except Exception as e:
+        result["backlog_remaining"] = f"unknown: {type(e).__name__}"
+    return result
+
+
 @router.post("/consolidate/weekly")
 async def trigger_weekly(domain: str, request: Request):
     """Ручной запуск L2→L3 консолидации."""
