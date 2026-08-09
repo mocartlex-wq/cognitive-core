@@ -154,7 +154,19 @@ async def _daily_consolidate_impl(
                         analysis.get("confidence", 0.5),
                         now,
                     )
-                    await mark_events_processed(filtered_event_ids, conn=conn)
+                    # Помечаем обработанными ВСЕ рассмотренные события, а не
+                    # только попавшие в буфер. Куратор часть отбраковывает как
+                    # шум (noise_event_ids) — раньше они оставались
+                    # processed_to_l2=false и возвращались в каждый следующий
+                    # прогон: LLM снова и снова платил за их разбор, а очередь
+                    # не убывала (на проде backfill обработал 40 событий, а
+                    # счётчик упал на 8). processed_to_l2 означает «прошло
+                    # через конвейер», а не «попало в L2».
+                    noise_ids = [
+                        e["id"] for e in dom_events
+                        if str(e["id"]) in set(curator_result.get("noise_event_ids", []))
+                    ]
+                    await mark_events_processed(filtered_event_ids + noise_ids, conn=conn)
 
             results.append({"domain": dom, "status": "consolidated", "buffer_id": str(buffer_id)})
         except Exception as e:
