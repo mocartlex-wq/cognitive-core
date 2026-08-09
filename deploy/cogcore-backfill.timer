@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger cogcore-backfill every 4 hours, offset from nightly (02,06,10,14,18,22 UTC)
+
+[Timer]
+# Сдвиг на 2 часа от cogcore-nightly: два LLM-тяжёлых прогона не должны
+# спорить за advisory lock консолидации и за квоту провайдера.
+OnCalendar=02,06,10,14,18,22:00 UTC
+Persistent=true
+Unit=cogcore-backfill.service
+
+[Install]
+WantedBy=timers.target

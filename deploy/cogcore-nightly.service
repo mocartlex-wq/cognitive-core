@@ -10,4 +10,6 @@ User=root
 ExecStart=/opt/cognitive-core/scripts/nightly-health-suite.sh
 StandardOutput=append:/var/log/cogcore/nightly.log
 StandardError=append:/var/log/cogcore/nightly.log
-TimeoutStartSec=300
+# daily-консолидация — это LLM-вызовы, 4+ минуты не редкость;
+# 300с оставляли прогон на грани обрыва (см. инцидент 2026-08-09).
+TimeoutStartSec=900

@@ -1,0 +1,16 @@
+[Unit]
+Description=Cognitive Core L1 backfill — drains the consolidation tail
+Documentation=https://github.com/mocartlex-wq/cognitive-core
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/cognitive-core/scripts/backfill-consolidation.sh
+StandardOutput=append:/var/log/cogcore/backfill.log
+StandardError=append:/var/log/cogcore/backfill.log
+# LLM-вызовы медленные: одна консолидация домена — минуты. Отдельный юнит
+# нужен ровно за этим: health-suite остаётся с коротким лимитом, а тяжёлая
+# работа получает свой бюджет и не убивается на середине.
+TimeoutStartSec=1500

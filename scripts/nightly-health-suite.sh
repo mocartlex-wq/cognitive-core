@@ -184,24 +184,6 @@ DAILY_OUT=$(sudo docker exec cognitive_api python -c \
   && pass T8 "daily consolidation triggered: ${DAILY_OUT:0:120}" \
   || warn T8 "daily consolidation trigger failed: ${DAILY_OUT:0:160}"
 
-# Backfill — догоняет хвост L1, выпавший из суточного окна (события, которые
-# обычный daily уже никогда не увидит). Маленькими порциями: 3 домена за
-# прогон × 6 прогонов в сутки. Так очередь тает сама, без ручных вызовов, и
-# LLM-бюджет расходуется ровно. Не блокирует health-suite: только warn.
-BACKFILL_OUT=$(sudo docker exec cognitive_api python -c \
-  "import asyncio,json;from app.services.consolidator import daily_consolidate;print(json.dumps(asyncio.run(daily_consolidate(backfill=True,max_domains=3,max_events_per_domain=40)))[:200])" 2>&1) \
-  && pass T8b "backfill triggered: ${BACKFILL_OUT:0:120}" \
-  || warn T8b "backfill failed: ${BACKFILL_OUT:0:160}"
-
-# Weekly L2→L3 synthesis — heavier (LLM per domain), so once per week: Monday,
-# only in the first 4h slot (00:00–03:59 UTC) to avoid 6× runs across the day.
-if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%H)" -lt 4 ]; then
-  WEEKLY_OUT=$(sudo docker exec cognitive_api python -c \
-    "import asyncio,json;from app.worker import run_weekly_cycle;print(json.dumps(asyncio.run(run_weekly_cycle()))[:200])" 2>&1) \
-    && pass T9 "weekly consolidation triggered: ${WEEKLY_OUT:0:120}" \
-    || warn T9 "weekly consolidation trigger failed: ${WEEKLY_OUT:0:160}"
-fi
-
 # ─── Summary ────────────────────────────────────────────────────
 log "════════ nightly suite done: PASS=$PASS WARN=$WARN FAIL=$FAIL ════════"
 
