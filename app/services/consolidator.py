@@ -136,7 +136,23 @@ async def _daily_consolidate_impl(
             else:
                 curator_result = await pre_daily_filter(dom_events, dom)
             if curator_result.get("skip"):
-                results.append({"domain": dom, "status": "skipped", "reason": curator_result.get("reason")})
+                # skip означает «ждём накопления» — события остаются в очереди.
+                # Но для СТАРОГО хвоста ждать нечего: куратор уже вынес вердикт
+                # («одинаковые e2e-маркеры без результата — шум»), а события
+                # висят месяцами и каждый прогон backfill снова платит LLM за
+                # их разбор. Помечаем как пройденные конвейер (в L2 они не
+                # идут, в L1 лежат до обычного retention — данные не теряются).
+                drained = 0
+                if backfill:
+                    oldest = min(e["timestamp"] for e in dom_events)
+                    if (datetime.now(timezone.utc) - oldest).days >= stale_tail_days:
+                        await mark_events_processed([e["id"] for e in dom_events])
+                        drained = len(dom_events)
+                results.append({
+                    "domain": dom, "status": "skipped",
+                    "reason": curator_result.get("reason"),
+                    **({"drained_as_noise": drained} if drained else {}),
+                })
                 continue
 
             filtered_ids = set(curator_result.get("filtered_event_ids", []))
