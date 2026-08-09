@@ -205,6 +205,13 @@ async def add_journal(body: JournalInput, request: Request):
     await verify_api_key(request)
     from app.services.ingestor import save_raw_event
     agent_id = getattr(request.state, "agent_id", None) or "unknown"
+    # owner_user_id ОБЯЗАТЕЛЕН: без него запись оседает в L1 «ничьей», такой же
+    # ничьей приходит в L3 после консолидации, и owner-scoped recall её не
+    # находит — журнал виден только прямым поиском /journal/search, но не
+    # семантической памятью (обнаружено на проде: work_journal L3=7, но
+    # cognitive_recall возвращал 0, тогда как infra_lessons находился).
+    owner = await _owner_of(request)
+    owner_uid = owner if not owner.startswith("agent:") else None
     event_id = await save_raw_event(
         agent_id=agent_id,
         domain=JOURNAL_DOMAIN,
@@ -212,6 +219,7 @@ async def add_journal(body: JournalInput, request: Request):
             "task": body.task, "actor": body.actor, "result": body.result,
             "files": body.files, "tags": body.tags,
         },
+        owner_user_id=owner_uid,
     )
     return {"ok": True, "event_id": str(event_id)}
 
