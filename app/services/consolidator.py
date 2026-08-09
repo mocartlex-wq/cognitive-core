@@ -52,6 +52,7 @@ async def daily_consolidate(
     backfill: bool = False,
     max_domains: int = 5,
     max_events_per_domain: int = 60,
+    stale_tail_days: int = 30,
 ) -> dict:
     """L1 → L2: фильтрация + анализ + сохранение дневного буфера.
     Защищён advisory lock — при параллельном вызове на тот же domain
@@ -65,7 +66,8 @@ async def daily_consolidate(
         if not got:
             return {"status": "lock_held", "domain": domain, "lock": lock_key}
         return await _daily_consolidate_impl(
-            since_hours, domain, backfill, max_domains, max_events_per_domain
+            since_hours, domain, backfill, max_domains, max_events_per_domain,
+            stale_tail_days,
         )
 
 
@@ -75,6 +77,7 @@ async def _daily_consolidate_impl(
     backfill: bool = False,
     max_domains: int = 5,
     max_events_per_domain: int = 60,
+    stale_tail_days: int = 30,
 ) -> dict:
     # Обычный режим смотрит на окно последних daily_hours часов. У этого окна
     # есть структурный изъян: событие, не попавшее в консолидацию за сутки,
@@ -112,7 +115,26 @@ async def _daily_consolidate_impl(
                 dom_events = sorted(dom_events, key=lambda e: e["timestamp"])[:max_events_per_domain]
 
             # Шаг 1: Куратор — фильтрация шума
-            curator_result = await pre_daily_filter(dom_events, dom)
+            stale_tail = False
+            if backfill and len(dom_events) < settings.min_events_for_daily:
+                # «Длинный хвост»: десятки доменов с 1-3 событиями, лежащими
+                # месяцами. Порог MIN_EVENTS_FOR_DAILY ждёт накопления, но домен
+                # неактивен — накопления не будет никогда, а через 90 дней
+                # события удалит retention, и опыт потеряется. Если весь хвост
+                # домена старше stale_tail_days, консолидируем что есть:
+                # буфер из одного события лучше потерянного события.
+                oldest = min(e["timestamp"] for e in dom_events)
+                age_days = (datetime.now(timezone.utc) - oldest).days
+                stale_tail = age_days >= stale_tail_days
+            if stale_tail:
+                curator_result = {
+                    "skip": False,
+                    "filtered_event_ids": [str(e["id"]) for e in dom_events],
+                    "noise_event_ids": [],
+                    "reason": f"stale tail ({len(dom_events)} events, older than {stale_tail_days}d)",
+                }
+            else:
+                curator_result = await pre_daily_filter(dom_events, dom)
             if curator_result.get("skip"):
                 results.append({"domain": dom, "status": "skipped", "reason": curator_result.get("reason")})
                 continue
