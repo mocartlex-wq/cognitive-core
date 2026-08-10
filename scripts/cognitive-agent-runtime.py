@@ -172,17 +172,55 @@ def tool_cogcore_bb(subcommand: str = "online") -> str:
     return _run(["cogcore-bb", subcommand])
 
 
+# Чей ключ брать инструментам. Реестр инструментов зовёт функции без контекста
+# агента, а ключ нужен именно вызывающего: recall owner-scoped, и агент должен
+# видеть свою память, а не чужую. Ставится перед execute_tool в цикле.
+_CURRENT_AGENT = None
+
+# Куда смотреть, когда домен не задан: домены, где реально копятся знания —
+# журнал работ, уроки инфраструктуры и навыки. agent_inbox сознательно не
+# берём: там переписка, а не выводы.
+RECALL_DEFAULT_DOMAINS = ["work_journal", "infra_lessons", "skills"]
+
+
 def tool_cognitive_recall(query: str, domain: str = "general") -> str:
     """Recall from L3 memory via cognitive-core API."""
     if len(query) > 500:
         return "ERROR: query too long"
-    try:
-        url = f"{ENDPOINT}/recall"
-        payload = {"query": query, "domain": domain, "top_k": 3}
-        d = http_post(url, payload, headers={"X-API-Key": AGENT_KEYS["cognitive-core-laptop"]}, timeout=15)
-        return json.dumps(d, ensure_ascii=False)[:2000]
-    except Exception as e:
-        return f"ERROR: {e}"
+    # Раньше ключ был прошит: AGENT_KEYS["cognitive-core-laptop"]. После перехода
+    # на agent_keys словарь AGENT_KEYS опустел, и обращение падало с KeyError —
+    # то есть память НЕ РАБОТАЛА ни у одного заместителя. Наружу это выглядело
+    # как «сервис памяти недоступен»: агент вежливо сообщал, что ничего не нашёл,
+    # и это читалось как сбой инфраструктуры, а не как отсутствующий ключ
+    # (обнаружено 2026-08-10).
+    key = resolve_agent_key(_CURRENT_AGENT) if _CURRENT_AGENT else None
+    if not key:
+        return (f"ERROR: не найден API-ключ агента {_CURRENT_AGENT or '?'} — "
+                f"память недоступна, отвечай без неё")
+    # Путь тоже был неверный: /recall не существует (404 «Not Found»), рабочий —
+    # /operative/query. Вторая половина той же поломки: даже с валидным ключом
+    # инструмент не мог ничего найти.
+    #
+    # И третья: домен по умолчанию был "general", а такого домена в L3 нет вовсе —
+    # поиск гарантированно возвращал пусто. Запрос БЕЗ домена тоже даёт ноль
+    # (поиск доменно-скоупный). Поэтому «домен не указан» разворачиваем в набор
+    # доменов, где реально лежат знания, и склеиваем результаты.
+    url = f"{ENDPOINT}/operative/query"
+    domains = [domain] if domain and domain != "general" else RECALL_DEFAULT_DOMAINS
+    found, errors = [], []
+    for dom in domains:
+        try:
+            d = http_post(url, {"context": query, "domain": dom, "top_k": 3},
+                          headers={"X-API-Key": key}, timeout=15)
+            for item in (d.get("results") or []):
+                item["_domain"] = dom
+                found.append(item)
+        except Exception as e:
+            errors.append(f"{dom}: {e}")
+    if not found:
+        detail = ("; ".join(errors)) if errors else "совпадений нет"
+        return f"Ничего не найдено по запросу «{query}» ({detail})"
+    return json.dumps({"results": found[:5]}, ensure_ascii=False)[:2000]
 
 
 def tool_uptime_loadavg() -> str:
@@ -1164,7 +1202,12 @@ def deepseek_reply_with_tools(persona, message):
                 if idx < budget_left:
                     tool_calls_made += 1
                     log.info(f"[{persona['persona_id']}] TOOL_CALL #{tool_calls_made} {tname}({targs})")
-                    result = execute_tool(tname, targs)
+                    global _CURRENT_AGENT
+                    _CURRENT_AGENT = persona["persona_id"]
+                    try:
+                        result = execute_tool(tname, targs)
+                    finally:
+                        _CURRENT_AGENT = None
                     tool_results_log.append(f"--- {tname}({targs}) ---\n{result[:1500]}")
                 else:
                     result = ("Пропущено: исчерпан лимит вызовов инструментов "
