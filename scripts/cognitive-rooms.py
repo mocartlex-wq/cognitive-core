@@ -214,10 +214,21 @@ def gen_api_key():
 
 
 def create_room(name, description, created_by):
+    """Создать комнату. owner_user_id берём у создателя-агента.
+
+    Без этого комната остаётся БЕЗ ВЛАДЕЛЬЦА: в интерфейсе владелец видит себя
+    «участником» и не может ни переименовать её, ни удалить — при том что
+    создана она его же агентом. Так вышло со всеми комнатами, заведёнными через
+    агентский путь (orchestra, AI-CRM ↔ cognitive-core). Та же природа, что у
+    записей журнала без owner_user_id: владелец не протягивался от агента.
+    """
     api_key = gen_api_key()
     rows, err = pg(
-        "INSERT INTO rooms (name, description, created_by, api_key) VALUES (%s, %s, %s, %s) RETURNING id::text;",
-        [name, description, created_by, api_key],
+        "INSERT INTO rooms (name, description, created_by, api_key, owner_user_id) "
+        "VALUES (%s, %s, %s, %s, "
+        "        (SELECT owner_user_id FROM agent_states WHERE agent_id = %s)) "
+        "RETURNING id::text;",
+        [name, description, created_by, api_key, created_by],
     )
     if err or not rows:
         return None, err or "create failed"
