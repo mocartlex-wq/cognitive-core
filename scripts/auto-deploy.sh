@@ -20,6 +20,13 @@ HEALTH_CMD="${COGNITIVE_HEALTH_CMD:-docker exec cognitive_api python -c \"import
 SMOKE_ATTEMPTS="${COGNITIVE_SMOKE_ATTEMPTS:-6}"
 SMOKE_INTERVAL="${COGNITIVE_SMOKE_INTERVAL:-5}"
 SMOKE_MIN_OK="${COGNITIVE_SMOKE_MIN_OK:-5}"
+# Прогрев: пока api ПЕРЕЗАПУСКАЕТСЯ после rebuild, неудачные пробы — это не
+# «деплой сломан», а «контейнер ещё не встал». Раньше они съедали бюджет попыток:
+# 2 пробы в стартап + 4 успешных = 4/6 при пороге 5 → ЛОЖНЫЙ откат (инцидент
+# 2026-08-09 14:06, стоил чужому проду суток простоя). Пробы до ПЕРВОГО успеха
+# бюджет не тратят, но ограничены своим лимитом — реально мёртвый api всё равно
+# провалит деплой, просто на минуту позже.
+SMOKE_WARMUP="${COGNITIVE_SMOKE_WARMUP:-12}"
 
 # PR #24: source env-файл чтобы получить GITHUB_PAT для git fetch через HTTPS.
 # Раньше auto-deploy полагался на /root/.ssh/github_cognitive_deploy который
@@ -35,6 +42,50 @@ if [ -z "$REPO_HTTPS_URL" ] && [ -n "${GITHUB_PAT:-}" ]; then
 fi
 
 log() { echo "[$(date -Iseconds)] $*"; }
+
+# ─── Защита чужих конфигов nginx ────────────────────────────────────────────
+# В nginx/conf.d/ физически лежат конфиги, которые нам НЕ принадлежат:
+# ai-crm.conf (его непрерывно переписывает внешний davsync/dynup), office.conf,
+# schitay.conf и цепочка .bak-* — единственные копии правок соседних команд.
+#
+# Инцидент 2026-08-09: ЛОЖНЫЙ провал смока (4/6 при пороге 5, api просто
+# перезапускался) запустил откат, а `git reset --hard` восстановил ai-crm.conf
+# из репозитория — версией от 9 мая. Вместе с правками исчезли локации /dav,
+# домен ai-mr.ru (лежал сутки с 525) и client_max_body_size 256M. Guard,
+# добавленный в PR #212, исключал файл только из ПРОВЕРКИ на грязь
+# (`git diff-index ... :(exclude)`), но не из reset/checkout — он спасал от
+# ложных abort'ов, а не от стирания.
+#
+# Вторая мина того же рода: office.conf, schitay.conf и все .bak-* — untracked,
+# то есть `git clean -fd` в self-heal снёс бы их целиком. Их никто не хватился
+# бы до следующего рестарта nginx.
+#
+# Поэтому: снимаем копию ДО любой разрушающей операции и возвращаем ПОСЛЕ.
+NGINX_CONFD="$REPO_DIR/nginx/conf.d"
+FOREIGN_STASH=""
+
+preserve_foreign_nginx() {
+    [ -d "$NGINX_CONFD" ] || return 0
+    FOREIGN_STASH=$(mktemp -d /tmp/cogcore-nginx-stash.XXXXXX) || { FOREIGN_STASH=""; return 0; }
+    cp -a "$NGINX_CONFD/." "$FOREIGN_STASH/" 2>/dev/null || true
+}
+
+restore_foreign_nginx() {
+    [ -n "$FOREIGN_STASH" ] && [ -d "$FOREIGN_STASH" ] || return 0
+    local restored=0
+    for f in "$FOREIGN_STASH"/*; do
+        [ -e "$f" ] || continue
+        local base; base=$(basename "$f")
+        # gitea.conf — наш, им управляет репозиторий; остальное возвращаем как было.
+        [ "$base" = "gitea.conf" ] && continue
+        if ! cmp -s "$f" "$NGINX_CONFD/$base" 2>/dev/null; then
+            cp -a "$f" "$NGINX_CONFD/$base" 2>/dev/null && restored=$((restored + 1))
+        fi
+    done
+    [ "$restored" -gt 0 ] && log "восстановлено чужих конфигов nginx: $restored (git-операция их затронула)"
+    rm -rf "$FOREIGN_STASH" 2>/dev/null || true
+    FOREIGN_STASH=""
+}
 
 # Telegram-alert helper: silent if TELEGRAM_BOT_TOKEN/CHAT_ID не заданы.
 # Set in /etc/cognitive-deploy.env or systemd unit Environment= directives.
@@ -88,11 +139,13 @@ if ! git diff-index --quiet HEAD -- "." ":(exclude)nginx/conf.d/ai-crm.conf" 2>/
     # Working tree dirty. Check if content matches origin/$BRANCH (safe self-heal case)
     if git diff --quiet "origin/$BRANCH" -- . 2>/dev/null; then
         log "dirty index but content matches origin/$BRANCH — self-healing via checkout + clean"
+        preserve_foreign_nginx
         git checkout --quiet -- . 2>/dev/null || true
-        # Удаляем untracked которые есть в origin/$BRANCH (старые runtime-installed файлы)
-        # `git clean -fd` уберёт всё untracked — но только в файлах под git control,
-        # не в /var/log или внешних путях. Safe для git repo.
-        git clean -fd 2>/dev/null || true
+        # Удаляем untracked которые есть в origin/$BRANCH (старые runtime-installed файлы).
+        # nginx/conf.d исключён: там untracked-файлы соседних команд (office.conf,
+        # schitay.conf, .bak-*) — для них clean не уборка, а потеря.
+        git clean -fd -e nginx/conf.d/ 2>/dev/null || true
+        restore_foreign_nginx
         if git diff-index --quiet HEAD 2>/dev/null; then
             log "self-healed: working tree clean now"
             rm -f /var/run/cognitive/deploy-dirty.alerted 2>/dev/null
@@ -176,19 +229,30 @@ log "app/infra files changed: $(echo "$APP_CHANGED" | head -3 | tr '\n' ' ')..."
 log "smoke-testing via [$HEALTH_CMD] (need ${SMOKE_MIN_OK}/${SMOKE_ATTEMPTS} healthy responses)"
 
 ok_count=0
+used=0        # потраченные попытки (только ПОСЛЕ того как api ответил хоть раз)
+warmup=0      # пробы в фазе прогрева — бюджет не тратят
 # При первой попытке ждём чуть дольше — даём контейнеру время после rebuild
 [ "$SMOKE_ATTEMPTS" -gt 0 ] && sleep 3
 
-for i in $(seq 1 "$SMOKE_ATTEMPTS"); do
+while [ "$used" -lt "$SMOKE_ATTEMPTS" ]; do
+    probe_ok=0
     if body=$(eval "$HEALTH_CMD" 2>/dev/null); then
         if echo "$body" | grep -q '"healthy":true'; then
-            ok_count=$((ok_count + 1))
-            log "smoke #${i}/${SMOKE_ATTEMPTS}: ok (${ok_count}/${SMOKE_MIN_OK})"
-        else
-            log "smoke #${i}/${SMOKE_ATTEMPTS}: bad response"
+            probe_ok=1
         fi
+    fi
+
+    if [ "$probe_ok" -eq 1 ]; then
+        ok_count=$((ok_count + 1))
+        used=$((used + 1))
+        log "smoke #${used}/${SMOKE_ATTEMPTS}: ok (${ok_count}/${SMOKE_MIN_OK})"
+    elif [ "$ok_count" -eq 0 ] && [ "$warmup" -lt "$SMOKE_WARMUP" ]; then
+        # Ни одного успеха ещё не было → считаем что контейнер поднимается.
+        warmup=$((warmup + 1))
+        log "smoke warm-up ${warmup}/${SMOKE_WARMUP}: api ещё не отвечает healthy"
     else
-        log "smoke #${i}/${SMOKE_ATTEMPTS}: probe failed"
+        used=$((used + 1))
+        log "smoke #${used}/${SMOKE_ATTEMPTS}: неудачная проба"
     fi
 
     # Раннее завершение если уже набрали нужное количество
@@ -196,10 +260,13 @@ for i in $(seq 1 "$SMOKE_ATTEMPTS"); do
         break
     fi
 
-    # Между попытками — пауза, кроме последней
-    if [ "$i" -lt "$SMOKE_ATTEMPTS" ]; then
-        sleep "$SMOKE_INTERVAL"
+    # Прогрев исчерпан и api так и не ответил — дальше ждать нечего
+    if [ "$ok_count" -eq 0 ] && [ "$warmup" -ge "$SMOKE_WARMUP" ]; then
+        log "прогрев исчерпан (${SMOKE_WARMUP} проб), api не поднялся"
+        break
     fi
+
+    sleep "$SMOKE_INTERVAL"
 done
 
 if [ "$ok_count" -ge "$SMOKE_MIN_OK" ]; then
@@ -210,10 +277,13 @@ fi
 # ─── ROLLBACK ────────────────────────────────────────────────────────────────
 log "SMOKE FAILED (only ${ok_count}/${SMOKE_ATTEMPTS} healthy). Rolling back ${NEW:0:7} -> ${PREV:0:7}"
 
+preserve_foreign_nginx
 if ! git reset --hard --quiet "$PREV" 2>&1; then
+    restore_foreign_nginx
     log "FATAL: git reset to $PREV failed — manual recovery required" >&2
     exit 2
 fi
+restore_foreign_nginx
 
 # Reverse-direction conditional reload: применяем то же что бы поменялось
 # при движении NEW → PREV (сейчас файлы уже как в PREV-state, нужно
