@@ -1215,6 +1215,36 @@ class HistoryStore:
             return 0, max_depth
         return len(self.data["by_parent"].get(parent_id, [])), max_depth
 
+    def peer_exchange_ok(self, persona, peer):
+        """Защита от пинг-понга двух заместителей.
+
+        loop_depth здесь бессилен: он считает ВЕТВЛЕНИЕ (сколько ответов на один
+        и тот же parent), а в цепочке A→B→A→B у каждого сообщения свой parent с
+        единственным ответом — счётчик не растёт никогда. Пока стандин был
+        включён у одного-двух агентов, это не проявлялось; 2026-08-10 включили
+        всем, и analyst с claude-8d5b07 сцепились: 9 вызовов LLM за минуту, и
+        останавливал их только часовой лимит — то есть десятки пустых обращений
+        к провайдеру в сутки.
+
+        Здесь ограничиваем число авто-обменов с ОДНИМ собеседником в окне: один
+        содержательный ответ пройдёт, бесконечная перепалка — нет.
+        """
+        rules = persona.get("escalation_rules", {})
+        max_exchanges = rules.get("max_exchanges_per_peer", 3)
+        window = rules.get("peer_window_sec", 600)
+        now = time.time()
+        peers = self.data.setdefault("peer_exchanges", {})
+        recent = [t for t in peers.get(peer, []) if now - t < window]
+        peers[peer] = recent
+        if len(recent) >= max_exchanges:
+            return False, f"peer-loop guard: {len(recent)} обменов с {peer} за {window}с"
+        return True, ""
+
+    def record_peer_exchange(self, peer):
+        if not peer:
+            return
+        self.data.setdefault("peer_exchanges", {}).setdefault(peer, []).append(time.time())
+
 
 def handle_silent(persona, msg, history):
     log.info(f"[{persona['persona_id']}] SILENT msg={msg.get('id', '?')[:8]}")
@@ -1529,6 +1559,11 @@ def process_persona(persona):
             if depth >= max_depth:
                 log.warning(f"[{pid}] LOOP_BLOCKED depth={depth}>={max_depth}")
                 continue
+            peer = extract_real_sender(msg) or msg.get("from")
+            peer_ok, peer_reason = history.peer_exchange_ok(persona, peer)
+            if not peer_ok:
+                log.warning(f"[{pid}] PEER_LOOP_BLOCKED {peer_reason}")
+                continue
         channel = persona.get("wake_channel", "deepseek")
         if action == "llm_reply" and channel == "claude_routine":
             # Route to the REAL cloud Claude via Routine /fire; if it can't fire
@@ -1560,6 +1595,7 @@ def process_persona(persona):
             sent_id = handler(persona, msg, history)
         if action in ("auto_ack", "llm_reply") and sent_id:
             history.record_reply(sent_id, parent_id=msg_id)
+            history.record_peer_exchange(extract_real_sender(msg) or msg.get("from"))
     if new_count:
         log.info(f"[{pid}] processed {new_count} new msgs")
     history.save()
