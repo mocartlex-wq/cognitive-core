@@ -860,7 +860,14 @@ def resolve_agent_key(agent_id):
     truth), cached in-process — like resolve_room_key for room keys. Replaces the
     old hardcoded AGENT_KEYS so the daemon can act for ANY onboarded agent.
     agent_id is format-validated before string interpolation (no injection)."""
-    if not agent_id or not re.match(r"^[\w\-]+$", agent_id):
+    # Двоеточие разрешено: идентификаторы сессий Claude Code выглядят как
+    # `claude-code:CRM-kadastr`. Без него валидация отсекала такого агента, ключ
+    # не находился, и демон не мог прочитать его ящик — то есть комнатный
+    # заместитель молчал даже когда мост уже доставил ему письмо (2026-08-10,
+    # третье место подряд, где на этих идентификаторах спотыкался разбор).
+    # Класс остаётся строгим: кавычек, пробелов и `;` в нём нет, поэтому
+    # подстановка в SQL ниже по-прежнему безопасна.
+    if not agent_id or not re.match(r"^[\w\-:.]+$", agent_id):
         return None
     if agent_id in _AGENT_KEY_CACHE:
         return _AGENT_KEY_CACHE[agent_id]
