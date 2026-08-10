@@ -1143,16 +1143,33 @@ def deepseek_reply_with_tools(persona, message):
                 "content": msg.get("content") or "",
                 "tool_calls": msg["tool_calls"],
             })
-            for tc in msg["tool_calls"][:MAX_TOOL_CALLS_PER_REPLY - tool_calls_made]:
-                tool_calls_made += 1
+            # На КАЖДЫЙ tool_call обязан прийти ответ с тем же tool_call_id —
+            # иначе провайдер отклоняет запрос целиком:
+            #   "An assistant message with 'tool_calls' must be followed by tool
+            #    messages responding to each 'tool_call_id'"
+            # Раньше список резался по остатку лимита, а в сообщении ассистента
+            # оставались ВСЕ вызовы — стоило модели попросить несколько справок
+            # разом, и весь ответ падал с HTTP 400. Наружу это выглядело как
+            # «память недоступна»: заместитель честно сообщал, что не смог
+            # ничего найти, хотя память была жива (2026-08-10).
+            # Лимит сохраняем, но сверхлимитным вызовам отвечаем отказом, а не
+            # молчанием.
+            budget_left = max(0, MAX_TOOL_CALLS_PER_REPLY - tool_calls_made)
+            for idx, tc in enumerate(msg["tool_calls"]):
                 tname = tc["function"]["name"]
                 try:
                     targs = json.loads(tc["function"]["arguments"] or "{}")
                 except Exception:
                     targs = {}
-                log.info(f"[{persona['persona_id']}] TOOL_CALL #{tool_calls_made} {tname}({targs})")
-                result = execute_tool(tname, targs)
-                tool_results_log.append(f"--- {tname}({targs}) ---\n{result[:1500]}")
+                if idx < budget_left:
+                    tool_calls_made += 1
+                    log.info(f"[{persona['persona_id']}] TOOL_CALL #{tool_calls_made} {tname}({targs})")
+                    result = execute_tool(tname, targs)
+                    tool_results_log.append(f"--- {tname}({targs}) ---\n{result[:1500]}")
+                else:
+                    result = ("Пропущено: исчерпан лимит вызовов инструментов "
+                              "на один ответ. Отвечай по тому, что уже получено.")
+                    log.info(f"[{persona['persona_id']}] TOOL_SKIPPED {tname} (лимит)")
                 msgs.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
