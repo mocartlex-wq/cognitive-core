@@ -52,6 +52,18 @@ nginx/certs/*.key
 nginx/certs/*.crt
 nginx/certs/*.pem
 
+# Чужие конфиги nginx. Каталог conf.d общий: рядом с нашим gitea.conf лежат
+# файлы соседних команд (ai-crm, office, schitay) и их бэкапы. Владелец у них
+# свой — ai-crm.conf раскатывается из репозитория ai-crm (deploy/nginx/, их
+# update.sh), остальные правятся вручную.
+#
+# Пока ai-crm.conf числился НАШИМ, любая разрушающая git-операция возвращала его
+# к версии из нашего репо: 2026-08-09 откат по ложному смоку вернул майский
+# конфиг, ai-mr.ru лёг на сутки. PR #237 закрыл пути reset/checkout/clean —
+# здесь убираем саму причину: файл перестаёт быть нашим.
+nginx/conf.d/*
+!nginx/conf.d/gitea.conf
+
 # Backups directory
 backups/
 

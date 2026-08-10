@@ -157,7 +157,10 @@ if ! git diff-index --quiet HEAD -- "." ":(exclude)nginx/conf.d/ai-crm.conf" 2>/
         log "ABORT: working tree dirty AND diverged from origin/$BRANCH"
         log "dirty files: $DIRTY_FILES"
         log "to investigate: git diff origin/$BRANCH"
-        log "to force-fix:   sudo git reset --hard origin/$BRANCH && sudo git clean -fd"
+        # ВНИМАНИЕ: подсказка намеренно исключает nginx/conf.d — голый
+        # `reset --hard && clean -fd` вернул бы чужие конфиги к версии из репо и
+        # снёс бы untracked-файлы соседей вместе с их бэкапами (инцидент 09.08).
+        log "to force-fix:   sudo git stash push -- nginx/conf.d && sudo git reset --hard origin/$BRANCH && sudo git clean -fd -e nginx/conf.d/ && sudo git stash pop"
         SENTINEL=/var/run/cognitive/deploy-dirty.alerted
         if [ ! -f "$SENTINEL" ] || [ $(( $(date +%s) - $(stat -c %Y "$SENTINEL" 2>/dev/null || echo 0) )) -gt 3600 ]; then
             /usr/local/bin/cognitive-notify.sh "auto-deploy: server tree DIRTY+DIVERGED, manual fix needed. Files: $DIRTY_FILES" 2>/dev/null
@@ -193,7 +196,21 @@ fi
 
 # git pull --ff-only --quiet может пытаться SSH-fetch — используем
 # уже скачанный FETCH_HEAD через merge --ff-only.
+# Чужие конфиги вокруг pull — две разные беды, обе лечатся здесь.
+#
+# 1. Пока файл ОТСЛЕЖИВАЕТСЯ и правится на сервере, дерево постоянно грязное, и
+#    ff-merge на коммите, который его трогает (в т.ч. на коммите, ВЫНОСЯЩЕМ его
+#    из-под git), падает: "Your local changes would be overwritten by merge".
+#    Деплой встал бы намертво — проверено на макете репозитория.
+# 2. Коммит с удалением сносит файл и с диска — nginx остался бы без конфига
+#    соседей до их следующего деплоя.
+#
+# Поэтому: снимаем копию → приводим каталог к HEAD, чтобы merge прошёл →
+# возвращаем копию. Содержимое на диске не меняется, меняется только индекс.
+preserve_foreign_nginx
+git checkout --quiet -- nginx/conf.d/ 2>/dev/null || true
 git merge --ff-only --quiet "$NEW" 2>/dev/null || git pull --ff-only --quiet origin "$BRANCH"
+restore_foreign_nginx
 
 # [skip-deploy] аварийный рычаг: если subject HEAD-коммита содержит "[skip-deploy]",
 # код приземляется в серверный checkout (ff-merge выше), но conditional_reload +
