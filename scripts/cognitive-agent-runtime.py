@@ -1032,6 +1032,54 @@ def post_to_room(room_id, from_agent, text):
         return None
 
 
+LIVE_AGENT_WINDOW_SEC = int(os.environ.get("COGCORE_LIVE_AGENT_WINDOW_SEC", "300"))
+
+
+def live_agent_active(persona_id, room_id, history, window_sec=LIVE_AGENT_WINDOW_SEC):
+    """True, если ЖИВАЯ сессия агента писала в комнату недавно.
+
+    Заместитель и живая сессия делят одно имя, и в комнате их не различить. Пока
+    оба отвечают, получается разнобой: 2026-08-10 codex-app за одну минуту
+    сказал «это живая задача Codex Desktop» и «я на связи как заместитель», после
+    чего живой агент публиковал отдельное сообщение-разъяснение, кто из реплик
+    чей. Замещать нужно ОТСУТСТВУЮЩЕГО, а не спорить с присутствующим.
+
+    Свои посты отличаем по id (их пишет record_self_post), а не по времени: у
+    демона и БД разные часы, и разница в секунды давала бы ложные срабатывания.
+    """
+    if not room_id or not persona_id:
+        return False
+    safe_room = str(room_id)
+    if not re.match(r"^[0-9a-fA-F\-]{36}$", safe_room):
+        return False
+    if not re.match(r"^[\w\-:.]+$", persona_id):
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "cognitive_postgres", "psql", "-U", "cognitive",
+             "-d", "cognitive_core", "-t", "-A", "-F", "|", "-c",
+             "SELECT id::text, EXTRACT(EPOCH FROM (NOW() - created_at))::int "
+             "FROM room_messages WHERE room_id='" + safe_room + "'::uuid "
+             "AND from_agent='" + persona_id + "' "
+             "ORDER BY created_at DESC LIMIT 5"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in (result.stdout or "").strip().splitlines():
+            if "|" not in line:
+                continue
+            mid, age = line.split("|", 1)
+            try:
+                age_sec = int(age)
+            except ValueError:
+                continue
+            if age_sec <= window_sec and not history.is_self_post(mid.strip()):
+                return True
+    except Exception as e:
+        # Не смогли проверить — отвечаем как раньше: молчание хуже дубля.
+        log.warning(f"live_agent_active check failed for {persona_id}: {e}")
+    return False
+
+
 def room_ctx(msg):
     """If this incoming msg came via a room (@-mention bridge), return its
     room_id; else None. Reads inbox message context {"via":"room","room_id":..}.
@@ -1338,6 +1386,19 @@ class HistoryStore:
             return
         self.data.setdefault("peer_exchanges", {}).setdefault(peer, []).append(time.time())
 
+    def record_self_post(self, msg_id):
+        """Запомнить id того, что демон САМ опубликовал в комнату — по нему
+        live_agent_active отличает свои реплики от реплик живой сессии."""
+        if not msg_id:
+            return
+        posts = self.data.setdefault("self_posts", [])
+        posts.append(str(msg_id))
+        if len(posts) > 200:
+            del posts[:-200]
+
+    def is_self_post(self, msg_id):
+        return str(msg_id) in set(self.data.get("self_posts", []))
+
 
 def handle_silent(persona, msg, history):
     log.info(f"[{persona['persona_id']}] SILENT msg={msg.get('id', '?')[:8]}")
@@ -1396,6 +1457,7 @@ def handle_llm_reply(persona, msg, history):
     room_id = room_ctx(msg)
     if room_id:
         sent_id = post_to_room(room_id, persona["persona_id"], reply_text)
+        history.record_self_post(sent_id)
         log.info(f"[{persona['persona_id']}] LLM_REPLY(room) -> {room_id} ({len(reply_text)} chars) reply={sent_id[:8] if sent_id else '?'}")
         return sent_id
     sent_id = send_dm(persona["persona_id"], sender, reply_text, parent_id=msg.get("id"))
@@ -1647,6 +1709,11 @@ def process_persona(persona):
         # Явное обращение К СЕБЕ не блокируем, безадресные реплики — тоже.
         if addressed_to_others(text, pid, persona.get("agent_label")):
             log.info(f"[{pid}] SKIP: адресовано другому агенту")
+            continue
+        # Живой агент на связи — замещать некого.
+        _rid = room_ctx(msg)
+        if _rid and live_agent_active(pid, _rid, history):
+            log.info(f"[{pid}] SKIP: живая сессия активна, заместитель молчит")
             continue
         trigger = match_trigger(text, persona.get("triggers", []))
         if not trigger:
