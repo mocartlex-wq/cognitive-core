@@ -11,6 +11,19 @@
 #      — иначе → ROLLBACK к prev-sha + повторный conditional_reload + alert
 #
 # Идемпотентен. Logs through systemd journal (`journalctl -u cognitive-deploy -f`).
+#
+# ⚠️ ПРАВЯ ЭТОТ СКРИПТ, ПОМНИ: сервер применит правку только ПОСЛЕ того, как
+# успешно заберёт коммит с ней — СТАРОЙ версией себя. Если правка чинит то, что
+# мешает pull, она до сервера не доедет: конвейер встанет на коммите с
+# лекарством и будет падать каждую минуту.
+# Так и вышло 2026-08-10 с обёрткой вокруг pull (nginx/conf.d): merge падал с
+# "Your local changes would be overwritten", а обёртка, которая это лечит, была
+# внутри непринимаемого коммита. Разблокировали руками, повторив её логику:
+#   cd /opt/cognitive-core && STASH=$(mktemp -d) && sudo cp -a nginx/conf.d/. "$STASH/"
+#   sudo git checkout -- nginx/conf.d/ && sudo git merge --ff-only origin/main
+#   for f in "$STASH"/*; do b=$(basename "$f"); [ "$b" = gitea.conf ] || sudo cp -a "$f" nginx/conf.d/; done
+# Правило: если правка снимает блокировку pull — сначала сними её на сервере
+# вручную, потом мержи.
 
 set -euo pipefail
 
