@@ -315,7 +315,18 @@ CONDUCTOR_HINT_TEXT = (
 
 # Matches @mentions: @agent_id or @Label. \w is Unicode-aware in Python 3 re,
 # so it captures Cyrillic labels (@Растр, @Аналитик) and ASCII ids (@analyst-1).
-_MENTION_RE = re.compile(r"@([\w\-]+)", re.UNICODE)
+#
+# Двоеточие обязано входить в класс: у сессий Claude Code идентификаторы вида
+# `claude-code:CRM-kadastr`. Без него `@claude-code:CRM-kadastr` разбиралось как
+# `claude-code` — такого агента нет, упоминание отбрасывалось, сообщение уходило
+# в ветку «ничьё» и доставалось дирижёру. Наружу это выглядело так, будто
+# заместитель владельца перехватывает чужую почту и отвечает за всех
+# (инцидент 2026-08-10: два обращения к @claude-code:Designer и
+# @claude-code:CRM-kadastr получил и ответил на них dsdsd).
+_MENTION_RE = re.compile(r"@([\w\-.:]+)", re.UNICODE)
+
+# Хвостовая пунктуация не часть имени: «@dsdsd:», «@analyst.» — обычная речь.
+_MENTION_TRIM = ":.-"
 
 
 def _resolve_mentions_to_agents(room_id, text):
@@ -352,21 +363,35 @@ def _resolve_mentions_to_agents(room_id, text):
     resolved = []
     seen = set()
     for m in mentions:
-        key = m.lower()
-        aid = by_id.get(key) or by_label.get(key)
+        # Кандидаты от длинного к короткому: сперва имя как есть, затем без
+        # хвостовой пунктуации. Порядок важен — иначе «@dsdsd:» не найдётся,
+        # а «@claude-code:CRM» ошибочно схлопнется до «claude-code».
+        candidates = [m]
+        trimmed = m.rstrip(_MENTION_TRIM)
+        if trimmed and trimmed != m:
+            candidates.append(trimmed)
+        aid = None
+        for cand in candidates:
+            key = cand.lower()
+            aid = by_id.get(key) or by_label.get(key)
+            if aid:
+                break
         if not aid:
             # Fallback: global agent_states (mention may target an agent that
             # exists but hasn't joined this room yet). First match wins.
-            g, gerr = pg(
-                "SELECT agent_id FROM agent_states "
-                "WHERE agent_id = %s OR lower(agent_label) = lower(%s) LIMIT 1;",
-                [m, m],
-            )
-            if gerr:
-                sys.stderr.write(f"[rooms] mention-bridge global resolve failed for @{m}: {gerr}\n")
-                continue
-            if g and g[0] and g[0][0]:
-                aid = g[0][0]
+            for cand in candidates:
+                g, gerr = pg(
+                    "SELECT agent_id FROM agent_states "
+                    "WHERE agent_id = %s OR lower(agent_label) = lower(%s) LIMIT 1;",
+                    [cand, cand],
+                )
+                if gerr:
+                    sys.stderr.write(
+                        f"[rooms] mention-bridge global resolve failed for @{cand}: {gerr}\n")
+                    break
+                if g and g[0] and g[0][0]:
+                    aid = g[0][0]
+                    break
         if aid and aid not in seen:
             seen.add(aid)
             resolved.append(aid)

@@ -1000,6 +1000,32 @@ def room_ctx(msg):
     return None
 
 
+_MENTION_RE_RT = re.compile(r"@([\w\-.:]+)", re.UNICODE)
+
+
+def addressed_to_others(text, persona_id, label=None):
+    """True, если в тексте есть @-обращения и НИ ОДНО из них — не ко мне.
+
+    Двоеточие в классе символов обязательно: идентификаторы сессий выглядят как
+    `claude-code:CRM-kadastr`, и без него обращение схлопывалось до `claude-code`
+    (та же ошибка, что жила в мосте комнат).
+
+    Безадресные реплики (@ вообще нет) не блокируем — на них заместитель как раз
+    и должен отвечать.
+    """
+    mentions = _MENTION_RE_RT.findall(text or "")
+    if not mentions:
+        return False
+    mine = {(persona_id or "").lower()}
+    if label:
+        mine.add(label.lower())
+    for m in mentions:
+        cand = m.lower()
+        if cand in mine or cand.rstrip(":.-") in mine:
+            return False
+    return True
+
+
 def room_mention_ctx(msg):
     """Like room_ctx, but returns room_id ONLY for a DIRECT @mention bridged from a
     room (inbox context {via:room, room_id} with NO extra marker). Conductor
@@ -1545,6 +1571,16 @@ def process_persona(persona):
             rid = room_mention_ctx(msg)
             if not rid or rid not in persona.get("room_responder_rooms", set()):
                 continue
+        # Заместитель молчит, когда в тексте адресуют КОГО-ТО ДРУГОГО.
+        # Мост кладёт «ничьи» комнатные сообщения дирижёру (unaddressed:true), и
+        # без этой проверки заместитель владельца отвечал на реплики,
+        # обращённые к другим агентам — со стороны это выглядит как перехват
+        # чужой почты (инцидент 2026-08-10: dsdsd ответил на два обращения к
+        # @claude-code:Designer и @claude-code:CRM-kadastr).
+        # Явное обращение К СЕБЕ не блокируем, безадресные реплики — тоже.
+        if addressed_to_others(text, pid, persona.get("agent_label")):
+            log.info(f"[{pid}] SKIP: адресовано другому агенту")
+            continue
         trigger = match_trigger(text, persona.get("triggers", []))
         if not trigger:
             continue
@@ -1618,6 +1654,11 @@ def main():
                     aid: (custom.get(aid) or default_persona(aid, label))
                     for aid, label in standin.items()
                 }
+                # Метка нужна не только для приветствия: по ней addressed_to_others
+                # понимает, что «@Аналитик» — обращение к analyst, а не к другому.
+                for aid, label in standin.items():
+                    if label:
+                        personas[aid].setdefault("agent_label", label)
                 # Per-room auto-responders (room_participants.auto_respond=true):
                 # wake for a DIRECT @mention in their bound room(s) only — a lighter
                 # binding than the full 24/7 stand-in. A full stand-in already covers
@@ -1631,6 +1672,8 @@ def main():
                     p = dict(custom.get(aid) or default_persona(aid, info["label"]))
                     p["room_responder_only"] = True
                     p["room_responder_rooms"] = info["rooms"]
+                    if info.get("label"):
+                        p.setdefault("agent_label", info["label"])
                     personas[aid] = p
                     n_room_only += 1
                 # Attach per-agent connection channel + (secret) config so the
@@ -1638,9 +1681,16 @@ def main():
                 for _aid, _p in personas.items():
                     _p["wake_channel"], _p["channel_config"] = load_agent_channel(_aid)
                 n_custom = sum(1 for a in personas if a in custom)
-                # Log only when the (agent, channel) set actually changes — avoids
-                # a log line every refresh now that refresh is frequent (60s).
-                sig = sorted((a, p.get("wake_channel", "deepseek")) for a, p in personas.items())
+                # Log only when the set actually changes — avoids a log line every
+                # refresh now that refresh is frequent (60s). РОЛЬ входит в подпись
+                # намеренно: без неё перевод агента «полный заместитель ->
+                # комнатный» не менял (agent, channel) и проходил МОЛЧА — 2026-08-10
+                # я ждал в логе подтверждения, которого не могло быть.
+                sig = sorted(
+                    (a, p.get("wake_channel", "deepseek"),
+                     "room" if p.get("room_responder_only") else "standin")
+                    for a, p in personas.items()
+                )
                 if sig != last_sig:
                     log.info(
                         f"loaded {len(personas)} personas "
