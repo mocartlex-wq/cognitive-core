@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import struct
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -10,6 +12,8 @@ from app.db.redis import get_redis, get_redis_raw
 from app.security.audit import log_audit
 from app.services.embedder import embed_text, get_model_version
 from app.services.ingestor import save_raw_event
+
+log = logging.getLogger(__name__)
 
 SESSION_TTL = 86400  # 24 часа
 
@@ -208,6 +212,92 @@ async def restore_redis_from_pg(domain: str | None = None) -> dict:
             restored += 1
 
     return {"restored": restored, "from": "pgvector"}
+
+
+async def search_fulltext(
+    query: str,
+    domain: str,
+    top_k: int = 5,
+    owner_user_id: str | None = None,
+) -> list[dict]:
+    """Полнотекстовый поиск по L3 — вторая половина гибрида.
+
+    Вектор хорошо ловит смысл и плохо — точные токены: имя файла
+    `GeometryPreview.tsx`, код `525`, флаг `--no-random-sleep-on-renew`. Такие
+    запросы у чисто векторного поиска проваливаются, потому что редкий
+    идентификатор почти не влияет на эмбеддинг предложения.
+
+    `websearch_to_tsquery` выбран вместо `plainto_tsquery`: он не падает на
+    произвольном пользовательском вводе (кавычки, минусы, оператор OR) и
+    понимает естественную запись запроса.
+
+    Возвращает записи в порядке убывания ts_rank. Ошибка здесь не должна ронять
+    поиск целиком — вызывающий склеивает то, что получил.
+    """
+    if not query or not query.strip():
+        return []
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        knowledge = await conn.fetch(
+            """
+            SELECT id, domain, knowledge_type, content,
+                   ts_rank(to_tsvector('russian', content::text),
+                           websearch_to_tsquery('russian', $1)) AS rank
+            FROM l3_master_knowledge
+            WHERE domain = $2 AND effective_to IS NULL
+              AND ($4::uuid IS NULL OR owner_user_id = $4::uuid)
+              AND to_tsvector('russian', content::text)
+                  @@ websearch_to_tsquery('russian', $1)
+            ORDER BY rank DESC
+            LIMIT $3
+            """,
+            query, domain, top_k, owner_user_id,
+        )
+    out = []
+    for k in knowledge:
+        kd = dict(k)
+        parsed = _parse_jsonb(kd["content"])
+        out.append({
+            "id": str(kd["id"]),
+            "record_type": "knowledge",
+            "domain": kd["domain"],
+            "content": parsed,
+            "knowledge_type": kd.get("knowledge_type", ""),
+            "confidence": _extract_confidence(parsed),
+            "fts_rank": float(kd["rank"]),
+        })
+    return out
+
+
+def _fuse_rrf(ranked_lists: list[list[dict]], top_k: int, k: int = 60) -> list[dict]:
+    """Слияние нескольких ранжирований по обратному рангу (RRF).
+
+    Складывать «расстояние» векторного поиска и ts_rank напрямую нельзя: это
+    величины из разных шкал, у которых даже направление разное. RRF работает с
+    ПОЗИЦИЯМИ, а не с очками, поэтому несравнимость шкал перестаёт быть
+    проблемой — отсюда и его репутация рабочего варианта по умолчанию.
+
+    Константа k=60 — общепринятая: она сглаживает вклад хвоста, не давая
+    первому месту одного списка автоматически побеждать всё остальное.
+    """
+    scores: dict[str, float] = {}
+    best: dict[str, dict] = {}
+    for lst in ranked_lists:
+        for pos, item in enumerate(lst):
+            rid = str(item.get("id"))
+            if not rid:
+                continue
+            scores[rid] = scores.get(rid, 0.0) + 1.0 / (k + pos + 1)
+            # Храним самую полную версию записи (у векторной есть distance,
+            # у полнотекстовой — fts_rank; объединяем, не теряя ни того ни другого).
+            if rid in best:
+                best[rid] = {**best[rid], **item}
+            else:
+                best[rid] = dict(item)
+    for rid, s in scores.items():
+        best[rid]["rrf_score"] = round(s, 6)
+    fused = sorted(best.values(), key=lambda x: x["rrf_score"], reverse=True)
+    return fused[:top_k]
 
 
 async def search_pgvector(
@@ -444,17 +534,35 @@ async def build_operative(
                 if results:
                     return results
 
-    # Попытка 2: pgvector KNN (multi-tenant safe).
-    pg_results = await search_pgvector(query_vec, domain, top_k, owner_user_id=owner_user_id)
-    if pg_results:
+    # Попытка 2: ГИБРИД — вектор + полнотекстовый, слияние по обратному рангу.
+    #
+    # Две половины закрывают разные промахи друг друга: вектор находит смысл при
+    # других словах, полнотекстовый — точные токены (имя файла, код ошибки,
+    # флаг команды), которые почти не влияют на эмбеддинг предложения.
+    # Обе части ищутся одновременно; падение полнотекстовой не должно ронять
+    # поиск, поэтому её исключение гасится.
+    vec_task = search_pgvector(query_vec, domain, top_k, owner_user_id=owner_user_id)
+    fts_task = search_fulltext(query, domain, top_k, owner_user_id=owner_user_id)
+    pg_results, fts_results = await asyncio.gather(
+        vec_task, fts_task, return_exceptions=True,
+    )
+    if isinstance(pg_results, Exception):
+        log.warning("векторный поиск упал: %s", pg_results)
+        pg_results = []
+    if isinstance(fts_results, Exception):
+        log.warning("полнотекстовый поиск упал: %s", fts_results)
+        fts_results = []
+
+    if pg_results or fts_results:
+        merged = _fuse_rrf([pg_results, fts_results], top_k=top_k + (top_k // 2))
         # Параллельно восстанавливаем Redis для следующих запросов
         try:
             await restore_redis_from_pg(domain)
         except Exception:
             pass
         if not include_tools:
-            pg_results = [r for r in pg_results if r["record_type"] != "tool"]
-        return pg_results[:top_k + (top_k // 2 if include_tools else 0)]
+            merged = [r for r in merged if r["record_type"] != "tool"]
+        return merged[:top_k + (top_k // 2 if include_tools else 0)]
 
     # Попытка 3: Python KNN (последний fallback — для свежесозданных без эмбеддингов)
     pool = await get_pool()
