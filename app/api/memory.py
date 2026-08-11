@@ -23,10 +23,14 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("/consolidate/daily")
-async def trigger_daily(since_hours: int | None = None, domain: str | None = None, request: Request = None):
-    """Ручной запуск L1→L2 консолидации."""
-    if request:
-        await verify_api_key(request)
+async def trigger_daily(request: Request, since_hours: int | None = None, domain: str | None = None):
+    """Ручной запуск L1→L2 консолидации.
+
+    `request` обязателен намеренно. Раньше было `request: Request = None` плюс
+    `if request:` — то есть проверка ключа выполнялась, только если запрос
+    оказался передан. Дефолт убран, авторизация безусловна.
+    """
+    await verify_api_key(request)
     result = await daily_consolidate(since_hours, domain)
     return result
 
@@ -81,10 +85,9 @@ async def trigger_monthly_audit(domain: str, request: Request):
 
 
 @router.get("/snapshots")
-async def list_snapshots(domain: str | None = None, request: Request = None):
-    """Список L4-снапшотов."""
-    if request:
-        await verify_api_key(request)
+async def list_snapshots(request: Request, domain: str | None = None):
+    """Список L4-снапшотов. Авторизация безусловна (см. trigger_daily)."""
+    await verify_api_key(request)
     pool = await get_pool()
     async with pool.acquire() as conn:
         if domain:
