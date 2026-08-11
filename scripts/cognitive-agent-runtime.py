@@ -10,8 +10,12 @@ import os, sys, json, re, time, logging, urllib.request, urllib.error, subproces
 from datetime import datetime, timezone
 
 ENDPOINT = "https://mcp.xn----8sbwawqx4fza.xn--p1ai"
-LOG_FILE = "/var/log/cognitive-agent-runtime.log"
-HISTORY_DIR = "/var/run/cognitive/agent-history"
+# Пути переопределяемы через окружение. Раньше они были жёстко зашиты, и модуль
+# нельзя было даже импортировать там, где нет /var/log — то есть ни в тестах, ни
+# на машине разработчика. Из-за этого на защиты заместителей (адресация, петли,
+# живой агент) не было НИ ОДНОГО теста, хотя каждая написана по следам аварии.
+LOG_FILE = os.environ.get("COGCORE_RUNTIME_LOG", "/var/log/cognitive-agent-runtime.log")
+HISTORY_DIR = os.environ.get("COGCORE_RUNTIME_HISTORY", "/var/run/cognitive/agent-history")
 PERSONA_REFRESH_SEC = 60  # was 300; lower so UI channel/standin changes apply within ~1 min
 DEFAULT_POLL_SEC = 5
 NOTIFY_BIN = "/usr/local/bin/cognitive-notify.sh"
@@ -25,10 +29,19 @@ MAX_TOOL_CALLS_PER_REPLY = 3
 # secrets live in this (git-tracked) source.
 AGENT_KEYS = {}
 
+_handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    _handlers.insert(0, logging.FileHandler(LOG_FILE))
+except OSError as _e:
+    # Нет доступа к файлу журнала — не повод не запускаться. На сервере это
+    # означало бы потерю истории, поэтому говорим об этом громко, но в консоль
+    # (её собирает journald), а работу продолжаем.
+    print(f"[runtime] журнал {LOG_FILE} недоступен ({_e}) — пишу только в stdout", file=sys.stderr)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler(sys.stdout)],
+    handlers=_handlers,
 )
 log = logging.getLogger("cogcore-agent-runtime")
 os.makedirs(HISTORY_DIR, exist_ok=True)

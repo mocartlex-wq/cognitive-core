@@ -185,8 +185,30 @@ def pg(query, params=None, timeout=10):
         return [], str(e)
 
 
+_FALLBACK_WARNED = set()
+
+
+def _warn_once(kind, message):
+    """Предупредить о переходе в аварийный режим — но один раз, не на каждый запрос.
+
+    Переходы в запасные пути (psycopg → docker exec psql, LISTEN → опрос)
+    происходили БЕСШУМНО: сервис продолжал отвечать, но работал медленнее и
+    иначе, и понять это по логам было нельзя. Молчаливая деградация — худший
+    вид отказа: она не чинится, потому что её не видно.
+    """
+    if kind in _FALLBACK_WARNED:
+        return
+    _FALLBACK_WARNED.add(kind)
+    sys.stderr.write(f"[rooms] ДЕГРАДАЦИЯ: {message}\n")
+
+
 def _pg_subprocess_fallback(query, params, timeout):
     """Original subprocess-based pg() — fallback if psycopg unavailable."""
+    _warn_once(
+        "pg-subprocess",
+        "psycopg недоступен — запросы идут через docker exec psql "
+        "(процесс на каждый запрос, заметно медленнее)",
+    )
     if params:
         for p in params:
             if isinstance(p, str):
@@ -399,6 +421,7 @@ def _resolve_mentions_to_agents(room_id, text):
             if label:
                 by_label.setdefault(label.lower(), aid)
     resolved = []
+    unresolved = []  # чтобы не терять обращения молча — см. ниже
     seen = set()
     for m in mentions:
         # Кандидаты от длинного к короткому: сперва имя как есть, затем без
@@ -433,6 +456,19 @@ def _resolve_mentions_to_agents(room_id, text):
         if aid and aid not in seen:
             seen.add(aid)
             resolved.append(aid)
+        elif not aid:
+            # Нерезолвимое обращение раньше отбрасывалось МОЛЧА. Снаружи это
+            # неотличимо от «агент не ответил»: автор видит, что написал
+            # адресно, а письмо не дошло и никто об этом не узнал. Именно так
+            # 2026-08-10 выглядела поломка разбора двоеточия — сутки никто не
+            # понимал, почему заместитель отвечает за других.
+            unresolved.append(m)
+
+    if unresolved:
+        sys.stderr.write(
+            f"[rooms] упоминания не разрешились в агентов: {', '.join('@' + u for u in unresolved)} "
+            f"(комната {room_id}) — сообщение уйдёт как безадресное\n"
+        )
     return resolved
 
 
@@ -683,6 +719,11 @@ def _wait_poll_fallback(room_id, cutoff, timeout):
     """Fallback long-poll using the shared pg() path: poll every 0.5s until a
     new message appears or the timeout elapses. Still far better than a 6s
     client poll, and needs no dedicated LISTEN connection."""
+    _warn_once(
+        "wait-poll",
+        "LISTEN недоступен — long-poll работает опросом раз в 0.5с "
+        "(задержка доставки выше, нагрузка на БД больше)",
+    )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         msgs = list_messages(room_id, since=cutoff, limit=50)
@@ -2038,6 +2079,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        self._req_started = time.time()  # для журнала доступа, см. log_message
         url = urllib.parse.urlparse(self.path)
         path = url.path
         # encoding="utf-8" — иначе percent-decoded байты query-параметров
@@ -2110,7 +2152,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             if path == "/health":
-                self._send(200, {"status": "ok", "service": "cogcore-rooms"})
+                # Раньше отдавался статичный {"status":"ok"} — он не проверял
+                # НИЧЕГО. Сервис с оборванной коннекцией к БД и с мёртвым
+                # LISTEN отвечал «здоров», и внешний мониторинг видел зелёное,
+                # пока комнаты не работали.
+                checks = {}
+                t0 = time.time()
+                rows, err = pg("SELECT 1;", [])
+                checks["postgres"] = "ok" if (rows and not err) else f"fail: {err or 'нет ответа'}"
+                checks["postgres_ms"] = int((time.time() - t0) * 1000)
+                # Режим работы: psycopg или деградация в docker exec psql.
+                checks["db_mode"] = "psycopg" if _PG_CONN is not None else "subprocess-fallback"
+                healthy = checks["postgres"] == "ok"
+                self._send(200 if healthy else 503, {
+                    "status": "ok" if healthy else "degraded",
+                    "service": "cogcore-rooms",
+                    "checks": checks,
+                })
             elif path == "/rooms/by-key":
                 # Lookup room by X-Room-Key — useful for AI helpers that only have the key
                 key = self.headers.get("X-Room-Key", "").strip()
@@ -2212,6 +2270,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"error": str(e)})
 
     def do_POST(self):
+        self._req_started = time.time()  # для журнала доступа, см. log_message
         try:
             path = self.path.split("?")[0]
             body = self._read_json()
@@ -2434,7 +2493,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"error": str(e)})
 
     def log_message(self, format, *args):
-        pass
+        """Журнал доступа.
+
+        Раньше здесь стояло `pass` — то есть НИ ОДИН запрос к сервису не
+        логировался: ни кода ответа, ни пути, ни длительности. Диагностика
+        сводилась к догадкам, а «сервис не отвечает» и «клиент не спрашивал»
+        были неразличимы.
+
+        Формат намеренно узкий: метод, путь без query (в нём room_key!), код и
+        миллисекунды. Тело и заголовки не пишем — там ключи комнат.
+        """
+        try:
+            started = getattr(self, "_req_started", None)
+            took = f" {int((time.time() - started) * 1000)}ms" if started else ""
+            path = (getattr(self, "path", "") or "").split("?", 1)[0]
+            code = args[1] if len(args) > 1 else "?"
+            sys.stderr.write(
+                f"[rooms] {self.command} {path} -> {code}{took}\n"
+            )
+        except Exception:
+            pass  # журнал не имеет права ронять обработку запроса
 
 
 # === Mobile UI templates ===
