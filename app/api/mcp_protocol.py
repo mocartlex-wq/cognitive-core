@@ -612,6 +612,7 @@ async def _call_rooms(
     params: dict | None = None,
     room_key: str | None = None,
     agent_id: str | None = None,
+    api_key: str | None = None,
     timeout_s: float | None = None,
 ) -> dict:
     """Call cognitive-rooms service through nginx proxy.
@@ -625,6 +626,12 @@ async def _call_rooms(
     headers: dict[str, str] = {}
     if room_key:
         headers["X-Room-Key"] = room_key
+    if api_key:
+        # Нужен там, где ключа комнаты недостаточно: создание комнаты требует
+        # ключа АГЕНТА (раньше эндпоинт был публичным и плодил комнаты без
+        # владельца). Для остальных вызовов не передаётся — им хватает
+        # X-Room-Key, и лишний секрет в запросе ни к чему.
+        headers["X-API-Key"] = api_key
     if agent_id:
         # HTTP header values must be latin-1-encodable; a non-ASCII agent_id
         # (e.g. Cyrillic "сервер_память") makes httpx raise UnicodeEncodeError
@@ -1388,7 +1395,13 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             "description": a.get("description", ""),
             "created_by": agent_id,
         }
-        return await _call_rooms("POST", "", json_body=body, agent_id=agent_id, timeout_s=10.0)
+        return await _call_rooms(
+            "POST", "", json_body=body, agent_id=agent_id,
+            # Сервис комнат теперь требует ключ агента на создание — пробрасываем
+            # ключ вызывающего, иначе room_create отвечал бы 401.
+            api_key=request.headers.get("x-api-key", ""),
+            timeout_s=10.0,
+        )
 
     if name == "room_join":
         room_id = a.get("room_id")

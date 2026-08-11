@@ -35,6 +35,11 @@ DEFAULT_QUESTION_TIMEOUT = 600  # 10 min default wait
 LONG_POLL_INTERVAL = 1.0  # seconds
 PROXY_FALLBACK_AFTER_SEC = int(os.environ.get("PROXY_FALLBACK_AFTER", "5"))  # try real agent 5s, then proxy
 ONLINE_THRESHOLD_SEC = 90  # last_seen_at within 90s = online
+
+# Потолок длины сообщения. Выбран с запасом: реальные реплики агентов в проде
+# доходят до ~3.5 тыс. символов (разбор инцидента с логами), поэтому 32 тыс.
+# никого не стеснит, но остановит цикл, набивающий комнату.
+MAX_MESSAGE_CHARS = int(os.environ.get("ROOMS_MAX_MESSAGE_CHARS", "32000"))
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
 # CORS allowlist — reuse the FastAPI env var so rooms and the main API agree.
@@ -292,6 +297,28 @@ def set_conductor(room_id, agent_id):
     if err:
         return None, err
     return mode, None
+
+
+def _auth_agent_key(headers):
+    """Возвращает agent_id по X-API-Key или None.
+
+    Сервис комнат живёт вне FastAPI и не может позвать app.security.auth,
+    поэтому проверка ключа сделана здесь — минимальная и только для тех
+    операций, где одного ключа комнаты недостаточно (создание комнаты).
+
+    Сравнение по точному совпадению ключа, отозванные не принимаются.
+    """
+    key = (headers.get("X-API-Key") or "").strip()
+    if not key or len(key) > 200:
+        return None
+    rows, err = pg(
+        "SELECT agent_id FROM agent_keys WHERE api_key = %s AND revoked_at IS NULL LIMIT 1;",
+        [key],
+    )
+    if err:
+        sys.stderr.write(f"[rooms] проверка ключа агента не удалась: {err}\n")
+        return None
+    return rows[0][0] if rows and rows[0] and rows[0][0] else None
 
 
 def _is_registered_agent(agent_id):
@@ -2222,10 +2249,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(500, {"error": type(e).__name__ + ": " + str(e)})
                 return
             if path == "/rooms":
-                # Public — anyone can create a room (returns api_key)
+                # Создание комнаты требует ключа агента.
+                #
+                # Раньше эндпоинт был публичным: комнату мог завести кто угодно,
+                # `created_by` по умолчанию "anonymous", владелец — NULL. Такие
+                # комнаты не принадлежат никому, не видны владельцу в
+                # интерфейсе и накапливаются мусором (для их уборки завели
+                # отдельный скрипт cleanup_anonymous_rooms_msgs.py).
+                #
+                # Совместимость: агенты, создающие комнаты через MCP
+                # (room_create) и владелец через веб-интерфейс, уже ходят со
+                # своими ключами — для них ничего не меняется.
+                agent_id = _auth_agent_key(self.headers)
+                if not agent_id:
+                    self._send(401, {
+                        "error": "создание комнаты требует X-API-Key агента",
+                        "hint": "передайте свой ключ агента в заголовке X-API-Key",
+                    })
+                    return
                 name = body.get("name", "Untitled")
                 description = body.get("description", "")
-                created_by = body.get("created_by", "anonymous")
+                # Автора берём из КЛЮЧА, а не из тела: иначе он декоративен.
+                created_by = agent_id
                 room, err = create_room(name, description, created_by)
                 if err:
                     self._send(500, {"error": err})
@@ -2256,6 +2301,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(400, {"error": "field 'text' required and non-empty",
                                      "received_keys": list(body.keys()) if body else [],
                                      "hint": "POST body {from_agent, text, parent_id?} as JSON"})
+                    return
+                # Потолок длины. Раньше его не было ни здесь, ни в схеме
+                # (`text text NOT NULL`): один агент в цикле мог набить комнату
+                # чем угодно, а каждое такое сообщение ещё и дублируется мостом
+                # в L1 и попадает в консолидацию — то есть оплачивается LLM.
+                # Отказ явный: молча срезать чужой текст хуже, чем сказать «не влезло».
+                if len(text) > MAX_MESSAGE_CHARS:
+                    self._send(413, {
+                        "error": f"сообщение длиннее {MAX_MESSAGE_CHARS} символов",
+                        "length": len(text),
+                        "hint": "разбейте на части или приложите файл",
+                    })
                     return
                 parent_id = body.get("parent_id")
                 msg_id, err = post_message(room_id, from_agent, text, parent_id=parent_id)
