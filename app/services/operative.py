@@ -29,7 +29,12 @@ async def _index_l3_vector(item_id: str, domain: str, record_type: str, content_
             "embedding": vec_bytes,
             "mv": get_model_version(),  # version модели — для hot-reload
         })
-        await r.expire(key, SESSION_TTL)
+        # TTL здесь НЕ ставим. Раньше стоял SESSION_TTL (24 часа) — срок жизни
+        # СЕССИИ, применённый к постоянным знаниям L3. Через сутки после
+        # индексации Redis-путь оказывался пуст, и каждый recall уходил в
+        # pgvector, попутно вызывая полную переиндексацию домена. Устаревшие
+        # векторы убирает cleanup_stale_vectors по полю mv — по смене модели,
+        # а не по часам.
         return True
     except Exception:
         return False
@@ -635,15 +640,13 @@ async def close_session(session_id: UUID, keep_results: bool = False,
             success=True,
         )
 
-    # Удаляем сессию и связанные ключи
-    results_raw = session_data.get("results", "[]")
-    try:
-        results = json.loads(results_raw)
-        for item in results:
-            await r.delete(f"op:{item['id']}")
-    except (json.JSONDecodeError, KeyError):
-        pass
-
+    # Удаляем ТОЛЬКО саму сессию.
+    #
+    # Раньше здесь удалялись и ключи op:{id} — но это не «связанные ключи
+    # сессии», а общий векторный индекс L3, который наполняет
+    # index_domain_vectors. То есть закрытие ОДНОЙ сессии выбивало из KNN
+    # записи, которыми пользуются все остальные: следующий recall по тем же
+    # знаниям уходил в pgvector и заново переиндексировал домен.
     await r.delete(session_key)
 
     return {

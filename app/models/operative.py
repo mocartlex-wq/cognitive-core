@@ -17,7 +17,14 @@ class OperativeRule(BaseModel):
 
 
 class OperativeQuery(BaseModel):
-    domain: str
+    """Запрос к оперативной памяти.
+
+    `domain` необязателен намеренно. Доменов в проде 18, и агент обязан был
+    угадать нужный — а промахнувшись, получал пустой ответ, неотличимый от
+    «в памяти ничего нет». Без домена поиск идёт по доменам ЗНАНИЙ
+    (settings.recall_default_domains), где копятся выводы, а не переписка.
+    """
+    domain: str | None = None
     context: str | None = None
     top_k: int = 5
     include_tools: bool = True

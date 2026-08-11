@@ -1,5 +1,8 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from app.config import settings
 from app.models.operative import OperativeClose, OperativeFeedback, OperativeQuery, OperativeRecallUI
 from app.security.auth import verify_api_key
 from app.security.owner import resolve_owner_user_id
@@ -12,6 +15,53 @@ from app.services.operative import (
 )
 
 router = APIRouter(prefix="/operative", tags=["operative"])
+
+
+async def _search_default_domains(
+    query: str,
+    top_k: int,
+    include_tools: bool,
+    owner_user_id: str | None,
+) -> list[dict]:
+    """Поиск без указания домена: по доменам знаний, параллельно, с дедупом.
+
+    Домены опрашиваются одновременно — последовательный обход пяти доменов
+    складывал бы латентности и делал бы «поиск без домена» заметно дороже
+    обычного. Сбой одного домена не рушит выдачу: он просто не даёт результатов.
+    """
+    domains = settings.recall_default_domains
+    if not domains:
+        return []
+    per_domain = max(2, top_k)
+    tasks = [
+        build_operative(
+            query=query or dom,
+            domain=dom,
+            top_k=per_domain,
+            include_tools=include_tools,
+            owner_user_id=owner_user_id,
+        )
+        for dom in domains
+    ]
+    chunks = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        if isinstance(chunk, Exception):
+            continue
+        for item in chunk:
+            key = str(item.get("id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+
+    # Сортировка по релевантности: у путей поиска исторически разная семантика
+    # поля distance (у одного это расстояние, у другого — сходство), поэтому
+    # опираемся на confidence, который считается одинаково везде.
+    merged.sort(key=lambda r: r.get("confidence") or 0.0, reverse=True)
+    return merged[:top_k]
 
 
 def _group_results_for_agent(results: list[dict]) -> dict:
@@ -60,15 +110,26 @@ async def query_operative(
     await verify_api_key(request)
     owner_user_id = await resolve_owner_user_id(request)
 
-    results = await build_operative(
-        query=body.context or body.domain,
-        domain=body.domain,
-        top_k=body.top_k,
-        include_tools=body.include_tools,
-        owner_user_id=owner_user_id,
-    )
+    # Домен не задан — ищем по доменам знаний и склеиваем. Раньше домен был
+    # обязателен: агент, промахнувшийся с одним из 18 доменов, получал пустой
+    # ответ, неотличимый от «в памяти ничего нет».
+    if body.domain:
+        results = await build_operative(
+            query=body.context or body.domain,
+            domain=body.domain,
+            top_k=body.top_k,
+            include_tools=body.include_tools,
+            owner_user_id=owner_user_id,
+        )
+    else:
+        results = await _search_default_domains(
+            query=body.context or "",
+            top_k=body.top_k,
+            include_tools=body.include_tools,
+            owner_user_id=owner_user_id,
+        )
 
-    session = await create_session(body.domain, results)
+    session = await create_session(body.domain or "all", results)
 
     if grouped:
         # Заменяем плоский results на семантический frame

@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     l3_staleness_days: int = 90
     tool_unused_days: int = 60
 
+    # Куда искать, когда домен не задан. Это домены ВЫВОДОВ, а не переписки:
+    # agent_inbox намеренно исключён — там 92 из 269 записей болтовни агентов,
+    # и она забивала бы выдачу вместо накопленного опыта.
+    recall_default_domains: list[str] = [
+        "work_journal", "infra_lessons", "skills", "setup_log", "deploy",
+    ]
+
     # Циклы
     retention_days: int = 14
     # Потолок для НЕконсолидированных L1 (processed_to_l2=false): обычный retention
