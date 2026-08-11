@@ -16,6 +16,11 @@ from app.services.operative import index_domain_vectors
 
 log = logging.getLogger(__name__)
 
+# Потолок выборки для месячного аудита: столько записей уходит в промпт.
+# Без него в модель отправлялся весь домен целиком, включая депрекированную
+# историю — а платится это каждый месяц.
+AUDIT_MAX_ITEMS = 200
+
 
 @asynccontextmanager
 async def _advisory_lock(lock_name: str):
@@ -44,6 +49,24 @@ def _to_uuid(val) -> _uuid.UUID:
     if isinstance(val, _uuid.UUID):
         return val
     return _uuid.UUID(str(val))
+
+
+def _confidence_of(content) -> float:
+    """Уверенность записи из её содержимого.
+
+    Модель кладёт её под разными именами, а иногда не кладёт вовсе. Отсутствие
+    трактуем как 0.5 — «не заявлено», а не «плохо»: иначе порог отбраковывал бы
+    всё, что просто не заполнило поле.
+    """
+    if not isinstance(content, dict):
+        return 0.5
+    for key in ("confidence", "avg_confidence", "confidence_score"):
+        if key in content:
+            try:
+                return float(content[key])
+            except (ValueError, TypeError):
+                pass
+    return 0.5
 
 
 async def daily_consolidate(
@@ -339,6 +362,7 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
 
     # Шаг 3: Применяем изменения
     now = datetime.now(timezone.utc)
+    rejected_low_confidence = 0
     async with pool.acquire() as conn:
         # Новые/обновлённые знания
         for item in synthesis.get("new_or_updated", []):
@@ -346,6 +370,21 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
             content = item.get("content", {})
             knowledge_type = item.get("type", "rule")
             merge_id = item.get("merge_with_l3_id")
+
+            # Порог уверенности применяется В КОДЕ, а не только в тексте промпта.
+            # settings.min_confidence_for_l3 существует с самого начала, но
+            # попадал лишь в инструкцию куратору (curator.py:49) — то есть был
+            # пожеланием к модели, а не правилом системы. Модель его нарушала
+            # молча, и слабые выводы оседали в долговременной памяти наравне с
+            # проверенными.
+            confidence = _confidence_of(content)
+            if confidence < settings.min_confidence_for_l3:
+                rejected_low_confidence += 1
+                log.info(
+                    "L3 отклонено по уверенности: домен=%s тип=%s confidence=%.2f < %.2f",
+                    domain, knowledge_type, confidence, settings.min_confidence_for_l3,
+                )
+                continue
 
             if merge_id:
                 # Обновляем существующее
@@ -387,11 +426,22 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
             safe_type = raw_type if raw_type in VALID_TOOL_TYPES else "service"
             await conn.execute(
                 """
+                -- Конфликт разрешается по (домен, имя, владелец) среди
+                -- ДЕЙСТВУЮЩИХ записей — индекс idx_l3_tools_unique_active,
+                -- миграция 0021. Раньше здесь стояло `ON CONFLICT DO NOTHING`
+                -- на первичном ключе со свежим uuid: конфликт не наступал
+                -- никогда, и каждая недельная свёртка добавляла ещё по копии
+                -- каждого инструмента (на проде накопилось 2604 записи при 145
+                -- уникальных). Теперь повторная встреча инструмента обновляет
+                -- описание и поднимает версию, а не плодит близнеца.
                 INSERT INTO l3_tools_registry
                     (id, domain, tool_name, tool_type, description, config_schema,
                      usage_patterns, version, effective_from, created_at, owner_user_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10::uuid)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (domain, tool_name, owner_user_id) WHERE effective_to IS NULL
+                DO UPDATE SET description = EXCLUDED.description,
+                              usage_patterns = EXCLUDED.usage_patterns,
+                              version = l3_tools_registry.version + 1
                 """,
                 tool_id, domain,
                 tool.get("tool_name", "unknown"),
@@ -407,7 +457,11 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
     # переиндексировать домен столько раз, сколько в нём тенантов.
     return {
         "status": "consolidated",
-        "new_items": len(synthesis.get("new_or_updated", [])),
+        # new_items — сколько РЕАЛЬНО записано, а не сколько предложила модель:
+        # отклонённые по уверенности сюда не входят, иначе цифра в отчёте
+        # расходилась бы с содержимым базы.
+        "new_items": len(synthesis.get("new_or_updated", [])) - rejected_low_confidence,
+        "rejected_low_confidence": rejected_low_confidence,
         "deprecated": len(synthesis.get("deprecated_l3_ids", [])),
         "tools_added": len(synthesis.get("tools", [])),
         "quality": quality,
@@ -418,15 +472,27 @@ async def _maybe_snapshot(domain: str) -> _uuid.UUID | None:
     """Создаёт L4-снапшот если достаточно изменений или интервал превышен."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Последний снапшот
+        # Последний снапшот ЭТОГО домена.
+        #
+        # Раньше условия `WHERE domain` тут не было вовсе: выбирался последний
+        # снапшот вообще, по всей системе. Из-за этого свежий снапшот одного
+        # домена подавлял создание снапшотов ВСЕХ остальных на весь интервал —
+        # то есть резервные копии молча не делались там, где были нужнее всего.
+        #
+        # У таблицы l4_snapshots нет колонки domain (см. миграцию 0001), зато
+        # домен присутствует в ключе объекта: `l4/{domain}/{id}.json`, а с
+        # multi-tenant префиксом — `l4/{owner}/{domain}/{id}.json`. Отбираем по
+        # нему: это не требует миграции и работает для обоих форматов.
         last = await conn.fetchrow(
             """
             SELECT snapshot_time, snapshot_hash
             FROM l4_snapshots
             WHERE snapshot_type = 'full'
+              AND s3_path LIKE '%/' || $1 || '/%'
             ORDER BY snapshot_time DESC
             LIMIT 1
-            """
+            """,
+            domain,
         )
 
         # Текущие L3 данные
@@ -502,11 +568,22 @@ async def run_monthly_audit(domain: str) -> dict:
     """Ежемесячная ревизия L3."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Берём только ДЕЙСТВУЮЩИЕ записи и с лимитом. Раньше здесь стояло
+        # `SELECT *` по всему домену без ограничений, и весь результат уходил в
+        # промпт: вместе с депрекированной историей и дублями инструментов
+        # (на проде их было 2604 при 145 уникальных) это раздувало запрос к
+        # модели на порядок и оплачивалось каждый месяц.
         knowledge_rows = await conn.fetch(
-            "SELECT * FROM l3_master_knowledge WHERE domain = $1", domain
+            "SELECT * FROM l3_master_knowledge "
+            "WHERE domain = $1 AND effective_to IS NULL "
+            "ORDER BY effective_from DESC LIMIT $2",
+            domain, AUDIT_MAX_ITEMS,
         )
         tool_rows = await conn.fetch(
-            "SELECT * FROM l3_tools_registry WHERE domain = $1", domain
+            "SELECT * FROM l3_tools_registry "
+            "WHERE domain = $1 AND effective_to IS NULL "
+            "ORDER BY created_at DESC LIMIT $2",
+            domain, AUDIT_MAX_ITEMS,
         )
 
     l3_knowledge = [dict(r) for r in knowledge_rows]
