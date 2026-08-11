@@ -829,8 +829,18 @@ def _decrypt_config(cfg):
 def load_agent_channel(agent_id):
     """Return (wake_channel, config_dict) for an agent: channel from agent_states,
     secret config (routine fire_url+token / managed key) from agent_channel_config.
-    Defaults to ('deepseek', {}). agent_id is format-validated (no SQL injection)."""
-    if not agent_id or not re.match(r"^[\w\-]+$", agent_id):
+    Defaults to ('deepseek', {}). agent_id is format-validated (no SQL injection).
+
+    Двоеточие разрешено — четвёртое и последнее место, где идентификаторы вида
+    `claude-code:CRM-kadastr` не проходили разбор. Здесь отказ был самым тихим:
+    агент с двоеточием НИКОГДА не получал свой канал и всегда молча
+    откатывался на deepseek. То есть настройка канала в интерфейсе для таких
+    агентов просто не действовала, и понять это по логам было нельзя.
+    Класс символов остаётся строгим (ни кавычек, ни пробелов, ни `;`), поэтому
+    подстановка в SQL ниже по-прежнему безопасна.
+    """
+    if not agent_id or not re.match(r"^[\w\-:.]+$", agent_id):
+        log.warning("load_agent_channel: недопустимый agent_id %r — канал по умолчанию", agent_id)
         return "deepseek", {}
     channel, cfg = "deepseek", {}
     try:

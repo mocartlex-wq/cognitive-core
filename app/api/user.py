@@ -477,7 +477,17 @@ async def add_my_room_participant(room_id: str, agent_id: str, request: Request)
 # который завязан reverse-мост демона, постящий ответ обратно в комнату.
 # Best-effort: ошибка моста НИКОГДА не ломает сам пост в комнату.
 # ─────────────────────────────────────────────────────────────────────────
-_MENTION_RE = re.compile(r"@([\w\-]+)", re.UNICODE)
+# Двоеточие и точка обязаны входить в класс: идентификаторы сессий Claude Code
+# выглядят как `claude-code:CRM-kadastr`. Без них обращение схлопывалось до
+# `claude-code`, не резолвилось и уходило в ветку «безадресное» — дирижёру.
+#
+# Это ВЛАДЕЛЬЧЕСКИЙ путь: ровно то, что происходит, когда владелец пишет агенту
+# из веб-интерфейса. В сервисе комнат и в демоне то же место починено
+# 2026-08-10, сюда правку тогда не перенесли — разбор @ живёт в трёх копиях.
+_MENTION_RE = re.compile(r"@([\w\-.:]+)", re.UNICODE)
+
+# Хвостовая пунктуация не часть имени: «@dsdsd:», «@analyst.» — обычная речь.
+_MENTION_TRIM = ":.-"
 
 
 async def _resolve_room_mentions(conn, room_id: str, text: str) -> list[str]:
@@ -511,16 +521,30 @@ async def _resolve_room_mentions(conn, room_id: str, text: str) -> list[str]:
     resolved: list[str] = []
     seen: set[str] = set()
     for m in mentions:
-        key = m.lower()
-        aid = by_id.get(key) or by_label.get(key)
+        # Кандидаты от длинного к короткому: сперва имя как есть, затем без
+        # хвостовой пунктуации. Порядок важен — иначе «@dsdsd:» не найдётся,
+        # а «@claude-code:CRM» ошибочно схлопнется до «claude-code».
+        candidates = [m]
+        trimmed = m.rstrip(_MENTION_TRIM)
+        if trimmed and trimmed != m:
+            candidates.append(trimmed)
+
+        aid = None
+        for cand in candidates:
+            key = cand.lower()
+            aid = by_id.get(key) or by_label.get(key)
+            if aid:
+                break
         if not aid:
-            g = await conn.fetchrow(
-                "SELECT agent_id FROM agent_states "
-                "WHERE agent_id = $1 OR lower(agent_label) = lower($1) LIMIT 1",
-                m,
-            )
-            if g and g["agent_id"]:
-                aid = g["agent_id"]
+            for cand in candidates:
+                g = await conn.fetchrow(
+                    "SELECT agent_id FROM agent_states "
+                    "WHERE agent_id = $1 OR lower(agent_label) = lower($1) LIMIT 1",
+                    cand,
+                )
+                if g and g["agent_id"]:
+                    aid = g["agent_id"]
+                    break
         if aid and aid not in seen:
             seen.add(aid)
             resolved.append(aid)
