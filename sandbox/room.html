@@ -743,16 +743,53 @@
     return msgs.length + ':' + (last.id || last.created_at || '');
   }
 
+  // Лента должна открываться на СВЕЖИХ сообщениях. Раньше скролл ставился
+  // трижды за первые 300 мс, и этого не хватало: сообщения в комнате длинные,
+  // шрифты и разметка досчитываются позже, высота растёт уже после последней
+  // попытки — тред оставался на старом сообщении, и до нового приходилось
+  // листать вручную.
+  //
+  // Поэтому не угадываем момент по таймеру, а следим за фактическим размером
+  // содержимого и подтягиваем низ, пока пользователь сам не ушёл вверх читать
+  // историю. Ушёл — не дёргаем; вернулся к низу — снова держим.
+  let stickToBottom = true;
+  let threadObserver = null;
+
+  function isNearBottom(el, slack = 80) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= slack;
+  }
+
   function scrollThreadToBottom() {
-    // Синхронный скролл сразу после innerHTML промахивался: layout ещё не
-    // посчитан (шрифты/картинки), scrollHeight занижен → тред открывался на
-    // ПЕРВОМ сообщении. Скроллим трижды: сейчас, после первого кадра и ещё
-    // раз после 300мс (дозагрузка контента) — идемпотентно и дёшево.
     const t = document.getElementById('threadScroll');
     if (!t) return;
-    const go = () => { t.scrollTop = t.scrollHeight; };
+    const go = () => { if (stickToBottom) t.scrollTop = t.scrollHeight; };
+
+    // Запомнить намерение пользователя: пролистал вверх — перестаём тянуть вниз.
+    if (!t.dataset.scrollWatch) {
+      t.dataset.scrollWatch = '1';
+      t.addEventListener('scroll', () => { stickToBottom = isNearBottom(t); },
+                         { passive: true });
+    }
+
     go();
-    requestAnimationFrame(() => { go(); setTimeout(go, 300); });
+    requestAnimationFrame(go);
+
+    // ResizeObserver ловит доросшую высоту независимо от того, ЧЕМ она вызвана
+    // (шрифты, перенос строк, отрисовка длинного текста) — в отличие от
+    // фиксированной задержки, которая либо срабатывает рано, либо тормозит.
+    if (window.ResizeObserver) {
+      if (threadObserver) threadObserver.disconnect();
+      threadObserver = new ResizeObserver(go);
+      Array.from(t.children).forEach((child) => threadObserver.observe(child));
+      // Наблюдение живёт недолго: дальше высота меняется только от новых
+      // сообщений, а те придут со своим рендером и своим вызовом.
+      setTimeout(() => { if (threadObserver) threadObserver.disconnect(); }, 3000);
+    } else {
+      [50, 200, 500, 1000].forEach((ms) => setTimeout(go, ms));
+    }
+
+    // Веб-шрифты меняют метрики текста уже после первого кадра.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(go);
   }
 
   // ── actions ───────────────────────────────────────────────────────────
@@ -918,7 +955,17 @@
       return;
     }
     lastMsgKey = key;
+    // Опрос перерисовывает ленту целиком, а innerHTML сбрасывает прокрутку в
+    // НОЛЬ. Пока лента всегда прыгала вниз, это было незаметно; теперь, когда
+    // мы уважаем «пользователь ушёл читать историю», без сохранения позиции его
+    // выбрасывало бы наверх каждые пять секунд.
+    const prev = document.getElementById('threadScroll');
+    const keepTop = (!stickToBottom && prev) ? prev.scrollTop : null;
     block.innerHTML = messagesHtml(d.messages);
+    if (keepTop !== null) {
+      const next = document.getElementById('threadScroll');
+      if (next) next.scrollTop = keepTop;
+    }
     updateTypingBar(d.typing);
     const pb = document.getElementById('participantsBlock');
     if (pb) pb.innerHTML = participantsHtml(d.participants);
