@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import struct
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -236,23 +237,37 @@ async def search_fulltext(
     """
     if not query or not query.strip():
         return []
+
+    sql = """
+        SELECT id, domain, knowledge_type, content,
+               ts_rank(to_tsvector('russian', content::text),
+                       websearch_to_tsquery('russian', $1)) AS rank
+        FROM l3_master_knowledge
+        WHERE domain = $2 AND effective_to IS NULL
+          AND ($4::uuid IS NULL OR owner_user_id = $4::uuid)
+          AND to_tsvector('russian', content::text)
+              @@ websearch_to_tsquery('russian', $1)
+        ORDER BY rank DESC
+        LIMIT $3
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        knowledge = await conn.fetch(
-            """
-            SELECT id, domain, knowledge_type, content,
-                   ts_rank(to_tsvector('russian', content::text),
-                           websearch_to_tsquery('russian', $1)) AS rank
-            FROM l3_master_knowledge
-            WHERE domain = $2 AND effective_to IS NULL
-              AND ($4::uuid IS NULL OR owner_user_id = $4::uuid)
-              AND to_tsvector('russian', content::text)
-                  @@ websearch_to_tsquery('russian', $1)
-            ORDER BY rank DESC
-            LIMIT $3
-            """,
-            query, domain, top_k, owner_user_id,
-        )
+        # Первый проход — как есть: websearch_to_tsquery соединяет слова через
+        # И, то есть требует ВСЕ сразу. Это точно, но для фразы почти всегда
+        # пусто: «systemd таймаут юнита» не найдёт запись, где есть systemd и
+        # таймаут, но нет слова «юнита». А агенты спрашивают именно фразами.
+        knowledge = await conn.fetch(sql, query, domain, top_k, owner_user_id)
+
+        if not knowledge:
+            # Второй проход — те же слова через ИЛИ. Точность не страдает:
+            # ранжирование всё равно идёт по ts_rank, а слияние по обратному
+            # рангу поднимет наверх то, что нашлось обоими путями. Токены
+            # прогоняются через тот же websearch_to_tsquery, поэтому
+            # экранирование остаётся на стороне Postgres.
+            tokens = [t for t in re.split(r"[^\w\-.:]+", query) if len(t) > 2]
+            if tokens:
+                or_query = " OR ".join(tokens[:12])
+                knowledge = await conn.fetch(sql, or_query, domain, top_k, owner_user_id)
     out = []
     for k in knowledge:
         kd = dict(k)
