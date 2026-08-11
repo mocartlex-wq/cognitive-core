@@ -298,7 +298,11 @@ async def get_my_room_detail(room_id: str, request: Request):
             """
             SELECT id::text AS id, name, api_key,
                    COALESCE(is_public, TRUE) AS is_public,
-                   owner_user_id::text AS owner_user_id, created_at
+                   owner_user_id::text AS owner_user_id, created_at,
+                   -- Дирижёр («старший») существовал в схеме и в сервисе комнат
+                   -- с самого начала, но наружу владельцу не отдавался: назначить
+                   -- или хотя бы увидеть его из интерфейса было нельзя.
+                   conductor_agent_id, COALESCE(room_mode, 'plain') AS room_mode
               FROM rooms WHERE id = $1::uuid
             """,
             room_id,
@@ -391,6 +395,8 @@ async def get_my_room_detail(room_id: str, request: Request):
         "participants": participants,
         "messages": messages,
         "typing": typing,
+        "conductor_agent_id": room["conductor_agent_id"],
+        "room_mode": room["room_mode"],
     }
 
 
@@ -434,6 +440,64 @@ async def set_participant_auto_respond(
                 user.user_id, room_id, agent_id, body.enabled)
     return {"ok": True, "room_id": room_id, "agent_id": agent_id,
             "auto_respond": body.enabled}
+
+
+class ConductorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # None снимает назначение — «старшего нет», комната возвращается в режим plain.
+    agent_id: str | None = None
+
+
+@router.post("/rooms/{room_id}/conductor")
+async def set_room_conductor(room_id: str, body: ConductorBody, request: Request):
+    """Назначить «старшего» комнаты — дирижёра, или снять назначение.
+
+    Дирижёр получает КОПИЮ каждого адресованного сообщения (контекст copy:true)
+    и все безадресные реплики. Смысл: в комнате из десятка агентов кто-то должен
+    видеть картину целиком и раздавать работу, иначе безадресное «сделайте X»
+    повисает в воздухе — никто не считает его своим.
+
+    Механизм существовал в схеме и в сервисе комнат с самого начала
+    (conductor_agent_id + room_mode), но наружу владельцу не отдавался:
+    назначить старшего из интерфейса было нельзя, только запросом к сервису
+    комнат с ключом комнаты.
+
+    Пустой agent_id снимает назначение. 404 если комнаты нет или агент не
+    участник, 403 если комната не ваша.
+    """
+    user = await require_user(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT owner_user_id::text FROM rooms WHERE id = $1::uuid", room_id,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        if str(owner) != str(user.user_id):
+            raise HTTPException(status_code=403, detail="Не ваша комната")
+
+        agent_id = (body.agent_id or "").strip() or None
+        if agent_id:
+            # Назначать можно только участника: дирижёр, которого нет в комнате,
+            # получал бы копии сообщений, не имея возможности ответить.
+            is_member = await conn.fetchval(
+                "SELECT 1 FROM room_participants WHERE room_id = $1::uuid AND agent_id = $2",
+                room_id, agent_id,
+            )
+            if not is_member:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Агент не участник этой комнаты — сначала добавьте его",
+                )
+
+        mode = "conductor_v1" if agent_id else "plain"
+        await conn.execute(
+            "UPDATE rooms SET conductor_agent_id = $1, room_mode = $2 WHERE id = $3::uuid",
+            agent_id, mode, room_id,
+        )
+    logger.info("room_conductor user=%s room=%s agent=%s mode=%s",
+                user.user_id, room_id, agent_id, mode)
+    return {"ok": True, "room_id": room_id, "conductor_agent_id": agent_id, "room_mode": mode}
 
 
 @router.post("/rooms/{room_id}/participants/{agent_id}")

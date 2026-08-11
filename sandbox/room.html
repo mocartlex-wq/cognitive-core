@@ -324,12 +324,30 @@
       </div></div>`;
   }
 
+  // Кто сейчас старший в комнате. Держим в модуле, чтобы отрисовка участников
+  // знала об этом, не таская состояние через аргументы.
+  let currentConductor = null;
+
   function participantsHtml(parts) {
     const addCtl = '<div id="addAgentWrap" style="margin:0 0 12px"><button type="button" class="btn btn-sm secondary" onclick="addOwnerAgent()">➕ Добавить моего агента</button></div>';
     if (!parts || parts.length === 0) {
       return addCtl + '<div class="empty">Пока никто не присоединился. Добавьте своего агента кнопкой ниже, либо дайте ключ агенту — он зайдёт командой <code>room_join</code>.</div>';
     }
     const rows = parts.map(p => {
+      const isLead = currentConductor && p.agent_id === currentConductor;
+      // Старший получает копию каждого адресованного сообщения и все
+      // безадресные реплики — иначе «сделайте X» без адресата повисает в
+      // воздухе: никто не считает его своим.
+      const leadBadge = isLead
+        ? ' <span class="chip" title="Старший: получает копии всех сообщений комнаты и разбирает безадресные просьбы">⭐ старший</span>'
+        : '';
+      const leadBtn = isLead
+        ? `<button type="button" class="btn btn-sm secondary"
+              title="Снять роль старшего. Комната вернётся в обычный режим: безадресные сообщения никому не пойдут."
+              onclick="setConductor(null, this)">Снять старшего</button>`
+        : `<button type="button" class="btn btn-sm secondary"
+              title="Назначить старшим: будет получать копии всех сообщений и разбирать безадресные просьбы"
+              onclick="setConductor('${esc(p.agent_id)}', this)">⭐ Сделать старшим</button>`;
       const ar = !!p.auto_respond;
       const arLabel = ar ? '🟢 Авто-ответ: вкл' : '⚪ Авто-ответ: выкл';
       const arTitle = ar
@@ -341,14 +359,35 @@
       return `
       <div class="item">
         <div style="min-width:0">
-          <div class="name">${esc(p.display_name || p.agent_id)} <span class="chip">${esc(p.role || 'member')}</span></div>
+          <div class="name">${esc(p.display_name || p.agent_id)} <span class="chip">${esc(p.role || 'member')}</span>${leadBadge}</div>
           <div class="meta">присоединился ${esc(fmtDate(p.joined_at))} · активность ${esc(fmtDate(p.last_seen_at))}</div>
-          <div style="margin-top:8px">${arBtn}</div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${arBtn}${leadBtn}</div>
         </div>
       </div>`;
     }).join('');
     return addCtl + `<div class="grid">${rows}</div>`;
   }
+
+  // Назначить/снять старшего комнаты. agentId=null снимает назначение.
+  window.setConductor = async function(agentId, btn) {
+    if (btn) btn.disabled = true;
+    const r = await api(`/user/rooms/${encodeURIComponent(ROOM_ID)}/conductor`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+    if (!r) return;  // 401 → редирект уже сделан в api()
+    if (!r.ok) {
+      let detail = r.status;
+      try { detail = (await r.json()).detail || detail; } catch (e) {}
+      if (btn) btn.disabled = false;
+      alert('Не удалось изменить старшего: ' + detail);
+      return;
+    }
+    const d = await r.json().catch(() => ({}));
+    currentConductor = d.conductor_agent_id || null;
+    refreshMessages(true);
+  };
 
   // Per-room авто-ответ: вкл/выкл room_participants.auto_respond для агента в
   // ЭТОЙ комнате. Когда вкл — демон cognitive-agent-runtime будит агента на
@@ -433,6 +472,7 @@
   }
 
   function render(detail) {
+    currentConductor = detail.conductor_agent_id || null;
     document.getElementById('roomTitle').textContent = detail.name || 'Комната';
     document.title = (detail.name || 'Комната') + ' — Cognitive Core';
     const pubChip = detail.is_public ? '' : '<span class="chip">приватная</span>';
@@ -955,6 +995,9 @@
     const r = await api(`/user/rooms/${encodeURIComponent(ROOM_ID)}/detail`);
     if (!r || !r.ok) return;
     const d = await r.json();
+    // Старшего мог назначить кто-то другой (или сам агент через сервис комнат) —
+    // подхватываем на каждом опросе, иначе бейдж отстаёт до перезагрузки страницы.
+    currentConductor = d.conductor_agent_id || null;
     const key = msgKey(d.messages);
     if (!force && key === lastMsgKey) {
       // Обновим только relative-времена/участников/индикатор печати молча
