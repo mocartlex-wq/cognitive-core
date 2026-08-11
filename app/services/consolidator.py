@@ -94,21 +94,29 @@ async def _daily_consolidate_impl(
     if not events:
         return {"status": "no_events", "buffer_id": None}
 
-    domains = {e["domain"] for e in events}
+    # Свёртка строится ПО ВЛАДЕЛЬЦУ, а не только по домену. Раньше группировка
+    # шла лишь по домену, и владелец в L2/L3 не попадал вовсе — все знания,
+    # произведённые конвейером, оседали с owner_user_id = NULL. Для
+    # owner-скоупного поиска это означало, что их нет: на проде 2026-08-11 из
+    # 269 активных записей L3 недостижимы были 159 (59 %), а домены
+    # frontend_errors и media_analysis не находились целиком.
+    groups: dict[tuple[str, str | None], list] = {}
+    for e in events:
+        groups.setdefault((e["domain"], e.get("owner_user_id")), []).append(e)
     if backfill:
-        # Сначала домены с самым длинным хвостом — очередь тает быстрее.
-        by_size = sorted(domains, key=lambda d: sum(1 for e in events if e["domain"] == d), reverse=True)
-        domains = set(by_size[:max_domains])
+        # Сначала группы с самым длинным хвостом — очередь тает быстрее.
+        by_size = sorted(groups, key=lambda g: len(groups[g]), reverse=True)
+        groups = {g: groups[g] for g in by_size[:max_domains]}
     results = []
 
-    for dom in domains:
+    for (dom, owner) in groups:
         # Per-domain isolation: один сбойный домен (LLM timeout, баг в анализаторе,
         # DB-конфликт) НЕ должен обрывать весь dailylet цикла. Раньше: первый
         # raise в pre_daily_filter/analyze_daily_events/INSERT выкидывал ВСЕХ
         # последующих доменов даже если они здоровые. Теперь: failure пишется
         # в results и цикл идёт дальше. weekly/monthly уже работают так.
         try:
-            dom_events = [e for e in events if e["domain"] == dom]
+            dom_events = groups[(dom, owner)]
             if backfill and len(dom_events) > max_events_per_domain:
                 # Разгребаем с самых старых — они дольше всех ждут и первыми
                 # рискуют упереться в 90-дневный потолок хранения.
@@ -149,7 +157,7 @@ async def _daily_consolidate_impl(
                         await mark_events_processed([e["id"] for e in dom_events])
                         drained = len(dom_events)
                 results.append({
-                    "domain": dom, "status": "skipped",
+                    "domain": dom, "owner": owner, "status": "skipped",
                     "reason": curator_result.get("reason"),
                     **({"drained_as_noise": drained} if drained else {}),
                 })
@@ -177,11 +185,16 @@ async def _daily_consolidate_impl(
             pool = await get_pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
+                    # Конфликт разрешается в границах ВЛАДЕЛЬЦА (индекс
+                    # idx_l2_date_domain_owner, миграция 0019). По старому
+                    # ключу (date, domain) свёртки двух владельцев склеивались
+                    # бы в одну строку с усреднённым confidence.
                     await conn.execute(
                         """
-                        INSERT INTO l2_daily_buffers (id, date, domain, summary, source_event_ids, confidence, created_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (date, domain) DO UPDATE
+                        INSERT INTO l2_daily_buffers (id, date, domain, owner_user_id,
+                                                      summary, source_event_ids, confidence, created_at)
+                        VALUES ($1, $2, $3, $8::uuid, $4, $5, $6, $7)
+                        ON CONFLICT (date, domain, owner_user_id) DO UPDATE
                         SET summary = EXCLUDED.summary,
                             source_event_ids = l2_daily_buffers.source_event_ids || EXCLUDED.source_event_ids,
                             confidence = (l2_daily_buffers.confidence + EXCLUDED.confidence) / 2,
@@ -190,7 +203,7 @@ async def _daily_consolidate_impl(
                         buffer_id, today, dom, json.dumps(analysis, ensure_ascii=False),
                         filtered_event_ids,
                         analysis.get("confidence", 0.5),
-                        now,
+                        now, owner,
                     )
                     # Помечаем обработанными ВСЕ рассмотренные события, а не
                     # только попавшие в буфер. Куратор часть отбраковывает как
@@ -206,10 +219,15 @@ async def _daily_consolidate_impl(
                     ]
                     await mark_events_processed(filtered_event_ids + noise_ids, conn=conn)
 
-            results.append({"domain": dom, "status": "consolidated", "buffer_id": str(buffer_id)})
+            results.append({
+                "domain": dom, "owner": owner,
+                "status": "consolidated", "buffer_id": str(buffer_id),
+            })
         except Exception as e:
-            log.warning("daily consolidation failed domain=%s err=%s: %s", dom, type(e).__name__, e)
-            results.append({"domain": dom, "status": "error", "error": f"{type(e).__name__}: {e}"})
+            log.warning("daily consolidation failed domain=%s owner=%s err=%s: %s",
+                        dom, owner, type(e).__name__, e)
+            results.append({"domain": dom, "owner": owner, "status": "error",
+                            "error": f"{type(e).__name__}: {e}"})
 
     return {"status": "ok", "results": results}
 
@@ -224,12 +242,23 @@ async def weekly_consolidate(domain: str) -> dict:
 
 
 async def _weekly_consolidate_impl(domain: str) -> dict:
+    """L2 → L3 по домену, отдельно для каждого владельца.
+
+    Синтез идёт В ГРАНИЦАХ ВЛАДЕЛЬЦА: его буферы, его действующие знания, его
+    инструменты. Иначе LLM смешала бы опыт разных тенантов в одну запись, а
+    результат осел бы без владельца и не нашёлся бы поиском — ровно это и
+    произошло с 59 % базы знаний (проверено на проде 2026-08-11).
+
+    Сигнатура намеренно прежняя: вызывающие (worker, API, MCP) не меняются,
+    разбиение по владельцам происходит внутри.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Загружаем L2 буферы за неделю
+        # Загружаем L2 буферы за неделю — вместе с владельцем
         l2_rows = await conn.fetch(
             """
-            SELECT id, date, domain, summary, source_event_ids, confidence
+            SELECT id, date, domain, owner_user_id::text AS owner_user_id,
+                   summary, source_event_ids, confidence
             FROM l2_daily_buffers
             WHERE domain = $1
               AND date >= CURRENT_DATE - $2::int
@@ -237,32 +266,70 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
             """,
             domain, settings.weekly_days,
         )
-        l2_buffers = [dict(r) for r in l2_rows]
+        all_buffers = [dict(r) for r in l2_rows]
 
-        # Загружаем активные L3 знания
+    if not all_buffers:
+        return {"status": "no_buffers"}
+
+    by_owner: dict[str | None, list] = {}
+    for b in all_buffers:
+        by_owner.setdefault(b.get("owner_user_id"), []).append(b)
+
+    per_owner: list[dict] = []
+    for owner, l2_buffers in by_owner.items():
+        try:
+            res = await _weekly_for_owner(domain, owner, l2_buffers)
+            per_owner.append({"owner": owner, **res})
+        except Exception as e:
+            log.warning("weekly failed domain=%s owner=%s err=%s: %s",
+                        domain, owner, type(e).__name__, e)
+            per_owner.append({"owner": owner, "status": "error",
+                              "error": f"{type(e).__name__}: {e}"})
+
+    # Снапшот и переиндексация — по домену целиком, они не owner-специфичны.
+    snapshot_id = await _maybe_snapshot(domain)
+    index_result = await index_domain_vectors(domain)
+
+    ok = [r for r in per_owner if r.get("status") == "consolidated"]
+    return {
+        "status": "consolidated" if ok else "no_buffers",
+        "owners": per_owner,
+        "new_items": sum(r.get("new_items", 0) for r in ok),
+        "deprecated": sum(r.get("deprecated", 0) for r in ok),
+        "tools_added": sum(r.get("tools_added", 0) for r in ok),
+        "quality": ok[0].get("quality") if ok else None,
+        "snapshot_id": str(snapshot_id) if snapshot_id else None,
+        "vectors_indexed": index_result["total"],
+    }
+
+
+async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) -> dict:
+    """Синтез L2 → L3 для одного владельца в одном домене."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Действующие знания владельца
         l3_rows = await conn.fetch(
             """
             SELECT id, domain, knowledge_type, content, version, derived_from_l2_ids
             FROM l3_master_knowledge
             WHERE domain = $1 AND effective_to IS NULL
+              AND owner_user_id IS NOT DISTINCT FROM $2::uuid
             """,
-            domain,
+            domain, owner,
         )
         current_l3 = [dict(r) for r in l3_rows]
 
-        # Загружаем активные инструменты
+        # Инструменты владельца
         tool_rows = await conn.fetch(
             """
             SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns
             FROM l3_tools_registry
             WHERE domain = $1 AND effective_to IS NULL
+              AND owner_user_id IS NOT DISTINCT FROM $2::uuid
             """,
-            domain,
+            domain, owner,
         )
         current_tools = [dict(r) for r in tool_rows]
-
-    if not l2_buffers:
-        return {"status": "no_buffers"}
 
     # Шаг 1: Куратор качества
     quality = await pre_weekly_check(domain, current_l3, l2_buffers)
@@ -295,13 +362,14 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
                 await conn.execute(
                     """
                     INSERT INTO l3_master_knowledge
-                        (id, domain, knowledge_type, content, version, derived_from_l2_ids, effective_from, created_at)
-                    VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
+                        (id, domain, knowledge_type, content, version, derived_from_l2_ids,
+                         effective_from, created_at, owner_user_id)
+                    VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8::uuid)
                     """,
                     new_id, domain, knowledge_type,
                     json.dumps(content, ensure_ascii=False),
                     [str(b["id"]) for b in l2_buffers],
-                    now, now,
+                    now, now, owner,
                 )
 
         # Депрекация устаревшего
@@ -321,8 +389,8 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
                 """
                 INSERT INTO l3_tools_registry
                     (id, domain, tool_name, tool_type, description, config_schema,
-                     usage_patterns, version, effective_from, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)
+                     usage_patterns, version, effective_from, created_at, owner_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10::uuid)
                 ON CONFLICT DO NOTHING
                 """,
                 tool_id, domain,
@@ -331,23 +399,18 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
                 tool.get("usage_pattern", ""),
                 "{}",
                 json.dumps({"pattern": tool.get("usage_pattern", "")}, ensure_ascii=False),
-                now, now,
+                now, now, owner,
             )
 
-    # Шаг 4: L4 снапшот
-    snapshot_id = await _maybe_snapshot(domain)
-
-    # Шаг 5: Индексация векторов для RediSearch KNN
-    index_result = await index_domain_vectors(domain)
-
+    # Снапшот и переиндексация делаются один раз на домен в вызывающей функции —
+    # они не owner-специфичны, и повторять их на каждого владельца значило бы
+    # переиндексировать домен столько раз, сколько в нём тенантов.
     return {
         "status": "consolidated",
         "new_items": len(synthesis.get("new_or_updated", [])),
         "deprecated": len(synthesis.get("deprecated_l3_ids", [])),
         "tools_added": len(synthesis.get("tools", [])),
         "quality": quality,
-        "snapshot_id": str(snapshot_id) if snapshot_id else None,
-        "vectors_indexed": index_result["total"],
     }
 
 
