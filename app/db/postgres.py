@@ -17,7 +17,13 @@ CREATE TABLE IF NOT EXISTS l1_raw_events (
     domain VARCHAR(64) NOT NULL,
     raw_payload JSONB NOT NULL,
     processed_to_l2 BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Владелец обязан быть и здесь. Раньше колонка жила ТОЛЬКО в миграции 0006:
+    -- база, поднятая через init_db без alembic (CI, self-hosted, локальная
+    -- разработка), не имела её вовсе, и любой owner-фильтр падал с
+    -- UndefinedColumnError. На существующие базы это не влияет — CREATE TABLE
+    -- IF NOT EXISTS их не трогает; расхождение закрывается для новых.
+    owner_user_id UUID
 );
 CREATE INDEX IF NOT EXISTS idx_l1_timestamp ON l1_raw_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_l1_domain ON l1_raw_events(domain, timestamp);
@@ -32,9 +38,14 @@ CREATE TABLE IF NOT EXISTS l2_daily_buffers (
     summary JSONB NOT NULL,
     source_event_ids UUID[] NOT NULL DEFAULT '{}',
     confidence FLOAT DEFAULT 0.0,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    owner_user_id UUID
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_l2_date_domain ON l2_daily_buffers(date, domain);
+-- Уникальность свёртки — в границах владельца (миграция 0019). Без NULLS NOT
+-- DISTINCT записи без владельца не конфликтовали бы между собой вовсе.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_l2_date_domain_owner
+    ON l2_daily_buffers(date, domain, owner_user_id) NULLS NOT DISTINCT;
 
 -- L3: Эталонные знания
 CREATE TABLE IF NOT EXISTS l3_master_knowledge (
@@ -47,10 +58,16 @@ CREATE TABLE IF NOT EXISTS l3_master_knowledge (
     related_tool_ids UUID[] DEFAULT '{}',
     effective_from TIMESTAMPTZ DEFAULT NOW(),
     effective_to TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    owner_user_id UUID
 );
 CREATE INDEX IF NOT EXISTS idx_l3_active ON l3_master_knowledge(domain, knowledge_type) WHERE effective_to IS NULL;
 CREATE INDEX IF NOT EXISTS idx_l3_domain ON l3_master_knowledge(domain) WHERE effective_to IS NULL;
+CREATE INDEX IF NOT EXISTS idx_l3_know_owner_domain ON l3_master_knowledge(owner_user_id, domain)
+    WHERE owner_user_id IS NOT NULL;
+-- Полнотекстовая половина гибридного поиска (миграция 0020).
+CREATE INDEX IF NOT EXISTS idx_l3_fts ON l3_master_knowledge
+    USING GIN (to_tsvector('russian', content::text));
 
 -- pgvector колонка для семантического поиска (384-dim multilingual-e5-small)
 ALTER TABLE l3_master_knowledge ADD COLUMN IF NOT EXISTS embedding vector(384);
@@ -70,9 +87,16 @@ CREATE TABLE IF NOT EXISTS l3_tools_registry (
     version INT DEFAULT 1,
     effective_from TIMESTAMPTZ DEFAULT NOW(),
     effective_to TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    owner_user_id UUID
 );
 CREATE INDEX IF NOT EXISTS idx_l3_tools_active ON l3_tools_registry(domain, tool_type) WHERE effective_to IS NULL;
+-- Один инструмент на (домен, имя, владелец) среди ДЕЙСТВУЮЩИХ (миграция 0021).
+-- Без этого ON CONFLICT в консолидаторе не с чем сопоставляться, и реестр
+-- снова заполнится копиями: на проде их накопилось 2604 при 145 уникальных.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_l3_tools_unique_active
+    ON l3_tools_registry(domain, tool_name, owner_user_id) NULLS NOT DISTINCT
+    WHERE effective_to IS NULL;
 
 -- pgvector колонка для tools
 ALTER TABLE l3_tools_registry ADD COLUMN IF NOT EXISTS embedding vector(384);
@@ -95,7 +119,8 @@ CREATE TABLE IF NOT EXISTS l4_snapshots (
     s3_path VARCHAR(255),
     is_verified BOOLEAN DEFAULT FALSE,
     comment TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    owner_user_id UUID
 );
 
 -- L5: Аудит
