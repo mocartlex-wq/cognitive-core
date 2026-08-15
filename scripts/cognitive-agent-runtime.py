@@ -22,6 +22,12 @@ NOTIFY_BIN = "/usr/local/bin/cognitive-notify.sh"
 TOOL_TIMEOUT_SEC = 10
 MAX_TOOL_CALLS_PER_REPLY = 3
 
+# Сколько символов входящего сообщения видит заместитель. Было зашито 2000 —
+# ровно на этом обрывались технические разборы, а ответ выглядел полным.
+# 12000 покрывает реальные сообщения в комнате (самое длинное за неделю — 3.5к)
+# с большим запасом и не съедает контекст: у DeepSeek окно много больше.
+MAX_INBOUND_CHARS = int(os.environ.get("COGCORE_MAX_INBOUND_CHARS", "12000"))
+
 # Agent API keys are resolved dynamically from the agent_keys table via
 # resolve_agent_key() — the DB is the single source of truth, so the daemon can
 # act for ANY onboarded agent (opt-in via agent_states.standin_enabled), not a
@@ -1204,7 +1210,26 @@ def deepseek_reply_with_tools(persona, message):
         "If no tool fits — reply briefly without inventing data."
     )
 
-    user_msg = f"From {message.get('from', '?')}: {message.get('text', '')[:2000]}"
+    # Заместитель видел только первые 2000 символов ЛЮБОГО сообщения и отвечал
+    # так, будто прочитал всё. 2026-08-15 на этом сорвался разбор конфигурации:
+    # сообщение на 3262 символа обрезалось посередине фразы, а заместитель дал
+    # уверенный ответ по половине. Молчаливое усечение — тот же класс отказа,
+    # что и молчаливая деградация: снаружи неотличимо от полного прочтения.
+    #
+    # Потолок поднят, а главное — про обрезку теперь СКАЗАНО в самом запросе,
+    # чтобы модель не выдавала частичное понимание за полное.
+    raw_text = message.get("text", "") or ""
+    if len(raw_text) > MAX_INBOUND_CHARS:
+        body = (
+            raw_text[:MAX_INBOUND_CHARS]
+            + f"\n\n[ВНИМАНИЕ: сообщение обрезано, показано {MAX_INBOUND_CHARS} "
+              f"символов из {len(raw_text)}. Ты видишь НЕ ВСЁ. Не отвечай так, "
+              f"будто прочитал целиком: скажи, что видел только начало, и "
+              f"попроси прислать остаток частями.]"
+        )
+    else:
+        body = raw_text
+    user_msg = f"From {message.get('from', '?')}: {body}"
     msgs = [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_msg},
