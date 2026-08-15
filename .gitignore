@@ -28,7 +28,12 @@ Thumbs.db
 docker-compose.override.yml
 
 # Claude Code
-.claude/
+# Содержимое .claude локальное — КРОМЕ скиллов: они знание о проекте, а не
+# настройка машины, и должны ехать с репозиторием, иначе каждый агент заводит
+# свой. Исключается содержимое каталога, а не сам каталог: git не заходит
+# внутрь исключённой папки, и отрицание `!` там уже не срабатывает.
+.claude/*
+!.claude/skills/
 
 # DeepSeek delegation outputs (могут содержать project-specific дампы)
 scripts/deepseek_out/
