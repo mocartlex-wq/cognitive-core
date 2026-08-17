@@ -17,6 +17,7 @@ from app.services.operative import (
     feedback_record,
     recall_any_domain,
     recall_path,
+    record_recall_hits,
 )
 
 log = logging.getLogger(__name__)
@@ -202,6 +203,18 @@ async def query_operative(
     )
 
     session = await create_session(body.domain or "all", results)
+
+    # Показы пишем ПОСЛЕ создания сессии: обратная связь приходит по паре
+    # (сессия, запись), и без session_id её потом не с чем связать.
+    try:
+        await record_recall_hits(
+            results,
+            session_id=session.get("session_id"),
+            domain=body.domain,
+            owner_user_id=owner_user_id,
+        )
+    except Exception as e:  # pragma: no cover — наблюдение не роняет поиск
+        log.warning("recall hits failed: %s", e)
 
     if grouped:
         # Заменяем плоский results на семантический frame
