@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -15,6 +16,19 @@ from app.services.embedder import embed_text, get_model_version
 from app.services.ingestor import save_raw_event
 
 log = logging.getLogger(__name__)
+
+# Каким из трёх путей отработал поиск. Нужен наблюдаемости: снаружи «пусто»
+# от RediSearch и «пусто» от python-fallback выглядят одинаково, а лечатся
+# по-разному.
+#
+# ContextVar, а не возвращаемое значение, чтобы не менять форму ответа
+# build_operative — его зовут из четырёх мест.
+#
+# ⚠️ Через asyncio.gather значение НЕ поднимется: задача получает копию
+# контекста. В бездоменном поиске (`_search_default_domains`) домены как раз
+# идут через gather, поэтому там путь помечается отдельно — «multi».
+recall_path: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "recall_path", default="unknown")
 
 SESSION_TTL = 86400  # 24 часа
 
@@ -547,6 +561,7 @@ async def build_operative(
                                 "distance": 0.0,
                             })
                 if results:
+                    recall_path.set("redis")
                     return results
 
     # Попытка 2: ГИБРИД — вектор + полнотекстовый, слияние по обратному рангу.
@@ -577,6 +592,7 @@ async def build_operative(
             pass
         if not include_tools:
             merged = [r for r in merged if r["record_type"] != "tool"]
+        recall_path.set("hybrid")
         return merged[:top_k + (top_k // 2 if include_tools else 0)]
 
     # Попытка 3: Python KNN (последний fallback — для свежесозданных без эмбеддингов)
@@ -691,6 +707,7 @@ async def build_operative(
         item_vec = await embed_text(content_str)
         await _index_l3_vector(r["id"], domain, r["record_type"], content_str, item_vec)
 
+    recall_path.set("python")
     return results
 
 

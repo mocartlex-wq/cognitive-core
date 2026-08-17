@@ -1,20 +1,76 @@
 import asyncio
+import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.config import settings
 from app.models.operative import OperativeClose, OperativeFeedback, OperativeQuery, OperativeRecallUI
+from app.security.audit import log_audit
 from app.security.auth import verify_api_key
 from app.security.owner import resolve_owner_user_id
+from app.services.metrics import track_recall
 from app.services.operative import (
     build_operative,
     close_session,
     create_session,
     feedback_record,
     recall_any_domain,
+    recall_path,
 )
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/operative", tags=["operative"])
+
+
+async def _observe_recall(*, request: Request, body: OperativeQuery, results: list,
+                          duration: float, owner_user_id: str | None,
+                          grouped: bool) -> None:
+    """Запись факта поиска: аудит + метрики.
+
+    Слот `operative_query` в CHECK таблицы аудита существовал с самого начала
+    (`app/db/postgres.py:131-136`) и не заполнялся никем. Поэтому на вопрос
+    «какие записи памяти хоть раз пригодились» ответить было нечем: обращений
+    к recall система не помнила вовсе.
+
+    ⚠️ Строго best-effort. Это горячий путь: в `scripts/dogfood_check.py`
+    порог p95 для `/operative/query` — 2 секунды, а до этой правки в ручке не
+    было ни одного try/except. Падение записи наблюдения не имеет права ронять
+    сам поиск — иначе инструмент измерения станет причиной отказа.
+    """
+    path = recall_path.get()
+    count = len(results)
+    try:
+        track_recall(path, duration, count, owner_scoped=owner_user_id is not None)
+    except Exception as e:  # pragma: no cover — метрика не должна ломать поиск
+        log.warning("recall metrics failed: %s", e)
+
+    try:
+        agent_id = getattr(getattr(request, "state", None), "agent_id", "") or ""
+        await log_audit(
+            agent_id=agent_id,
+            action="operative_query",
+            target_table="l3_master_knowledge",
+            details={
+                # Сам запрос обрезаем: в контексте бывает кусок переписки.
+                "query": (body.context or "")[:200],
+                "domain": body.domain or "*",
+                "top_k": body.top_k,
+                "include_tools": body.include_tools,
+                "grouped": grouped,
+                "path": path,
+                "results": count,
+                "empty": count == 0,
+                "latency_ms": int(duration * 1000),
+                # У l5_audit_log нет колонки owner_user_id — кладём в details,
+                # иначе агрегат «по тенанту» не собрать.
+                "owner_user_id": owner_user_id,
+            },
+            success=True,
+        )
+    except Exception as e:  # pragma: no cover
+        log.warning("recall audit failed: %s", e)
 
 
 async def _search_default_domains(
@@ -110,6 +166,9 @@ async def query_operative(
     await verify_api_key(request)
     owner_user_id = await resolve_owner_user_id(request)
 
+    recall_path.set("unknown")
+    _t0 = time.monotonic()
+
     # Домен не задан — ищем по доменам знаний и склеиваем. Раньше домен был
     # обязателен: агент, промахнувшийся с одним из 18 доменов, получал пустой
     # ответ, неотличимый от «в памяти ничего нет».
@@ -128,6 +187,19 @@ async def query_operative(
             include_tools=body.include_tools,
             owner_user_id=owner_user_id,
         )
+        # Домены идут через asyncio.gather — задача получает КОПИЮ контекста,
+        # и recall_path, выставленный внутри, сюда не поднимется. Помечаем
+        # честно, а не оставляем "unknown", который читался бы как сбой.
+        recall_path.set("multi")
+
+    await _observe_recall(
+        request=request,
+        body=body,
+        results=results,
+        duration=time.monotonic() - _t0,
+        owner_user_id=owner_user_id,
+        grouped=grouped,
+    )
 
     session = await create_session(body.domain or "all", results)
 
