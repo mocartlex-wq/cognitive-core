@@ -1,0 +1,37 @@
+{
+  "id": "ddl-parity-drift",
+  "title": "Схема жила в двух источниках, и они разошлись молча",
+  "first_seen": "2026-08-11",
+  "last_seen": "2026-08-11",
+  "occurrences": 1,
+  "cost": "`owner_user_id` был только в миграции 0006. База, поднятая через `init_db` без alembic — CI, self-hosted, локальная разработка, — не имела колонки вовсе, и любой owner-фильтр падал с UndefinedColumnError. На проде не проявлялось: таблицы уже созданы, `CREATE TABLE IF NOT EXISTS` их не трогает. Из-за этого расхождение прожило месяцы.",
+  "detected_by": "ручной разбор изоляции тенантов",
+  "unasked_question": "Мы добавили колонку миграцией. А есть ли ВТОРОЙ источник той же схемы — и если да, кто и когда его исполняет?",
+  "false_confirmations": [
+    {
+      "signal": "на проде всё работает",
+      "why_it_lied": "прод не пересоздаёт таблицы; дефект виден только там, где схема поднимается с нуля"
+    },
+    {
+      "signal": "миграция применена, `alembic current` показывает head",
+      "why_it_lied": "alembic знает про свой источник и ничего не знает про CREATE_TABLES_SQL"
+    }
+  ],
+  "check": {
+    "ref": "tests/test_schema_ddl_parity.py",
+    "kind": "pytest"
+  },
+  "repro": {
+    "runner": "python -m pytest tests/test_schema_ddl_parity.py -q",
+    "bad": [
+      {"input": "колонка добавлена только в alembic/versions/*", "expected": "fail"},
+      {"input": "таблица добавлена только в CREATE_TABLES_SQL", "expected": "fail"}
+    ],
+    "good": [
+      {"input": "колонка в обоих источниках", "expected": "pass"}
+    ]
+  },
+  "external_deps": [],
+  "status": "covered",
+  "note": "Проверка сработала по назначению 17.08: таблица l3_recall_hits была добавлена миграцией 0022, и тест потребовал зеркала в CREATE_TABLES_SQL до того, как расхождение уехало в репозиторий."
+}

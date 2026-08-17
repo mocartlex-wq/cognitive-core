@@ -1,0 +1,47 @@
+{
+  "id": "tools-registry-duplicates",
+  "title": "ON CONFLICT стоял на первичном ключе со свежим uuid — конфликт не наступал никогда",
+  "first_seen": "2026-08-11",
+  "last_seen": "2026-08-17",
+  "occurrences": 2,
+  "cost": "2604 активных записи при 145 уникальных парах; один инструмент записан 121 раз. Реестр целиком уходит в промпт месячного аудита — за дубли платили LLM каждый месяц. Повтор 17.08: три записи-сироты без владельца, созданные путём, который правку не получил.",
+  "detected_by": "первый раз — ручной разбор гигиены знаний; повтор — взгляд на цифру «2 959 инструментов» на витрине сайта",
+  "unasked_question": "Проверили, что вставка не падает. А наступает ли конфликт, на который рассчитан ON CONFLICT? Свежий uuid4 в PK означает, что не наступает никогда.",
+  "false_confirmations": [
+    {
+      "signal": "`ON CONFLICT DO NOTHING` присутствует в коде",
+      "why_it_lied": "конструкция была, а условие для неё — нет: конфликт по PK с генерируемым id недостижим"
+    },
+    {
+      "signal": "после чистки 11.08 дубли исчезли",
+      "why_it_lied": "исчезли те, что были; путь, который их создавал, закрыли только в консолидаторе — `register_tool` и восстановление из снапшота остались без владельца и без ON CONFLICT"
+    },
+    {
+      "signal": "уникальный индекс стоит",
+      "why_it_lied": "индекс по тройке (domain, tool_name, owner_user_id) с NULLS NOT DISTINCT; NULL — законное третье значение, и пара «с владельцем / без владельца» ему не противоречит"
+    }
+  ],
+  "check": {
+    "ref": "tests/test_tools_owner_scope.py::test_register_carries_owner_and_is_idempotent",
+    "kind": "pytest"
+  },
+  "repro": {
+    "runner": "python -m pytest tests/test_tools_owner_scope.py -q",
+    "bad": [
+      {"input": "register_tool без owner_user_id в INSERT", "expected": "fail", "why": "запись-сирота: owner-scoped чтение её не видит"},
+      {"input": "INSERT без ON CONFLICT", "expected": "fail", "why": "каждая регистрация вставляет свежий uuid и плодит близнеца"}
+    ],
+    "good": [
+      {"input": "register_tool(data, owner_user_id=...) дважды подряд", "expected": "одна строка, version += 1"}
+    ]
+  },
+  "external_deps": [
+    {
+      "tool": "postgres",
+      "property": "NULLS NOT DISTINCT в частичном уникальном индексе трактует NULL как значение",
+      "observed": "16",
+      "risk": "низкий — поведение стандартизовано"
+    }
+  ],
+  "status": "covered"
+}

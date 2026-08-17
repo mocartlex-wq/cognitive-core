@@ -1,0 +1,49 @@
+{
+  "id": "git-commit-bypasses-precommit",
+  "title": "Гейт pre-commit обходился короткой склейкой флагов и сокращением длинного",
+  "first_seen": "2026-08-16",
+  "last_seen": "2026-08-16",
+  "occurrences": 2,
+  "cost": "Хук числился установленным и не работал по трём формам сразу. Любой коммит мимо гейта проносит то, что гейт ловит: ruff, mypy, миграции, утечки ключей. У соседнего проекта тот же дефект прожил при 117 зелёных самопроверках.",
+  "detected_by": "разбор чужого пакета конфигурации; проверено на репозитории с намеренно падающим pre-commit",
+  "unasked_question": "Регулярка написана от канонического написания флага. А что вообще ПРИНИМАЕТ git — только точное написание или ещё сокращения и склейки?",
+  "false_confirmations": [
+    {
+      "signal": "тест на `git commit -an` зелёный",
+      "why_it_lied": "кейс выведен из той же модели, что и код: оба предполагали, что «n» — последняя буква кластера. `-nm` отличается одним символом и не проверялся"
+    },
+    {
+      "signal": "литерал `--no-verify` в регулярке выглядит исчерпывающим",
+      "why_it_lied": "git принимает однозначные сокращения длинных флагов; `--no-veri` работает, `--no-ver` отвергается как двусмысленный"
+    }
+  ],
+  "check": {
+    "ref": "tests/test_hooks_block_bypass.py",
+    "kind": "pytest"
+  },
+  "repro": {
+    "runner": "python -m pytest tests/test_hooks_block_bypass.py -q",
+    "bad": [
+      {"input": "git commit -nm \"проверка\"", "expected": "deny", "why": "валидная склейка -n -m"},
+      {"input": "git commit -anm x", "expected": "deny"},
+      {"input": "git commit --no-veri -m x", "expected": "deny", "why": "минимальное однозначное сокращение"},
+      {"input": "git commit --no-verif -m x", "expected": "deny"},
+      {"input": "git -c core.hooksPath=/dev/null commit -m x", "expected": "deny", "why": "гейт не запускается вовсе, флаги не нужны"}
+    ],
+    "good": [
+      {"input": "git commit -am 'правка'", "expected": "allow"},
+      {"input": "git commit --no-verbose -m x", "expected": "allow", "why": "рабочий флаг; при нём гейт отрабатывает"},
+      {"input": "git commit -m \"use -n flag\"", "expected": "allow", "why": "-n в тексте сообщения"},
+      {"input": "git push -n", "expected": "allow", "why": "у push это --dry-run"}
+    ]
+  },
+  "external_deps": [
+    {
+      "tool": "git",
+      "property": "принимает однозначные сокращения длинных опций",
+      "observed": "2.x, Windows",
+      "risk": "изменится поведение — проверка станет ложно-зелёной не по вине кода"
+    }
+  ],
+  "status": "covered"
+}
