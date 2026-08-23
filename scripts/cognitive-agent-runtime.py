@@ -1035,7 +1035,7 @@ def resolve_room_key(room_id):
         return None
 
 
-def post_to_room(room_id, from_agent, text, history):
+def post_to_room(room_id, from_agent, text, history, model=None):
     """Post `text` from `from_agent` into the room. Returns message id or None.
 
     Best-effort: any failure (key not resolvable, HTTP error) is logged and
@@ -1058,7 +1058,13 @@ def post_to_room(room_id, from_agent, text, history):
             log.warning(f"post_to_room: no room key for {room_id}, skipping room post")
             return None
         url = f"{ENDPOINT}/rooms/{room_id}/post"
-        d = http_post(url, {"from_agent": from_agent, "text": text},
+        # Помечаем происхождение. Заместитель постит под тем же именем,
+        # что живая сессия, и 16.08 это дало реплики с обязательствами,
+        # которых живая сессия не давала. Сервер вывести происхождение
+        # не может — сказать должен тот, кто пишет.
+        d = http_post(url, {"from_agent": from_agent, "text": text,
+                            "origin_meta": {"origin": "standin",
+                                            "model": model or "unknown"}},
                       headers={"X-Room-Key": key})
         mid = d.get("id") or d.get("message_id")
         log.info(f"[{from_agent}] ROOM_REPLY -> room {room_id} msg={(mid or '?')[:8] if mid else '?'}")
@@ -1477,7 +1483,8 @@ def handle_auto_ack(persona, msg, history):
     # Reverse room bridge: room-originated message -> ack in the room, not in DM.
     room_id = room_ctx(msg)
     if room_id:
-        sent_id = post_to_room(room_id, persona["persona_id"], text, history)
+        sent_id = post_to_room(room_id, persona["persona_id"], text, history,
+                               model="auto_ack")
         if sent_id:
             log.info(f"[{persona['persona_id']}] AUTO_ACK(room) -> {room_id} reply={sent_id[:8]}")
         return sent_id
@@ -1517,7 +1524,8 @@ def handle_llm_reply(persona, msg, history):
     # arrived via a room @-mention is answered IN THE ROOM.
     room_id = room_ctx(msg)
     if room_id:
-        sent_id = post_to_room(room_id, persona["persona_id"], reply_text, history)
+        sent_id = post_to_room(room_id, persona["persona_id"], reply_text, history,
+                               model="deepseek")
         log.info(f"[{persona['persona_id']}] LLM_REPLY(room) -> {room_id} ({len(reply_text)} chars) reply={sent_id[:8] if sent_id else '?'}")
         return sent_id
     sent_id = send_dm(persona["persona_id"], sender, reply_text, parent_id=msg.get("id"))
@@ -1614,7 +1622,7 @@ def handle_managed(persona, msg, history):
         # @-mention-only bridging + loop_depth).
         room_id = room_ctx(msg)
         if room_id:
-            sid = post_to_room(room_id, pid, reply, history)
+            sid = post_to_room(room_id, pid, reply, history, model="managed")
             log.info(f"[{pid}] MANAGED(room) -> {room_id} ({len(reply)} chars) reply={sid[:8] if sid else '?'}")
             return sid
         sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
@@ -1670,7 +1678,7 @@ def handle_custom_llm(persona, msg, history):
         # No auto-reply marker — agent answers in its own voice.
         room_id = room_ctx(msg)
         if room_id:
-            sid = post_to_room(room_id, pid, reply, history)
+            sid = post_to_room(room_id, pid, reply, history, model=model)
             log.info(f"[{pid}] CUSTOM_LLM(room) -> {room_id} model={model} ({len(reply)}ch) reply={sid[:8] if sid else '?'}")
             return sid
         sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
