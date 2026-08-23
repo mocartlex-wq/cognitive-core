@@ -1,0 +1,19 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Нет сети — Память</title>
+<style>
+  html,body{height:100%;margin:0;background:#000;color:#eaeaf0;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .w{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center}
+  .t{font-size:19px;font-weight:600}
+  .m{color:#8e8e93;max-width:30ch}
+  button{margin-top:6px;padding:11px 22px;border:0;border-radius:12px;
+    background:#0a84ff;color:#fff;font-size:16px}
+</style>
+<div class="w">
+  <div style="font-size:44px">🔌</div>
+  <div class="t">Нет сети</div>
+  <div class="m">Сообщения и комнаты живут на сервере, локальной копии переписки приложение не хранит.</div>
+  <button onclick="location.replace('/chat')">Попробовать снова</button>
+</div>

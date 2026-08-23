@@ -105,17 +105,37 @@ async def my_rooms(request: Request):
         try:
             rows = await conn.fetch(
                 """
-                SELECT DISTINCT r.id::text AS id, r.name, r.created_at,
+                SELECT r.id::text AS id, r.name, r.created_at,
                        (r.owner_user_id = $1::uuid) AS is_owner,
-                       COALESCE(r.is_public, TRUE) AS is_public
+                       COALESCE(r.is_public, TRUE) AS is_public,
+                       m.text       AS last_text,
+                       m.from_agent AS last_from,
+                       m.created_at AS last_at
                   FROM rooms r
-                  LEFT JOIN room_participants p
-                         ON p.room_id = r.id
+                  -- LATERAL, а не GROUP BY: нужна не агрегация, а последняя
+                  -- строка целиком, и она берётся одним обращением к индексу
+                  -- idx_rm_room (room_id, created_at DESC).
+                  LEFT JOIN LATERAL (
+                        SELECT text, from_agent, created_at
+                          FROM room_messages
+                         WHERE room_id = r.id
+                         ORDER BY created_at DESC
+                         LIMIT 1
+                  ) m ON TRUE
+                 -- EXISTS вместо LEFT JOIN + DISTINCT: DISTINCT здесь нужен был
+                 -- только чтобы схлопнуть дубли, которые сам же JOIN и создавал,
+                 -- а с LATERAL он бы ещё и склеивал разные последние сообщения.
                  WHERE r.owner_user_id = $1::uuid
-                    OR p.agent_id IN (
-                        SELECT agent_id FROM agent_states WHERE owner_user_id = $1::uuid
+                    OR EXISTS (
+                        SELECT 1 FROM room_participants p
+                         WHERE p.room_id = r.id
+                           AND p.agent_id IN (
+                               SELECT agent_id FROM agent_states
+                                WHERE owner_user_id = $1::uuid)
                     )
-                 ORDER BY r.created_at DESC
+                 -- По последней активности, а не по дате создания: список нужен
+                 -- для того, чтобы найти, где только что ответили.
+                 ORDER BY COALESCE(m.created_at, r.created_at) DESC
                  LIMIT 200
                 """,
                 user.user_id,
@@ -124,6 +144,18 @@ async def my_rooms(request: Request):
                 d = dict(r)
                 if isinstance(d.get("created_at"), datetime):
                     d["created_at"] = d["created_at"].isoformat()
+                last_at = d.pop("last_at", None)
+                last_text = d.pop("last_text", None)
+                last_from = d.pop("last_from", None)
+                # Превью списка стоило N запросов /detail (плюс ещё N на поиск
+                # первой доступной комнаты). Отдаём его прямо здесь: строка
+                # списка не должна тянуть всю карточку комнаты.
+                d["last_message"] = None if last_at is None else {
+                    "text": (last_text or "")[:200],
+                    "from_agent": last_from,
+                    "created_at": last_at.isoformat()
+                    if isinstance(last_at, datetime) else last_at,
+                }
                 items.append(d)
         except Exception as e:
             # rooms таблица может ещё не существовать в этой БД

@@ -452,6 +452,24 @@ async def profile_page():
     return _html("profile.html")
 
 
+@app.get("/sw.js")
+async def service_worker():
+    """Service worker с корня, а не из /static/.
+
+    Область действия воркера не может быть шире каталога, из которого он
+    отдан: с /static/sw.js он не покрыл бы ни /chat, ни уведомления. Поэтому
+    отдельный маршрут в корне плюс заголовок Service-Worker-Allowed.
+
+    no-store обязателен: браузер кэширует сам файл воркера, и без запрета
+    обновление приложения не доезжает до тех, у кого он уже установлен.
+    """
+    return FileResponse(
+        os.path.join(SANDBOX_DIR, "sw.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store", "Service-Worker-Allowed": "/"},
+    )
+
+
 @app.get("/chat")
 async def webchat_page():
     """Веб-чат: единая страница-обёртка над комнатами владельца (session-auth,
