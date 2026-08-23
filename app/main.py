@@ -101,9 +101,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_event("warn", "media_cleanup loop failed to start", error=str(e))
 
+    # Слушатель room_event для уведомлений. Событие шлёт триггер
+    # room_msg_notify, который стоит с апреля; сервис комнат не трогаем.
+    # Выключен целиком, если ключи VAPID не заданы.
+    try:
+        from app.api.push import start_room_listener
+        await start_room_listener()
+    except Exception as e:
+        log_event("warn", "push listener failed to start", error=str(e)[:200])
+
     log_event("info", "Cognitive Core ready")
     yield
 
+    try:
+        from app.api.push import stop_room_listener
+        await stop_room_listener()
+    except Exception:
+        pass
     if _outbox_publisher:
         await _outbox_publisher.stop()
     if _scheduler_task:
@@ -366,10 +380,12 @@ app.include_router(mcp_router)
 
 # Новые роутеры (2026-05-17): аккаунты + magic-link авторизация
 from app.api.auth import router as auth_router
+from app.api.push import router as push_router
 from app.api.user import router as user_router
 
 app.include_router(auth_router)
 app.include_router(user_router)
+app.include_router(push_router)
 
 # Frontend error reporter (2026-05-20): /api/errors POST/GET
 from app.api.docs_serve import router as docs_serve_router

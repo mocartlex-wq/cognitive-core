@@ -234,6 +234,23 @@ CREATE TABLE IF NOT EXISTS l_arbitration (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     resolved_at TIMESTAMPTZ
 );
+
+-- Подписки браузера на уведомления (Web Push).
+-- endpoint — первичный ключ по смыслу: браузер выдаёт его на пару
+-- (устройство, установка), и повторная подписка того же устройства
+-- обязана обновлять строку, а не заводить вторую — иначе одно событие
+-- приходит на телефон дважды.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    user_id UUID NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_ok_at TIMESTAMPTZ,
+    failures INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_push_sub_user ON push_subscriptions(user_id);
 """
 
 # Stable arbitrary lock id for pg_advisory_xact_lock in init_db.

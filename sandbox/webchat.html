@@ -573,6 +573,8 @@ function buildProfile(u){
        <div class="prow"><div class="pl"><span class="pic">🌙</span>Тёмная тема</div>
          <div class="toggle ${themeOn()?'':'on'}" id="rTheme"></div></div>
        ${installRow}
+       <div class="prow"><div class="pl"><span class="pic">🔔</span>Уведомления</div>
+         <div class="toggle" id="rPush"></div></div>
        <div class="prow"><div class="pl"><span class="pic">🔄</span>Версия</div>
          <span class="pval">${appVer?('v'+H(appVer)):'Cognitive Core'}</span></div>
      </div>
@@ -596,6 +598,11 @@ function buildProfile(u){
     if(isIOS){ alert('На iPhone: нажми «Поделиться» внизу Safari → «На экран „Домой“». Иконка появится как «Память».'); return; }
     alert('Открой этот адрес в Chrome (Android) или Safari (iPhone), затем установи из меню браузера.');
   });
+  // Уведомления. Три отдельных условия отказа, и каждое обязано быть видно:
+  // браузер не умеет, сервер без ключей, пользователь запретил. Без этого
+  // «не приходит» выглядит одинаково во всех трёх случаях.
+  const rp=document.getElementById('rPush');
+  if(rp) initPush(rp);
   // Аккаунт
   document.getElementById('rSwitch').addEventListener('click',async ()=>{
     if(!confirm('Выйти из текущего аккаунта и войти под другим?')) return;
@@ -734,6 +741,54 @@ async function openAddAgent(id, existing){
 
 /* ─── Старт ─── */
 applyTheme();
+/* ─── Уведомления ─── */
+function b64ToU8(b64){
+  // VAPID-ключ приходит в url-safe base64 без выравнивания, а atob хочет
+  // обычный с ним. Без этой правки подписка падает на InvalidCharacterError.
+  const pad='='.repeat((4-b64.length%4)%4);
+  const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function currentSub(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg=await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function initPush(el){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    el.classList.add('off'); el.title='Браузер не поддерживает уведомления'; return;
+  }
+  try{ el.classList.toggle('on', !!(await currentSub())); }catch(e){}
+  el.addEventListener('click',async ()=>{
+    try{
+      const sub=await currentSub();
+      if(sub){
+        await fetch('/push/unsubscribe',{...J,method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(subPayload(sub))});
+        await sub.unsubscribe(); el.classList.remove('on'); return;
+      }
+      const kr=await fetch('/push/vapid-public-key', J);
+      if(kr.status===503){ alert('Уведомления не настроены на сервере: нет ключей VAPID.'); return; }
+      if(!kr.ok){ alert('Не удалось получить ключ: '+kr.status); return; }
+      const perm=await Notification.requestPermission();
+      if(perm!=='granted'){ alert('Уведомления запрещены в настройках браузера.'); return; }
+      const reg=await navigator.serviceWorker.ready;
+      const ns=await reg.pushManager.subscribe({userVisibleOnly:true,
+        applicationServerKey:b64ToU8((await kr.json()).key)});
+      const r=await fetch('/push/subscribe',{...J,method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(subPayload(ns))});
+      if(!r.ok){ alert('Сервер не принял подписку: '+r.status); return; }
+      el.classList.add('on');
+      await fetch('/push/test',{...J,method:'POST'});
+    }catch(e){ alert('Не получилось: '+(e&&e.message||e)); }
+  });
+}
+function subPayload(sub){
+  const j=sub.toJSON();
+  return {endpoint:j.endpoint, p256dh:j.keys.p256dh, auth:j.keys.auth,
+          user_agent:(navigator.userAgent||'').slice(0,300)};
+}
+
 /* ─── Service worker ─── */
 // Регистрируем после загрузки, а не в разборе страницы: установка воркера
 // конкурирует с первыми запросами за соединения, и на телефоне это видно.
