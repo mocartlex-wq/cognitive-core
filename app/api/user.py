@@ -95,6 +95,10 @@ async def patch_me(body: UpdateProfileBody, request: Request):
 async def my_rooms(request: Request):
     """Список комнат пользователя — где он владелец ИЛИ участник.
 
+    В каждой строке есть last_message ({text, from_agent, created_at} либо
+    None): без него список строился N запросами /detail — по одному на
+    комнату ради одной строки превью. Порядок — по последней активности.
+
     Возвращает пустой список если таблицы rooms ещё нет (cognitive-rooms.py
     не задеплоен — в этом случае возвращаем 200 + items=[]).
     """
