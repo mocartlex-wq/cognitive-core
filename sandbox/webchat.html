@@ -348,12 +348,10 @@ function isUnread(x){
 // в превью выглядят мусором.
 function previewOf(lm){
   const txt=(lm.text||'')
-    .replace(/\s*@dsdsd/gi,'')
+    .replace(/\s*@dsdsd\b/gi,'')
     .replace(/\(media:[a-f0-9-]{6,}\)/g,'📷')
-    .replace(/[📎🎤📷]\s*[^
-]*\.(png|jpe?g|webp|gif|pdf|webm)/gi,'📷 вложение')
-    .replace(/
-+/g,' ').trim();
+    .replace(/[📎🎤📷]\s*[^\n]*\.(png|jpe?g|webp|gif|pdf|webm)/gi,'📷 вложение')
+    .replace(/\n+/g,' ').trim();
   return (isMe(lm.from_agent)?'Вы: ':'')+(txt||'вложение');
 }
 function renderRoomList(){

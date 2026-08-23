@@ -19,9 +19,16 @@
 from __future__ import annotations
 
 import io
+import json
 import pathlib
+import re
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SW = ROOT / "sandbox" / "sw.js"
@@ -292,3 +299,55 @@ def test_seen_mark_is_set_where_messages_are_shown():
     src = WEBCHAT.read_text(encoding="utf-8")
     paint = src.split("function paint(")[1][:900]
     assert "markSeen(roomId)" in paint
+
+
+# ─── целостность самих файлов ────────────────────────────────────────────────
+
+FRONT = ["webchat.html", "sw.js", "offline.html", "room.html", "home.html"]
+
+
+@pytest.mark.parametrize("name", FRONT)
+def test_no_stray_control_bytes(name):
+    """Управляющий байт в файле — почти всегда испорченное экранирование.
+
+    Поймано на себе 23.08: инструмент записи превратил `\\b` в regexp'е в
+    настоящий байт backspace (0x08). Выражение осталось синтаксически верным,
+    поэтому ни один из 37 тестов не покраснел, а превью перестало вычищать
+    @-адресацию. Тем же путём `\\n` стал переводом строки и порвал regexp
+    пополам — вот это уже ломало разбор всей страницы.
+    """
+    path = ROOT / "sandbox" / name
+    if not path.exists():
+        pytest.skip(f"{name} отсутствует")
+    src = path.read_text(encoding="utf-8")
+    bad = {hex(ord(c)) for c in src if ord(c) < 32 and c not in "\r\n\t"}
+    assert not bad, f"{name}: управляющие байты {sorted(bad)}"
+
+
+@pytest.mark.parametrize("name", ["webchat.html", "sw.js"])
+def test_javascript_actually_parses(name):
+    """Разбор скрипта целиком: единственная проверка, ловящая порванный regexp.
+
+    Без неё синтаксическая ошибка доезжает до прода как белая страница —
+    проверять её на глаз можно только после деплоя.
+    """
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node не установлен")
+    path = ROOT / "sandbox" / name
+    if name.endswith(".js"):
+        r = subprocess.run([node, "--check", str(path)], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=60)
+        assert r.returncode == 0, r.stderr[:500]
+        return
+
+    src = path.read_text(encoding="utf-8")
+    body = "\n;\n".join(re.findall(r"<script[^>]*>(.*?)</script>", src, re.S))
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d) / "bundle.js"
+        # new Function, а не --check: код страницы содержит return верхнего
+        # уровня и вне функции не разбирается.
+        tmp.write_text("new Function(" + json.dumps(body) + ");", encoding="utf-8")
+        r = subprocess.run([node, str(tmp)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60)
+    assert r.returncode == 0, r.stderr[:500]
