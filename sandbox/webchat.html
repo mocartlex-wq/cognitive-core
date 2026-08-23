@@ -79,6 +79,8 @@
   .dots i:nth-child(2){animation-delay:.2s} .dots i:nth-child(3){animation-delay:.4s}
   @keyframes tp{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
   .media-link{color:inherit;text-decoration:underline;font-weight:600;opacity:.95}
+  .media-img{max-width:222px;max-height:290px;border-radius:14px;display:block;margin:2px 0;cursor:pointer;background:rgba(0,0,0,.15)}
+  .daysep{align-self:center;font-size:11px;color:var(--mut);margin:15px 0 7px;font-weight:600}
   .empty{margin:auto;opacity:.45;font-size:14px;text-align:center;padding:0 24px}
 
   /* Композер */
@@ -109,7 +111,11 @@
     background:linear-gradient(135deg,#5e5ce6,#0a84ff)}
   .rmain{flex:1;min-width:0}
   .rname{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rmain>.rtop{display:flex;align-items:baseline;gap:8px}
+  .rname{flex:1;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rtime{flex:0 0 auto;font-size:12px;color:var(--mut)}
   .rlast{font-size:13.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+  .rrow.locked{opacity:.5}
   .rarr{flex:0 0 auto;color:var(--mut);font-size:20px}
 
   /* ── Профиль ── */
@@ -154,6 +160,31 @@
   .app.light #box{background:rgba(0,0,0,.05)}
   .app.light .pcard,.app.light .pgrp{background:rgba(0,0,0,.05)}
   .app.light .rrow:active,.app.light .prow.btn:active{background:rgba(0,0,0,.05)}
+  /* Кнопки в шапках (＋ создать, ⋯ настройки) */
+  .hbtn{flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+    font-size:23px;background:none;border:none;color:var(--sent);cursor:pointer;padding:0}
+  .vhead .spring{flex:1}
+
+  /* ── Шит (настройки комнаты / добавить агента) ── */
+  .sheet{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5)}
+  .sheet.open{display:flex}
+  .sheet-card{width:100%;max-width:820px;background:#1c1c1e;border-radius:18px 18px 0 0;
+    padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 16px);max-height:88vh;overflow-y:auto;
+    animation:slideup .25s cubic-bezier(.2,.9,.3,1.1)}
+  @keyframes slideup{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
+  .app.light .sheet-card{background:#f2f2f7}
+  .sheet-card h3{margin:0 0 12px;font-size:19px}
+  .srow{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:.5px solid var(--hair)}
+  .srow:last-of-type{border-bottom:none}
+  .srow .sn{flex:1;min-width:0}
+  .srow .snm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .ss{font-size:12.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sheet-btn{display:block;width:100%;padding:12px;border-radius:12px;border:none;font-size:15px;
+    font-weight:600;cursor:pointer;font-family:inherit;margin-top:10px;background:rgba(255,255,255,.1);color:var(--ink)}
+  .app.light .sheet-btn{background:rgba(0,0,0,.06)}
+  .sheet-btn.primary{background:var(--sent);color:#fff}
+  .sheet-btn.danger{background:rgba(255,69,58,.15);color:#ff453a}
+
   /* Убираем плавающий ассистент-виджет — приложение само по себе чат */
   #cogasst-fab,#cogasst-panel{display:none!important}
 </style>
@@ -170,7 +201,7 @@
         <div class="ava" id="chatAva">🧠</div>
         <div class="ttl"><b id="chatName">Чат</b><small id="chatStatus">агенты на связи</small></div>
       </div>
-      <span class="hspace"></span>
+      <button class="hbtn" id="roomInfo" title="Настройки комнаты" type="button">⋯</button>
     </header>
     <div id="log"><div class="empty">Загрузка…</div></div>
     <div class="composer">
@@ -184,7 +215,8 @@
 
   <!-- КОМНАТЫ -->
   <section class="view" id="vRooms">
-    <header class="vhead"><b>Комнаты</b></header>
+    <header class="vhead"><b>Комнаты</b><span class="spring"></span>
+      <button class="hbtn" id="newRoom" title="Новая комната" type="button">＋</button></header>
     <div class="rlist" id="rlist"><div class="empty">Загрузка…</div></div>
   </section>
 
@@ -202,20 +234,67 @@
   </nav>
 </div>
 
+<!-- Шит: настройки комнаты / добавить агента -->
+<div class="sheet" id="sheet"><div class="sheet-card" id="sheetCard"></div></div>
+
 <script>
 const app = document.getElementById('app');
 const log = document.getElementById('log');
 const box = document.getElementById('box');
 const send = document.getElementById('send');
-let roomId = null, rooms = [], supportRoomId = null;
+let roomId = null, rooms = [], supportRoomId = null, roomKey = null, liveGen = 0;
 const seen = new Set();
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
 const J = {credentials:'include'};
 const H = s => (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const isMe = a => (a||'').startsWith('owner');
 const initials = s => (s||'?').trim().replace(/^[@#]/,'').slice(0,2).toUpperCase();
-// @dsdsd — служебный маршрут-токен техподдержки: в отображении вырезаем.
-const renderText = s => H((s||'').replace(/\s*@dsdsd\b/gi,'')).replace(/\(media:([a-f0-9-]{6,})\)/g,
-  '<a class="media-link" href="/api/media/info/$1" target="_blank" rel="noopener">открыть ↗</a>');
+const AVAP=['#5e5ce6,#0a84ff','#ff375f,#ff9f0a','#30d158,#0a84ff','#bf5af2,#5e5ce6','#ff9f0a,#ff375f','#64d2ff,#5e5ce6'];
+function colorFor(s){ let h=0; for(const c of (s||'x')) h=(h*31+c.charCodeAt(0))>>>0; return AVAP[h%AVAP.length]; }
+// Текст сообщения: убираем служебный @dsdsd, а маркеры вложений (📎 name (media:id))
+// превращаем в плейсхолдер, который асинхронно гидратируется в картинку/транскрипт/ссылку.
+function renderText(s){
+  let t = H((s||'').replace(/\s*@dsdsd\b/gi,''));
+  t = t.replace(/(?:📎|🎤|📷)?\s*([^\n(]*?)\s*\(media:([a-f0-9-]{6,})\)/g, (m, fname, id)=>
+    `<span class="media" data-media="${id}" data-name="${H((fname||'').trim())}">📎 ${H((fname||'').trim()||'файл')}</span>`);
+  return t;
+}
+// Асинхронная гидратация вложения: картинка инлайн, голос → транскрипт, прочее → ссылка.
+async function hydrateMedia(span){
+  if(span.dataset.h) return; span.dataset.h='1';
+  const id=span.dataset.media, name=span.dataset.name||'';
+  try{
+    const info=await (await fetch('/api/media/info/'+id)).json();
+    if(info.kind==='image' && info.url){
+      span.innerHTML='<img class="media-img" loading="lazy" alt="'+H(name)+'">';
+      const img=span.querySelector('img'); img.src=info.url;
+      img.addEventListener('click',()=>window.open(info.url,'_blank','noopener'));
+    } else if(info.transcript){
+      span.textContent='🎤 «'+info.transcript+'»';
+    } else {
+      span.innerHTML='<a class="media-link" href="'+(info.url||('/api/media/info/'+id))+'" target="_blank" rel="noopener">📎 '+H(name||info.filename||'файл')+' ↗</a>';
+    }
+  }catch(e){}
+}
+// Метка времени над сообщением (день сменился ИЛИ пауза > 15 мин).
+let lastTs=null;
+const MON=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+function fmtSep(d){
+  const now=new Date(), hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  const sameDay=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  const y=new Date(now); y.setDate(now.getDate()-1);
+  if(sameDay(d,now)) return 'Сегодня '+hm;
+  if(sameDay(d,y)) return 'Вчера '+hm;
+  return d.getDate()+' '+MON[d.getMonth()]+' '+hm;
+}
+function fmtShort(iso){
+  if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return '';
+  const now=new Date(), sameDay=d.toDateString()===now.toDateString();
+  if(sameDay) return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  const y=new Date(now); y.setDate(now.getDate()-1);
+  if(d.toDateString()===y.toDateString()) return 'вчера';
+  return d.getDate()+' '+MON[d.getMonth()];
+}
 
 /* ─── Навигация по вкладкам ─── */
 const views = ['vChat','vRooms','vProfile'];
@@ -249,20 +328,40 @@ function renderRoomList(){
   if(!list.length){ el.innerHTML='<div class="empty">У тебя пока нет своих комнат.</div>'; return; }
   el.innerHTML = list.map(x=>
     `<div class="rrow" data-id="${x.id}" data-name="${H(x.name)}">
-       <div class="rav">${H(initials(x.name))}</div>
-       <div class="rmain"><div class="rname">${H(x.name)}</div>
-         <div class="rlast">Открыть чат</div></div>
+       <div class="rav" style="background:linear-gradient(135deg,${colorFor(x.name)})">${H(initials(x.name))}</div>
+       <div class="rmain">
+         <div class="rtop"><span class="rname">${H(x.name)}</span><span class="rtime"></span></div>
+         <div class="rlast">…</div>
+       </div>
        <span class="rarr">›</span>
      </div>`).join('');
   el.querySelectorAll('.rrow').forEach(row=>row.addEventListener('click',()=>{
     openRoom(row.getAttribute('data-id'), row.getAttribute('data-name'));
   }));
+  hydrateRoomPreviews(list);
+}
+// Подтягиваем последнее сообщение + время в каждую строку списка; чужие (403) помечаем.
+async function hydrateRoomPreviews(list){
+  for(const x of list){
+    const row=document.querySelector(`.rrow[data-id="${x.id}"]`); if(!row) continue;
+    const lastEl=row.querySelector('.rlast'), timeEl=row.querySelector('.rtime');
+    try{
+      const r=await fetch(`/user/rooms/${x.id}/detail`, J);
+      if(!r.ok){ row.classList.add('locked'); if(lastEl) lastEl.textContent=(r.status===403?'Недоступна':'Ошибка '+r.status); continue; }
+      const d=await r.json(); const ms=d.messages||[]; const last=ms[ms.length-1];
+      if(last){
+        let txt=(last.text||'').replace(/\s*@dsdsd\b/gi,'').replace(/\(media:[a-f0-9-]{6,}\)/g,'📷').replace(/[📎🎤📷]\s*[^\n]*\.(png|jpe?g|webp|gif|pdf|webm)/gi,'📷 вложение').replace(/\n+/g,' ').trim();
+        if(lastEl) lastEl.textContent=(isMe(last.from_agent)?'Вы: ':'')+(txt||'вложение');
+        if(timeEl) timeEl.textContent=fmtShort(last.created_at);
+      } else if(lastEl) lastEl.textContent='Пока пусто';
+    }catch(e){}
+  }
 }
 // Открыть первую ДОСТУПНУЮ комнату (пропускаем те, что дают 403).
 async function autoOpen(){
   for(const it of realRooms()){
     try{ const r=await fetch(`/user/rooms/${it.id}/detail`, J);
-      if(r.ok){ setRoom(it.id, it.name); paint(await r.json(), true); return; } }catch(e){}
+      if(r.ok){ setRoom(it.id, it.name); roomKey=null; paint(await r.json(), true); startLive(); return; } }catch(e){}
   }
   roomId=null;
   log.innerHTML='<div class="empty">Нет доступных комнат для чтения. Открой свою в «Комнатах».</div>';
@@ -272,10 +371,11 @@ function setRoom(id,name){
   document.getElementById('chatName').textContent=name||'Чат';
   document.getElementById('chatAva').textContent=initials(name);
   document.getElementById('chatStatus').textContent='агенты на связи';
+  const ri=document.getElementById('roomInfo'); if(ri) ri.style.display='';
 }
 async function openRoom(id,name){
-  setRoom(id,name); go('vChat'); seen.clear(); log.innerHTML='<div class="empty">Загрузка…</div>';
-  await refresh(true);
+  setRoom(id,name); go('vChat'); seen.clear(); roomKey=null; log.innerHTML='<div class="empty">Загрузка…</div>';
+  await refresh(true); startLive();
 }
 
 /* ─── Рендер сообщений ─── */
@@ -283,6 +383,13 @@ function lastRow(){ let n=log.lastElementChild; while(n && !n.classList.contains
 function render(m){
   if(seen.has(m.id)) return false;
   seen.add(m.id); hideTyping();
+  const ts=m.created_at?new Date(m.created_at):null;
+  if(ts && !isNaN(ts)){
+    if(!lastTs || (ts-lastTs)>15*60000 || ts.toDateString()!==lastTs.toDateString()){
+      const sep=document.createElement('div'); sep.className='daysep'; sep.textContent=fmtSep(ts); log.appendChild(sep);
+    }
+    lastTs=ts;
+  }
   const mine=isMe(m.from_agent);
   const prev=lastRow();
   const sameSender = prev && prev.dataset.who===m.from_agent;
@@ -293,11 +400,14 @@ function render(m){
   const row=document.createElement('div');
   row.className='row '+(mine?'me':'them')+(sameSender?' grp':''); row.dataset.who=m.from_agent;
   row.innerHTML='<div class="bubble">'+renderText(m.text)+'</div>';
-  log.appendChild(row); return true;
+  log.appendChild(row);
+  row.querySelectorAll('.media[data-media]').forEach(hydrateMedia);
+  return true;
 }
 function paint(d, reset){
-  const msgs=d.messages||[];
-  if(reset){ log.innerHTML=''; seen.clear(); }
+  if(d && d.api_key) roomKey=d.api_key;   // ключ комнаты для live-подписки
+  const msgs=(d&&d.messages)||[];
+  if(reset){ log.innerHTML=''; seen.clear(); lastTs=null; }
   let added=false; msgs.forEach(m=>{ if(render(m)) added=true; });
   if(!log.children.length) log.innerHTML='<div class="empty">Пока пусто — напиши первым</div>';
   if(added||reset) log.scrollTop=log.scrollHeight;
@@ -321,6 +431,24 @@ async function refresh(reset){
                      :'Не удалось загрузить ('+r.status+')')+'</div>'; return; }
     paint(await r.json(), reset);
   }catch(e){}
+}
+// Live-подписка: long-poll /rooms/{id}/wait (PG NOTIFY, sub-second). При ошибке — откат на 4с-poll.
+async function startLive(){
+  const gen = ++liveGen;                    // отменяет прежний цикл при смене комнаты
+  const myRoom = roomId;
+  while(gen===liveGen && roomId===myRoom && roomId){
+    const t0=Date.now(); let ok=false;
+    try{
+      const r = await fetch(`/rooms/${myRoom}/wait?since_seconds=5&timeout=25`,
+        {credentials:'include', headers: roomKey?{'X-Room-Key':roomKey}:{}});
+      ok = r.ok;
+      if(gen!==liveGen || roomId!==myRoom) return;
+      if(r.ok) await refresh(false);
+    }catch(e){ ok=false; }
+    if(gen!==liveGen || roomId!==myRoom) return;
+    if(!ok){ await refresh(false); await sleep(4000); }        // fallback poll
+    else if(Date.now()-t0 < 500) await sleep(500);             // антидребезг busy-loop
+  }
 }
 async function submit(){
   const t=box.value.trim(); if(!t||!roomId) return;
@@ -413,6 +541,7 @@ function buildProfile(u){
        <div><div class="pname">${H(name)}</div><div class="pmeta">${H(email)}${role?' · '+role:''}</div></div>
      </div>
      <div class="pgrp">
+       <div class="prow btn" id="rEditName"><div class="pl"><span class="pic">✏️</span>Изменить имя</div><span class="parr">›</span></div>
        <div class="prow"><div class="pl"><span class="pic">🌙</span>Тёмная тема</div>
          <div class="toggle ${themeOn()?'':'on'}" id="rTheme"></div></div>
        ${installRow}
@@ -452,6 +581,18 @@ function buildProfile(u){
   });
   const rs=document.getElementById('rSupport');
   if(rs) rs.addEventListener('click',openSupport);
+  // Правка имени профиля
+  const re=document.getElementById('rEditName');
+  if(re) re.addEventListener('click',async ()=>{
+    const cur=(lastUser&&(lastUser.display_name||''))||'';
+    const n=prompt('Как тебя показывать?', cur); if(n===null) return;
+    const name=n.trim(); if(!name||name===cur) return;
+    try{
+      const r=await fetch('/user/me',{...J,method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({display_name:name})});
+      if(!r.ok){ alert('Не удалось сохранить ('+r.status+')'); return; }
+      if(lastUser) lastUser.display_name=name; buildProfile(lastUser);
+    }catch(e){ alert('Ошибка: '+(e&&e.message||e)); }
+  });
 }
 
 /* ─── Техподдержка: отдельная ветка-диалог со мной (не мешается в основной чат) ─── */
@@ -472,16 +613,103 @@ async function openSupport(){
   setRoom(id,'🛟 Техподдержка');
   document.getElementById('chatAva').textContent='🛟';
   document.getElementById('chatStatus').textContent='техподдержка · отвечу здесь';
-  go('vChat'); seen.clear(); log.innerHTML='<div class="empty">Напиши сообщение — можно со скринами (📎). Это отдельная ветка, отвечу здесь.</div>';
-  await refresh(true);
+  const ri=document.getElementById('roomInfo'); if(ri) ri.style.display='none';
+  go('vChat'); seen.clear(); roomKey=null; log.innerHTML='<div class="empty">Напиши сообщение — можно со скринами (📎). Это отдельная ветка, отвечу здесь.</div>';
+  await refresh(true); startLive();
 }
 window.addEventListener('appinstalled',()=>{ buildProfile(lastUser); });
+
+/* ─── Управление комнатами (создание, настройки, участники) ─── */
+const sheet=document.getElementById('sheet'), sheetCard=document.getElementById('sheetCard');
+function openSheet(html){ sheetCard.innerHTML=html; sheet.classList.add('open'); }
+function closeSheet(){ sheet.classList.remove('open'); }
+sheet.addEventListener('click',e=>{ if(e.target===sheet) closeSheet(); });
+
+document.getElementById('newRoom').addEventListener('click',async ()=>{
+  const n=prompt('Название комнаты'); if(n===null) return; const name=n.trim(); if(!name) return;
+  try{
+    const r=await fetch('/user/rooms',{...J,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    if(!r.ok){ alert('Не удалось создать ('+r.status+')'); return; }
+    const d=await r.json(); rooms.push({id:d.id,name:d.name,is_owner:true}); renderRoomList(); openRoom(d.id,d.name);
+  }catch(e){ alert('Ошибка: '+(e&&e.message||e)); }
+});
+document.getElementById('roomInfo').addEventListener('click',()=>{ if(roomId) openRoomSettings(roomId); });
+
+async function openRoomSettings(id){
+  openSheet('<h3>Настройки комнаты</h3><div class="ss" style="padding:16px 4px">Загрузка…</div>');
+  let d; try{ const r=await fetch(`/user/rooms/${id}/detail`,J);
+    if(!r.ok){ openSheet('<h3>Настройки</h3><div class="ss" style="padding:12px 4px">Недоступно ('+r.status+')</div><button class="sheet-btn" id="stClose">Закрыть</button>'); document.getElementById('stClose').onclick=closeSheet; return; }
+    d=await r.json();
+  }catch(e){ closeSheet(); return; }
+  const parts=(d.participants||[]);
+  const av=(nm)=>`<div class="rav" style="width:36px;height:36px;font-size:13px;background:linear-gradient(135deg,${colorFor(nm)})">${H(initials(nm))}</div>`;
+  const partHtml = parts.length ? parts.map(p=>{ const nm=p.display_name||p.agent_id;
+    return `<div class="srow">${av(nm)}<div class="sn"><div class="snm">${H(nm)}</div>
+      <div class="ss">${p.auto_respond?'отвечает автоматически':'ручной режим'}</div></div>
+      <div class="toggle ${p.auto_respond?'on':''}" data-ar="${H(p.agent_id)}"></div></div>`; }).join('')
+    : '<div class="ss" style="padding:8px 4px">Пока нет агентов-участников</div>';
+  openSheet(
+    '<h3>'+H(d.name||'Комната')+'</h3>'+
+    '<button class="sheet-btn" id="stRename">✏️ Переименовать</button>'+
+    '<div style="margin:16px 0 4px;font-size:13px;color:var(--mut)">Участники</div>'+partHtml+
+    '<button class="sheet-btn" id="stAddAgent">＋ Добавить агента</button>'+
+    '<button class="sheet-btn danger" id="stDelete">Удалить комнату</button>'+
+    '<button class="sheet-btn" id="stClose">Закрыть</button>');
+  document.getElementById('stClose').onclick=closeSheet;
+  sheetCard.querySelectorAll('.toggle[data-ar]').forEach(t=>t.addEventListener('click',async ()=>{
+    const aid=t.getAttribute('data-ar'), on=!t.classList.contains('on'); t.classList.toggle('on',on);
+    try{ const r=await fetch(`/user/rooms/${id}/participants/${encodeURIComponent(aid)}/auto-respond`,
+      {...J,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:on})});
+      if(!r.ok) throw 0; }catch(e){ t.classList.toggle('on',!on); }
+  }));
+  document.getElementById('stRename').onclick=async ()=>{
+    const n=prompt('Новое название', d.name||''); if(n===null) return; const name=n.trim(); if(!name||name===d.name) return;
+    try{ const r=await fetch(`/user/rooms/${id}`,{...J,method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+      if(!r.ok){ alert('Не удалось ('+r.status+')'); return; }
+      const rm=rooms.find(x=>x.id===id); if(rm) rm.name=name;
+      if(roomId===id) document.getElementById('chatName').textContent=name;
+      renderRoomList(); openRoomSettings(id);
+    }catch(e){}
+  };
+  document.getElementById('stDelete').onclick=async ()=>{
+    if(!confirm('Удалить комнату «'+(d.name||'')+'» со всеми сообщениями?')) return;
+    try{ const r=await fetch(`/user/rooms/${id}`,{...J,method:'DELETE'});
+      if(!r.ok){ alert('Не удалось ('+r.status+')'); return; }
+      rooms=rooms.filter(x=>x.id!==id); closeSheet(); renderRoomList();
+      if(roomId===id){ roomId=null; liveGen++; go('vRooms'); }
+    }catch(e){}
+  };
+  document.getElementById('stAddAgent').onclick=()=>openAddAgent(id, parts.map(p=>p.agent_id));
+}
+
+async function openAddAgent(id, existing){
+  openSheet('<h3>Добавить агента</h3><div class="ss" style="padding:16px 4px">Загрузка…</div>');
+  let items=[]; try{ const r=await fetch('/user/agents',J); const d=await r.json();
+    items=(d.items||[]).filter(a=>a.status!=='pending_claim'); }catch(e){}
+  const ex=new Set(existing||[]);
+  const avail=items.filter(a=>!ex.has(a.agent_id));
+  const list = avail.length ? avail.map(a=>{ const nm=a.agent_label||a.agent_id;
+    return `<div class="srow" data-add="${H(a.agent_id)}" style="cursor:pointer">
+      <div class="rav" style="width:36px;height:36px;font-size:13px;background:linear-gradient(135deg,${colorFor(nm)})">${H(initials(nm))}</div>
+      <div class="sn"><div class="snm">${H(nm)}</div><div class="ss">${a.mcp_online?'🟢 онлайн':'офлайн'} · ${H(a.agent_id)}</div></div>
+      <span class="rarr">＋</span></div>`; }).join('')
+    : '<div class="ss" style="padding:10px 4px">Нет свободных агентов для добавления</div>';
+  openSheet('<h3>Добавить агента</h3>'+list+'<button class="sheet-btn" id="aaBack">Назад</button>');
+  document.getElementById('aaBack').onclick=()=>openRoomSettings(id);
+  sheetCard.querySelectorAll('[data-add]').forEach(el=>el.addEventListener('click',async ()=>{
+    const aid=el.getAttribute('data-add');
+    try{ const r=await fetch(`/user/rooms/${id}/participants/${encodeURIComponent(aid)}`,{...J,method:'POST'});
+      if(!r.ok){ alert('Не удалось ('+r.status+')'); return; } }catch(e){}
+    openRoomSettings(id);
+  }));
+}
 
 /* ─── Старт ─── */
 applyTheme();
 loadRooms();
 loadProfile();
-setInterval(()=>{ if(document.getElementById('vChat').classList.contains('active')) refresh(false); }, 4000);
+// Живая доставка идёт через startLive() (long-poll). Лёгкий страховочный refresh раз в 20с.
+setInterval(()=>{ if(roomId && document.getElementById('vChat').classList.contains('active')) refresh(false); }, 20000);
 </script>
 </body>
 </html>
