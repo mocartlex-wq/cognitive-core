@@ -160,6 +160,31 @@
   .app.light #box{background:rgba(0,0,0,.05)}
   .app.light .pcard,.app.light .pgrp{background:rgba(0,0,0,.05)}
   .app.light .rrow:active,.app.light .prow.btn:active{background:rgba(0,0,0,.05)}
+  /* Кнопки в шапках (＋ создать, ⋯ настройки) */
+  .hbtn{flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+    font-size:23px;background:none;border:none;color:var(--sent);cursor:pointer;padding:0}
+  .vhead .spring{flex:1}
+
+  /* ── Шит (настройки комнаты / добавить агента) ── */
+  .sheet{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5)}
+  .sheet.open{display:flex}
+  .sheet-card{width:100%;max-width:820px;background:#1c1c1e;border-radius:18px 18px 0 0;
+    padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 16px);max-height:88vh;overflow-y:auto;
+    animation:slideup .25s cubic-bezier(.2,.9,.3,1.1)}
+  @keyframes slideup{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
+  .app.light .sheet-card{background:#f2f2f7}
+  .sheet-card h3{margin:0 0 12px;font-size:19px}
+  .srow{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:.5px solid var(--hair)}
+  .srow:last-of-type{border-bottom:none}
+  .srow .sn{flex:1;min-width:0}
+  .srow .snm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .ss{font-size:12.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sheet-btn{display:block;width:100%;padding:12px;border-radius:12px;border:none;font-size:15px;
+    font-weight:600;cursor:pointer;font-family:inherit;margin-top:10px;background:rgba(255,255,255,.1);color:var(--ink)}
+  .app.light .sheet-btn{background:rgba(0,0,0,.06)}
+  .sheet-btn.primary{background:var(--sent);color:#fff}
+  .sheet-btn.danger{background:rgba(255,69,58,.15);color:#ff453a}
+
   /* Убираем плавающий ассистент-виджет — приложение само по себе чат */
   #cogasst-fab,#cogasst-panel{display:none!important}
 </style>
@@ -176,7 +201,7 @@
         <div class="ava" id="chatAva">🧠</div>
         <div class="ttl"><b id="chatName">Чат</b><small id="chatStatus">агенты на связи</small></div>
       </div>
-      <span class="hspace"></span>
+      <button class="hbtn" id="roomInfo" title="Настройки комнаты" type="button">⋯</button>
     </header>
     <div id="log"><div class="empty">Загрузка…</div></div>
     <div class="composer">
@@ -190,7 +215,8 @@
 
   <!-- КОМНАТЫ -->
   <section class="view" id="vRooms">
-    <header class="vhead"><b>Комнаты</b></header>
+    <header class="vhead"><b>Комнаты</b><span class="spring"></span>
+      <button class="hbtn" id="newRoom" title="Новая комната" type="button">＋</button></header>
     <div class="rlist" id="rlist"><div class="empty">Загрузка…</div></div>
   </section>
 
@@ -207,6 +233,9 @@
     <button class="tab" data-v="vProfile" type="button">⚙️<span>Профиль</span></button>
   </nav>
 </div>
+
+<!-- Шит: настройки комнаты / добавить агента -->
+<div class="sheet" id="sheet"><div class="sheet-card" id="sheetCard"></div></div>
 
 <script>
 const app = document.getElementById('app');
@@ -342,6 +371,7 @@ function setRoom(id,name){
   document.getElementById('chatName').textContent=name||'Чат';
   document.getElementById('chatAva').textContent=initials(name);
   document.getElementById('chatStatus').textContent='агенты на связи';
+  const ri=document.getElementById('roomInfo'); if(ri) ri.style.display='';
 }
 async function openRoom(id,name){
   setRoom(id,name); go('vChat'); seen.clear(); roomKey=null; log.innerHTML='<div class="empty">Загрузка…</div>';
@@ -583,10 +613,96 @@ async function openSupport(){
   setRoom(id,'🛟 Техподдержка');
   document.getElementById('chatAva').textContent='🛟';
   document.getElementById('chatStatus').textContent='техподдержка · отвечу здесь';
+  const ri=document.getElementById('roomInfo'); if(ri) ri.style.display='none';
   go('vChat'); seen.clear(); roomKey=null; log.innerHTML='<div class="empty">Напиши сообщение — можно со скринами (📎). Это отдельная ветка, отвечу здесь.</div>';
   await refresh(true); startLive();
 }
 window.addEventListener('appinstalled',()=>{ buildProfile(lastUser); });
+
+/* ─── Управление комнатами (создание, настройки, участники) ─── */
+const sheet=document.getElementById('sheet'), sheetCard=document.getElementById('sheetCard');
+function openSheet(html){ sheetCard.innerHTML=html; sheet.classList.add('open'); }
+function closeSheet(){ sheet.classList.remove('open'); }
+sheet.addEventListener('click',e=>{ if(e.target===sheet) closeSheet(); });
+
+document.getElementById('newRoom').addEventListener('click',async ()=>{
+  const n=prompt('Название комнаты'); if(n===null) return; const name=n.trim(); if(!name) return;
+  try{
+    const r=await fetch('/user/rooms',{...J,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    if(!r.ok){ alert('Не удалось создать ('+r.status+')'); return; }
+    const d=await r.json(); rooms.push({id:d.id,name:d.name,is_owner:true}); renderRoomList(); openRoom(d.id,d.name);
+  }catch(e){ alert('Ошибка: '+(e&&e.message||e)); }
+});
+document.getElementById('roomInfo').addEventListener('click',()=>{ if(roomId) openRoomSettings(roomId); });
+
+async function openRoomSettings(id){
+  openSheet('<h3>Настройки комнаты</h3><div class="ss" style="padding:16px 4px">Загрузка…</div>');
+  let d; try{ const r=await fetch(`/user/rooms/${id}/detail`,J);
+    if(!r.ok){ openSheet('<h3>Настройки</h3><div class="ss" style="padding:12px 4px">Недоступно ('+r.status+')</div><button class="sheet-btn" id="stClose">Закрыть</button>'); document.getElementById('stClose').onclick=closeSheet; return; }
+    d=await r.json();
+  }catch(e){ closeSheet(); return; }
+  const parts=(d.participants||[]);
+  const av=(nm)=>`<div class="rav" style="width:36px;height:36px;font-size:13px;background:linear-gradient(135deg,${colorFor(nm)})">${H(initials(nm))}</div>`;
+  const partHtml = parts.length ? parts.map(p=>{ const nm=p.display_name||p.agent_id;
+    return `<div class="srow">${av(nm)}<div class="sn"><div class="snm">${H(nm)}</div>
+      <div class="ss">${p.auto_respond?'отвечает автоматически':'ручной режим'}</div></div>
+      <div class="toggle ${p.auto_respond?'on':''}" data-ar="${H(p.agent_id)}"></div></div>`; }).join('')
+    : '<div class="ss" style="padding:8px 4px">Пока нет агентов-участников</div>';
+  openSheet(
+    '<h3>'+H(d.name||'Комната')+'</h3>'+
+    '<button class="sheet-btn" id="stRename">✏️ Переименовать</button>'+
+    '<div style="margin:16px 0 4px;font-size:13px;color:var(--mut)">Участники</div>'+partHtml+
+    '<button class="sheet-btn" id="stAddAgent">＋ Добавить агента</button>'+
+    '<button class="sheet-btn danger" id="stDelete">Удалить комнату</button>'+
+    '<button class="sheet-btn" id="stClose">Закрыть</button>');
+  document.getElementById('stClose').onclick=closeSheet;
+  sheetCard.querySelectorAll('.toggle[data-ar]').forEach(t=>t.addEventListener('click',async ()=>{
+    const aid=t.getAttribute('data-ar'), on=!t.classList.contains('on'); t.classList.toggle('on',on);
+    try{ const r=await fetch(`/user/rooms/${id}/participants/${encodeURIComponent(aid)}/auto-respond`,
+      {...J,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:on})});
+      if(!r.ok) throw 0; }catch(e){ t.classList.toggle('on',!on); }
+  }));
+  document.getElementById('stRename').onclick=async ()=>{
+    const n=prompt('Новое название', d.name||''); if(n===null) return; const name=n.trim(); if(!name||name===d.name) return;
+    try{ const r=await fetch(`/user/rooms/${id}`,{...J,method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+      if(!r.ok){ alert('Не удалось ('+r.status+')'); return; }
+      const rm=rooms.find(x=>x.id===id); if(rm) rm.name=name;
+      if(roomId===id) document.getElementById('chatName').textContent=name;
+      renderRoomList(); openRoomSettings(id);
+    }catch(e){}
+  };
+  document.getElementById('stDelete').onclick=async ()=>{
+    if(!confirm('Удалить комнату «'+(d.name||'')+'» со всеми сообщениями?')) return;
+    try{ const r=await fetch(`/user/rooms/${id}`,{...J,method:'DELETE'});
+      if(!r.ok){ alert('Не удалось ('+r.status+')'); return; }
+      rooms=rooms.filter(x=>x.id!==id); closeSheet(); renderRoomList();
+      if(roomId===id){ roomId=null; liveGen++; go('vRooms'); }
+    }catch(e){}
+  };
+  document.getElementById('stAddAgent').onclick=()=>openAddAgent(id, parts.map(p=>p.agent_id));
+}
+
+async function openAddAgent(id, existing){
+  openSheet('<h3>Добавить агента</h3><div class="ss" style="padding:16px 4px">Загрузка…</div>');
+  let items=[]; try{ const r=await fetch('/user/agents',J); const d=await r.json();
+    items=(d.items||[]).filter(a=>a.status!=='pending_claim'); }catch(e){}
+  const ex=new Set(existing||[]);
+  const avail=items.filter(a=>!ex.has(a.agent_id));
+  const list = avail.length ? avail.map(a=>{ const nm=a.agent_label||a.agent_id;
+    return `<div class="srow" data-add="${H(a.agent_id)}" style="cursor:pointer">
+      <div class="rav" style="width:36px;height:36px;font-size:13px;background:linear-gradient(135deg,${colorFor(nm)})">${H(initials(nm))}</div>
+      <div class="sn"><div class="snm">${H(nm)}</div><div class="ss">${a.mcp_online?'🟢 онлайн':'офлайн'} · ${H(a.agent_id)}</div></div>
+      <span class="rarr">＋</span></div>`; }).join('')
+    : '<div class="ss" style="padding:10px 4px">Нет свободных агентов для добавления</div>';
+  openSheet('<h3>Добавить агента</h3>'+list+'<button class="sheet-btn" id="aaBack">Назад</button>');
+  document.getElementById('aaBack').onclick=()=>openRoomSettings(id);
+  sheetCard.querySelectorAll('[data-add]').forEach(el=>el.addEventListener('click',async ()=>{
+    const aid=el.getAttribute('data-add');
+    try{ const r=await fetch(`/user/rooms/${id}/participants/${encodeURIComponent(aid)}`,{...J,method:'POST'});
+      if(!r.ok){ alert('Не удалось ('+r.status+')'); return; } }catch(e){}
+    openRoomSettings(id);
+  }));
+}
 
 /* ─── Старт ─── */
 applyTheme();
