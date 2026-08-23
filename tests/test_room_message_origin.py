@@ -92,3 +92,36 @@ def test_absent_mark_is_not_claimed_as_live():
     src = _source(ROOMS)
     assert '"live"' not in src.split("def post_message")[1][:900]
     assert 'or "live"' not in src
+
+
+def test_ui_shows_the_mark_where_the_confusion_happened():
+    """Пометка обязана быть в шапке сообщения, рядом с именем.
+
+    Именно там читатель решает, чьё это слово. В JSON её достаточно для
+    разбора постфактум, но 16.08 обязательство приняли за слово агента,
+    ЧИТАЯ ленту — значит и различать надо в ленте.
+
+    Проверено в браузере на стенде, собранном из настоящего кода страницы:
+    у реплик с origin=standin значок есть, у остальных нет, подсказка несёт
+    имя модели, переполнения шапки нет ни на 393px, ни на 320px.
+    """
+    ui = (pathlib.Path(__file__).resolve().parent.parent / "sandbox" / "room.html")
+    src = ui.read_text(encoding="utf-8")
+    block = src.split("function messagesHtml")[1][:1600]
+    assert "originBadge" in block, "значок не рисуется в ленте"
+    assert "m.origin === 'standin'" in block, (
+        "значок вешается не по происхождению — либо не на том условии"
+    )
+    assert "origin_model" in block, "в подсказке нет модели: «заместитель» и «DeepSeek» — разные факты"
+    assert ".chip-standin" in src, "нет стиля: значок сольётся с обычными чипами"
+
+
+def test_ui_does_not_invent_a_live_badge():
+    """Обратной пометки быть не должно.
+
+    Нарисовав «живая сессия» там, где просто нет метки, мы выдали бы
+    предположение за факт — и повторили бы ошибку live_agent_active.
+    """
+    ui = (pathlib.Path(__file__).resolve().parent.parent / "sandbox" / "room.html")
+    block = ui.read_text(encoding="utf-8").split("function messagesHtml")[1][:1600]
+    assert "живая сессия<" not in block and "chip-live" not in block
