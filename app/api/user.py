@@ -383,7 +383,13 @@ async def get_my_room_detail(room_id: str, request: Request):
             mrows = await conn.fetch(
                 """
                 SELECT m.id::text AS id, m.from_agent, m.text, m.created_at,
-                       s.agent_label
+                       s.agent_label,
+                       -- Происхождение реплики. Владельческая страница читает
+                       -- сообщения ЭТИМ запросом, а не через rooms-сервис —
+                       -- поля надо добавлять в обоих местах, иначе пометка
+                       -- пишется, отдаётся сервисом и не доезжает до экрана,
+                       -- на который смотрит человек.
+                       m.metadata
                   FROM room_messages m
                   LEFT JOIN agent_states s ON s.agent_id = m.from_agent
                  WHERE m.room_id = $1::uuid
@@ -400,6 +406,15 @@ async def get_my_room_detail(room_id: str, request: Request):
                 # (фронт сам форматирует «Вы (email)»), для агентов — красивое имя.
                 fa = d.get("from_agent") or ""
                 d["display_name"] = d.get("agent_label") or fa
+                meta = d.pop("metadata", None) or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except (ValueError, TypeError):
+                        meta = {}
+                # Пусто = «не помечено», а не «живая сессия».
+                d["origin"] = meta.get("origin")
+                d["origin_model"] = meta.get("model")
                 messages.append(d)
         except Exception as e:
             logger.info("room_detail messages_skip room=%s err=%s", room_id, e)

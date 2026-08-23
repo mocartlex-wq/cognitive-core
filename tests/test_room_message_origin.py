@@ -125,3 +125,30 @@ def test_ui_does_not_invent_a_live_badge():
     ui = (pathlib.Path(__file__).resolve().parent.parent / "sandbox" / "room.html")
     block = ui.read_text(encoding="utf-8").split("function messagesHtml")[1][:1600]
     assert "живая сессия<" not in block and "chip-live" not in block
+
+
+def test_owner_path_also_carries_origin():
+    """Владельческая страница читает сообщения СВОИМ запросом.
+
+    Найдено проверкой в браузере под живой сессией владельца 17.08: пометка
+    писалась rooms-сервисом и им же отдавалась, но `sandbox/room.html` ходит
+    в `/user/rooms/{id}/detail` (`app/api/user.py`) — там отдельный SELECT, и
+    происхождение до экрана не доезжало.
+
+    Классика двух источников одной правды: правку внесли в одном месте, а
+    смотрят в другое. Ровно так же расходились CREATE_TABLES_SQL и миграция.
+    """
+    user_api = (pathlib.Path(__file__).resolve().parent.parent / "app" / "api" / "user.py")
+    src = user_api.read_text(encoding="utf-8")
+    block = src.split("mrows = await conn.fetch")[1][:2200]
+    assert "m.metadata" in block, "владельческий SELECT не забирает происхождение"
+    assert '"origin"' in block, "происхождение не попадает в ответ владельческого пути"
+
+
+def test_both_read_paths_agree_on_field_names():
+    """Имена полей обязаны совпадать: фронт один, читает и то и другое."""
+    rooms = _source(ROOMS)
+    user_api = (pathlib.Path(__file__).resolve().parent.parent / "app" / "api" / "user.py")
+    for field in ('"origin"', '"origin_model"'):
+        assert field in rooms, f"{field} нет в rooms-сервисе"
+        assert field in user_api.read_text(encoding="utf-8"), f"{field} нет во владельческом пути"
