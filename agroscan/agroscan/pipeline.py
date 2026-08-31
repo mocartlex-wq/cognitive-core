@@ -17,12 +17,13 @@ from . import zones as z
 from . import cache as cache_mod
 from .geo import Grid
 from .rings import rasterize, vectorize
-from .sources import canopy, sentinel
+from .sources import canopy, dem as dem_src, landcover, landsat, sentinel
 
 def _say(t0, msg):
     print('[%5.1f с] %s' % (time.time() - t0, msg), flush=True)
 
-def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=False):
+def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=False,
+        appendices=True):
     t0 = time.time()
     cfg = cfg_mod.load(cfg_path)
     out = out_dir or os.path.join(cfg['_dir'], '..', 'out', cfg['kn'].replace(':', '-'))
@@ -58,20 +59,29 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                          cloud=cfg['sentinel']['max_cloud'], n=cfg['sentinel']['scenes'])
     cached = None if no_cache else cache_mod.get_json(k_s2)
     ix, used = {}, []
+    bands = {}
     if cached:
         used = cached['used']
         ix = {n: cache_mod.get_array(k_s2 + '_' + n) for n in cached['indices']}
         ix = {n: v for n, v in ix.items() if v is not None}
-    if not ix:
+        bands = {n: cache_mod.get_array(k_s2 + '_b_' + n) for n in cached.get('bands', [])}
+        bands = {n: v for n, v in bands.items() if v is not None}
+    # каналы нужны не только для индексов, но и для ИК-композитов приложения:
+    # запись в кэше без них — повод перезагрузить, иначе лист молча пропадёт
+    if not ix or not bands:
         sc = sentinel.search(bbox, '%d-%s' % (year, cfg['sentinel']['start']),
                              '%d-%s' % (year, cfg['sentinel']['end']),
                              cfg['sentinel']['max_cloud'])
         comp, used = sentinel.composite(gd, sc, limit=cfg['sentinel']['scenes'])
         ix = sentinel.indices(comp) if comp else {}
+        bands = comp or {}
         if ix:
             for n, v in ix.items():
                 cache_mod.put_array(k_s2 + '_' + n, v)
-            cache_mod.put_json(k_s2, {'used': used, 'indices': sorted(ix)})
+            for n, v in bands.items():
+                cache_mod.put_array(k_s2 + '_b_' + n, v)
+            cache_mod.put_json(k_s2, {'used': used, 'indices': sorted(ix),
+                                      'bands': sorted(bands)})
     _say(t0, 'Sentinel-2: композит из %d сцен%s%s' % (len(used), ' (из кэша)' if cached else '',
          ', NDMI медиана %.3f' % np.nanmedian(ix['ndmi'][gd.submask(mask)]) if ix else ''))
 
@@ -196,6 +206,108 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                       cfg['egrn_ha'], json.load(open(os.path.join(out, 'result.json'))),
                       cfg.get('place', ''), cfg.get('zone_name', cfg['zone']))
         _say(t0, 'пояснительная записка собрана')
+    # ── приложения: обоснование принятых решений ───────────────────────
+    if appendices and cfg.get('appendices', True):
+        want = cfg.get('appendices', True)
+        want = ('relief', 'dynamics', 'ir') if want in (True, None) else tuple(want)
+        from .sheets import relief as sh_relief, dynamics as sh_dyn, ir as sh_ir
+
+        if 'relief' in want:
+            try:
+                from . import relief as relief_mod
+                k_dem = cache_mod.key('dem', bbox=bbox, step=4, shape=Grid(meta, cfg['zone'], 4).shape)
+                dm = None if no_cache else cache_mod.get_array(k_dem)
+                tiles = []
+                if dm is None:
+                    dm, tiles = dem_src.sample(Grid(meta, cfg['zone'], step=4))
+                    if dm is not None:
+                        cache_mod.put_array(k_dem, dm)
+                if dm is None:
+                    _say(t0, 'рельеф: покрытия DEM нет, лист пропущен')
+                else:
+                    D = np.repeat(np.repeat(dm, 4, 0), 4, 1)[:meta['H'], :meta['W']]
+                    rel = relief_mod.analyze(D, mask, mpp)
+                    sh_relief.build(os.path.join(out, 'Приложение_рельеф.pdf'), cfg['kn'], rings,
+                                    rel, cfg['egrn_ha'], meta, cfg_mod.path_of(cfg, 'image'))
+                    json.dump({'stats': rel['stats'], 'формы': rel['формы'], 'тайлы': tiles},
+                              open(os.path.join(out, 'relief.json'), 'w'), ensure_ascii=False, indent=1)
+                    _say(t0, 'рельеф: уклон медиана %.1f°, форм %d, оврагов %d, к исключению %.2f га'
+                         % (rel['stats']['уклон_медиана'], rel['stats']['форм_найдено'],
+                            rel['stats']['оврагов'], rel['stats']['исключается_га']))
+            except Exception as e:
+                _say(t0, 'рельеф: лист пропущен (%s)' % str(e)[:70])
+
+        if 'dynamics' in want:
+            try:
+                from . import timeseries as ts_mod
+                gs = Grid(meta, cfg['zone'], step=8)
+                # С 1999 года — КАЖДЫЙ год, без прореживания. Шаг в два года
+                # пропустил 2010-й и сдвинул дату выбытия с 2011 на 2002:
+                # ответ листа зависит от того, какие годы попали в выборку,
+                # поэтому экономить на них нельзя.
+                yy = cfg.get('landsat_years') or (
+                    [1977, 1985, 1990, 1995] + list(range(1999, year + 1)))
+                cdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    'cache', 'landsat', cfg['kn'].replace(':', '-'))
+                ser, _ = landsat.ndvi_series(gs, yy, cdir, verbose=False)
+                # ряд считается по зарастающей части, а не по всему участку:
+                # на :74 три четверти площади — действующая пашня, летом она
+                # зелёная, пар в статистике тонет, и дата выбытия не находится
+                grow = np.zeros_like(mask)
+                for k in ('1', '2'):
+                    if k in res:
+                        grow |= rasterize(res[k]['outer'], grid, res[k]['inner'])
+                grow &= mask
+                m8 = gs.submask(grow if grow.sum() > 0.05 * mask.sum() else mask)
+                scope = ('зарастающая часть %.1f га' % (grow.sum() * mpp * mpp / 1e4)
+                         if grow.sum() > 0.05 * mask.sum() else 'весь участок')
+                if len(ser) < 4:
+                    _say(t0, 'динамика: сцен Landsat %d — мало, лист пропущен' % len(ser))
+                else:
+                    ts = ts_mod.summary(ser, m8, gs.cellHa, this_year=year,
+                                        edge_m=30.0, cell_m=meta['mpp'] * gs.step)
+                    lc, tnames = landcover.sample(gs)
+                    extra = []
+                    wc = lc.get('worldcover')
+                    if wc is not None:
+                        tree = np.isin(np.nan_to_num(wc).astype(int), [10, 20]) & m8
+                        extra.append(('ESA WorldCover 2021, древесная',
+                                      '%.2f га' % (tree.sum() * gs.cellHa),
+                                      'тайл ' + tnames['тайл_worldcover']))
+                    own = sum(res[k]['areaHa'] for k in ('1', '4') if k in res)
+                    extra.append(('Наш расчёт, древесная', '%.2f га' % own, ''))
+                    hs = lc.get('hansen_treecover2000')
+                    if hs is not None:
+                        extra.append(('Hansen GFC, покров крон 2000 г.',
+                                      '%d %% ≥ 25 %%' % (100 * ((np.nan_to_num(hs) >= 25) & m8).sum()
+                                                         // max(m8.sum(), 1)),
+                                      'тайл ' + tnames['тайл_hansen']))
+                    if chm is not None:
+                        cs = gs.submask(chm_f) if chm_f is not None else None
+                        if cs is not None:
+                            v = cs[m8 & np.isfinite(cs)]
+                            if len(v):
+                                extra.append(('Высота полога, медиана', '%.0f м' % np.median(v),
+                                              'Meta/WRI Canopy Height, ~1 м'))
+                    sh_dyn.build(os.path.join(out, 'Приложение_динамика.pdf'), cfg['kn'], rings,
+                                 meta, ser, ts, cfg['egrn_ha'], extra, scope=scope)
+                    json.dump(ts, open(os.path.join(out, 'timeseries.json'), 'w'),
+                              ensure_ascii=False, indent=1)
+                    _say(t0, 'динамика (%s): сцен %d, год выбытия %s, возраст %s лет'
+                         % (scope, len(ser), ts['год_выбытия'],
+                            ts.get('возраст_зарастания_лет', '—')))
+            except Exception as e:
+                _say(t0, 'динамика: лист пропущен (%s)' % str(e)[:70])
+
+        if 'ir' in want and bands:
+            try:
+                pr = {k: v['outer'] for k, v in res.items()}
+                if sh_ir.build(os.path.join(out, 'Приложение_ИК.pdf'), cfg['kn'], rings, meta,
+                               bands, cfg['egrn_ha'], pr, used):
+                    _say(t0, 'ИК-материалы: композиты из каналов Sentinel-2')
+            except Exception as e:
+                _say(t0, 'ИК-материалы: лист пропущен (%s)' % str(e)[:70])
+
     if formats:
         from . import export
         made = export.all_formats(out, cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'],

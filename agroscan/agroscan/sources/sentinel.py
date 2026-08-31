@@ -32,7 +32,8 @@ def search(bbox, start, end, max_cloud=25, limit=40):
     d = json.loads(subprocess.run(cmd, capture_output=True, check=True).stdout)
     return sorted(d.get('features', []), key=lambda x: x['properties']['eo:cloud_cover'])
 
-def composite(grid, scenes, bands=('red', 'green', 'blue', 'nir', 'rededge1', 'swir16'),
+def composite(grid, scenes, bands=('red', 'green', 'blue', 'nir', 'rededge1',
+                                   'swir16', 'swir22'),
               limit=8, verbose=True):
     """Медианный композит по сценам с маскированием по SCL.
 
