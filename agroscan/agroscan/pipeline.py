@@ -17,7 +17,7 @@ from . import zones as z
 from . import cache as cache_mod
 from .geo import Grid
 from .rings import rasterize, vectorize
-from .sources import canopy, dem as dem_src, landcover, landsat, sentinel
+from .sources import canopy, dem as dem_src, landcover, landsat, sentinel, soil as soil_src
 
 def _say(t0, msg):
     print('[%5.1f с] %s' % (time.time() - t0, msg), flush=True)
@@ -209,7 +209,7 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     # ── приложения: обоснование принятых решений ───────────────────────
     if appendices and cfg.get('appendices', True):
         want = cfg.get('appendices', True)
-        want = ('relief', 'dynamics', 'ir') if want in (True, None) else tuple(want)
+        want = ('relief', 'dynamics', 'ir', 'soil') if want in (True, None) else tuple(want)
         from .sheets import relief as sh_relief, dynamics as sh_dyn, ir as sh_ir
 
         if 'relief' in want:
@@ -298,6 +298,45 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                             ts.get('возраст_зарастания_лет', '—')))
             except Exception as e:
                 _say(t0, 'динамика: лист пропущен (%s)' % str(e)[:70])
+
+        if 'soil' in want:
+            try:
+                # точки берём внутри маски участка: одна ячейка SoilGrids — 250 м,
+                # по центру и краям значения расходятся на несколько процентов
+                ys, xs = np.nonzero(mask[::16, ::16])
+                pts = []
+                if len(ys):
+                    idx = np.linspace(0, len(ys) - 1, min(5, len(ys))).astype(int)
+                    gg = Grid(meta, cfg['zone'], step=16)
+                    for i in idx:
+                        r, c = ys[i], xs[i]
+                        if r < gg.shape[0] and c < gg.shape[1]:
+                            k = r * gg.shape[1] + c
+                            pts.append((float(gg.lon[k]), float(gg.lat[k])))
+                k_soil = cache_mod.key('soil', pts=[(round(a, 3), round(b, 3)) for a, b in pts])
+                cached_soil = None if no_cache else cache_mod.get_json(k_soil)
+                if cached_soil:
+                    srows, used_pts = cached_soil['rows'], cached_soil['точек']
+                else:
+                    srows, _u, used_pts = soil_src.profile_points(pts)
+                    if srows:
+                        cache_mod.put_json(k_soil, {'rows': srows, 'точек': used_pts})
+                if not srows:
+                    _say(t0, 'почвы: SoilGrids не ответил, лист пропущен')
+                else:
+                    from .sheets import soil as sh_soil
+                    concl = soil_src.interpret(srows)
+                    sh_soil.build(os.path.join(out, 'Приложение_почвы.pdf'), cfg['kn'], srows,
+                                  concl, cfg['egrn_ha'], cfg.get('place', ''), used_pts)
+                    json.dump({'точек': used_pts, 'профиль': srows},
+                              open(os.path.join(out, 'soil.json'), 'w'),
+                              ensure_ascii=False, indent=1)
+                    top = list(srows.values())[0]
+                    _say(t0, 'почвы: %s, гумус %.1f %%, pH %.1f (точек %d)'
+                         % (soil_src.texture_class(top['clay'], top['silt'], top['sand']),
+                            top['humus'], top['phh2o'], used_pts))
+            except Exception as e:
+                _say(t0, 'почвы: лист пропущен (%s)' % str(e)[:70])
 
         if 'ir' in want and bands:
             try:
