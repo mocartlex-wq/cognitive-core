@@ -9,7 +9,7 @@ import itertools
 from shapely.geometry import MultiPolygon
 from shapely.ops import unary_union
 
-def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01):
+def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01, cover_all=True):
     """zones — {ключ: полигон}; egrn_ha — площадь по сведениям ЕГРН."""
     res = []
     def add(name, ok, got, tol, note=''):
@@ -17,9 +17,15 @@ def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01):
                     'измерено': round(float(got), 4), 'допуск': tol, 'примечание': note})
 
     total = sum(g.area for g in zones.values()) / 1e4
-    d = abs(total - egrn_ha) / egrn_ha * 100 if egrn_ha else 0
-    add('сумма частей = площадь ЕГРН', d <= area_tol_pct, d, '%.2f %%' % area_tol_pct,
-        'сумма %.4f га при ЕГРН %.4f га' % (total, egrn_ha))
+    if cover_all:
+        d = abs(total - egrn_ha) / egrn_ha * 100 if egrn_ha else 0
+        add('сумма частей = площадь ЕГРН', d <= area_tol_pct, d, '%.2f %%' % area_tol_pct,
+            'сумма %.4f га при ЕГРН %.4f га' % (total, egrn_ha))
+    else:
+        # части покрывают участок не целиком (действующая пашня вне ЧЗУ) —
+        # проверяем только, что они не больше участка
+        add('сумма частей не больше площади ЕГРН', total <= egrn_ha * 1.0001, total,
+            '≤ %.4f га' % egrn_ha, 'вне частей %.4f га' % (egrn_ha - total))
 
     worst, pair = 0.0, ''
     for a, b in itertools.combinations(sorted(zones), 2):
@@ -39,8 +45,9 @@ def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01):
     add('нет частей уже %.0f м' % thin, not slivers, len(slivers), '0 шт',
         '; '.join('%s %.0f м²' % s for s in slivers[:5]))
 
-    gap = parcel.difference(unary_union(list(zones.values()))).area
-    add('участок покрыт без зазоров', gap <= 1.0, gap, '≤ 1 м²')
+    if cover_all:
+        gap = parcel.difference(unary_union(list(zones.values()))).area
+        add('участок покрыт без зазоров', gap <= 1.0, gap, '≤ 1 м²')
 
     empty = [k for k, g in zones.items() if g.is_empty]
     add('все части непустые', not empty, len(empty), '0 шт', ', '.join(empty))

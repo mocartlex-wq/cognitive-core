@@ -30,6 +30,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     _say(t0, 'участок %s, ЕГРН %.4f га → %s' % (cfg['kn'], cfg['egrn_ha'], out))
 
     rings = json.load(open(cfg_mod.path_of(cfg, 'rings')))
+    if rings and isinstance(rings[0][0], (int, float)):
+        rings = [rings]              # выгрузки бывают и одним кольцом, и списком колец
     meta = json.load(open(cfg_mod.path_of(cfg, 'meta')))
     grid = Grid(meta, cfg['zone'])
     mpp = meta['mpp']
@@ -128,22 +130,31 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     drev = z.merge_touching(z.smooth(drev, free, mpp), free, mpp, gap)
     gr = (cls == 0) & free
     gr = z.merge_touching(z.smooth(gr, free, mpp, 6.0, 3.0), free, mpp, gap)
+    # строим только те части, что объявлены в конфиге: на :74 нет ни ЗОУИТ,
+    # ни лесополос, и пустые ЧЗУ/3, ЧЗУ/4 роняли проверку «все части непустые»
     raw = {'1': drev, '2': gr, '3': z.merge_touching(zin, mask, mpp, gap),
            '4': z.merge_touching(belt, mask, mpp, gap)}
+    raw = {k: v for k, v in raw.items() if k in cfg['parts']}
     eps = {'1': 3.0, '2': 3.0, '3': 2.0, '4': 2.5}
-    Z = {k: z.to_poly(*vectorize(m, grid, eps[k], 0.10)[:2]) for k, m in raw.items()}
-    Z = z.resolve(Z, parcel, cfg['priority'])
+    Z = {k: z.to_poly(*vectorize(m, grid, eps.get(k, 3.0), 0.10)[:2]) for k, m in raw.items()}
+    order = [k for k in cfg['priority'] if k in Z]
+    Z = z.resolve(Z, parcel, order)
 
     def decide(sel, sub):
         zz = (zn[sub] & sel).sum(); dd = (np.isin(cls[sub], [1, 2, 3]) & sel).sum(); t = sel.sum()
         return '3' if zz / t > 0.5 else ('1' if dd / t > 0.5 else '2')
-    Z, rest, moved = z.fill_remainder(Z, parcel, grid, decide, cfg['priority'], thin)
-    Z, cleaned = z.despeckle(Z, parcel, cfg['priority'], thin)
-    _say(t0, 'добор остатка %.3f га (%s), чистка нитей %.3f га'
-         % (rest, ', '.join('ЧЗУ/%s %.2f' % (k, v) for k, v in moved.items() if v > 0), cleaned))
+    # cover_all=false — участок покрыт частями не целиком: на 58:28:0500401:74
+    # больше половины площади занимает действующая пашня, она не часть ЧЗУ
+    # и добирать остаток в зоны нельзя.
+    if cfg.get('cover_all', True):
+        Z, rest, moved = z.fill_remainder(Z, parcel, grid, decide, order, thin)
+        _say(t0, 'добор остатка %.3f га (%s)'
+             % (rest, ', '.join('ЧЗУ/%s %.2f' % (k, v) for k, v in moved.items() if v > 0)))
+    Z, cleaned = z.despeckle(Z, parcel, order, thin) if len(Z) > 1 else (Z, 0.0)
+    _say(t0, 'чистка нитей %.3f га' % cleaned)
 
     # ── проверки и запись ──────────────────────────────────────────────
-    qa = qa_mod.check(Z, parcel, cfg['egrn_ha'], thin)
+    qa = qa_mod.check(Z, parcel, cfg['egrn_ha'], thin, cover_all=cfg.get('cover_all', True))
     res = {}
     for k in sorted(Z):
         o, i, a = z.to_rings(Z[k])
@@ -195,7 +206,10 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     for k in sorted(res):
         print('  ЧЗУ/%s %-58s %7.2f га  контуров %2d' %
               (k, res[k]['название'][:58], res[k]['areaHa'], len(res[k]['outer'])))
-    print('  %-62s %7.2f га  (ЕГРН %.2f)' % ('сумма частей', sum(v['areaHa'] for v in res.values()), cfg['egrn_ha']))
+    tot_parts = sum(v['areaHa'] for v in res.values())
+    print('  %-62s %7.2f га  (ЕГРН %.2f%s)'
+          % ('сумма частей', tot_parts, cfg['egrn_ha'],
+             ', вне частей %.2f' % (cfg['egrn_ha'] - tot_parts) if not cfg.get('cover_all', True) else ''))
     print()
     print(qa_mod.report(qa))
     _say(t0, 'готово')
