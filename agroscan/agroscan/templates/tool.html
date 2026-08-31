@@ -1,0 +1,557 @@
+<title>__TITLE__</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{--ink:#0e1216;--panel:#161c22;--panel-2:#1e262e;--line:#2a343d;--text:#e3eaf1;
+  --muted:#8fa0b0;--accent:#ff6b2c;--accent-dim:#a8451c;--ok:#54d98c;--zu:#2ee89a;
+  --font:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--text);font-family:var(--font);
+     height:100vh;display:grid;grid-template-columns:1fr 360px;overflow:hidden}
+#stage{position:relative;overflow:hidden;background:#000;cursor:crosshair}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+aside{background:var(--panel);border-left:1px solid var(--line);display:flex;
+      flex-direction:column;overflow:hidden}
+header{padding:14px 18px 12px;border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.sub{margin:5px 0 0;font-size:11.5px;color:var(--muted);line-height:1.45}
+.sec{padding:12px 18px;border-bottom:1px solid var(--line)}
+.lab{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
+     margin:0 0 8px;font-weight:600}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{flex:1;background:var(--panel-2);color:var(--muted);border:0;padding:8px 4px;
+     font:500 11.5px var(--font);cursor:pointer;transition:.13s}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#150a04}
+#mEdit[aria-pressed="true"]{background:#49a6d6;color:#04131a}
+#mHole[aria-pressed="true"]{background:#ff5c7a;color:#1a0710}
+.chk{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);
+     padding:4px 0;cursor:pointer}
+.chk input{accent-color:var(--accent)}
+.chk i{width:10px;height:10px;border-radius:2px;display:block;flex:none}
+#list{flex:1 1 auto;overflow-y:auto;padding:8px 10px 8px 18px;min-height:80px}
+.tags{flex:none}
+.belt{display:grid;grid-template-columns:22px 1fr auto auto;gap:8px;align-items:center;
+      padding:6px 6px 6px 0;border-bottom:1px solid #202830}
+.belt[data-sel="1"]{background:#1b2530;border-radius:6px}
+.n{width:22px;height:22px;border-radius:5px;color:#fff;display:grid;place-items:center;
+   font:600 11px var(--mono)}
+.m{font:400 11px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.m b{color:var(--text);font-weight:500}
+.del,.pick{background:none;border:0;color:#5b6b7a;cursor:pointer;font-size:15px;padding:2px 4px}
+.del:hover{color:#ff6b6b}.pick:hover{color:var(--accent)}
+.tot{padding:10px 18px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+     display:flex;justify-content:space-between;align-items:baseline}
+.tot .big{font:600 20px var(--mono);font-variant-numeric:tabular-nums}
+.acts{padding:12px 18px;display:flex;flex-direction:column;gap:7px}
+button.primary{background:var(--accent);color:#150a04;border:0;border-radius:7px;padding:11px;
+     font:600 13px var(--font);cursor:pointer}
+button.primary:hover{filter:brightness(1.08)}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);
+     border-radius:7px;padding:8px;font:500 12px var(--font);cursor:pointer}
+button.ghost:hover{color:var(--text);border-color:#3b4854}
+#out{width:100%;height:110px;background:#0b0f13;color:#9fd8b4;border:1px solid var(--line);
+     border-radius:7px;padding:9px;font:400 10.5px var(--mono);resize:none;display:none}
+.hint{font-size:11px;color:var(--muted);line-height:1.5;margin:0}
+.hint kbd{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
+     padding:1px 5px;font:500 10.5px var(--mono);color:var(--text)}
+.pill{position:absolute;left:14px;top:14px;background:#0d1216cc;backdrop-filter:blur(6px);
+     border:1px solid var(--line);border-radius:8px;padding:7px 11px;font:500 11.5px var(--mono);
+     color:var(--muted);pointer-events:none;font-variant-numeric:tabular-nums}
+.pill b{color:var(--accent)}
+.saved{position:absolute;right:14px;top:14px;background:#0d1216cc;border:1px solid var(--line);
+     border-radius:8px;padding:6px 10px;font:500 11px var(--mono);color:var(--ok);opacity:0;
+     transition:opacity .4s;pointer-events:none}
+.types{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.types button{display:flex;align-items:center;gap:7px;background:var(--panel-2);
+     border:1px solid var(--line);border-radius:7px;padding:7px 8px;cursor:pointer;
+     font:500 11.5px var(--font);color:var(--muted);text-align:left}
+.types button .sw{width:11px;height:11px;border-radius:3px;flex:none}
+.types button[aria-pressed="true"]{color:var(--text);border-color:currentColor;background:#232c35;
+     box-shadow:inset 0 0 0 1px currentColor}
+.tags{display:flex;flex-wrap:wrap;gap:5px;padding:0 18px 10px}
+.tag{display:flex;align-items:center;gap:5px;font:500 10.5px var(--mono);color:var(--muted);
+     background:var(--panel-2);border-radius:5px;padding:3px 7px}
+.tag i{width:8px;height:8px;border-radius:2px;display:block}
+.tag b{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums}
+.cand{display:flex;gap:6px;margin-top:6px}
+.cand button{flex:1;font:500 11.5px var(--font);border-radius:6px;padding:7px;cursor:pointer;
+     border:1px solid var(--line);background:var(--panel-2);color:var(--muted)}
+.cand button.yes{border-color:#2f7d4f;color:#8fe0ac}
+</style>
+
+<script type="application/json" id="markup-data">__PAYLOAD__</script>
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div class="pill">масштаб <b id="zm">1.0×</b> · курсор <b id="crd">—</b></div>
+  <div class="saved" id="savedTag">сохранено</div>
+</div>
+
+<aside>
+  <header>
+    <h1>Разметка контуров</h1>
+    <p class="sub" id="hdr"></p>
+  </header>
+
+  <div class="sec">
+    <p class="lab">Подложка</p>
+    <div class="seg" id="tiles"></div>
+  </div>
+
+  <div class="sec">
+    <p class="lab">Показывать поверх</p>
+    <label class="chk"><input type="checkbox" id="lZU" checked><i style="background:#2ee89a"></i>границу ЗУ и ЗОУИТ</label>
+    <label class="chk"><input type="checkbox" id="lCH"><i style="background:#4f8dff"></i>контуры частей из расчёта</label>
+    <label class="chk"><input type="checkbox" id="lAU"><i style="background:#00e1ff"></i>автопоиск лесополос по высоте полога</label>
+    <div class="cand" id="candBox" style="display:none">
+      <button class="yes" id="candAdd">Принять все в разметку</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <p class="lab">Что размечаю</p>
+    <div class="types" id="types"></div>
+  </div>
+
+  <div class="sec">
+    <p class="lab">Режим</p>
+    <div class="seg">
+      <button id="mOut" aria-pressed="true">Рисовать</button>
+      <button id="mEdit" aria-pressed="false">Править</button>
+      <button id="mHole" aria-pressed="false">Вырез</button>
+    </div>
+    <p class="hint" id="modeHint" style="margin-top:8px"></p>
+  </div>
+
+  <div id="list"></div>
+  <div class="tags" id="tags"></div>
+
+  <div class="tot">
+    <div><span class="lab" style="margin:0">Итого</span></div>
+    <div style="text-align:right"><div class="big" id="tot">0,00 га</div></div>
+  </div>
+
+  <div class="acts">
+    <button class="primary" id="send">Передать Claude</button>
+    <p class="hint" id="sendMsg" style="display:none"></p>
+    <button class="ghost" id="dl">Скачать GeoJSON</button>
+    <button class="ghost" id="exp">Показать координаты текстом</button>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+    <button class="ghost" id="cp" style="display:none">Скопировать в буфер</button>
+    <button class="ghost" id="clr">Очистить всё</button>
+  </div>
+</aside>
+
+<script>
+const META=__META__, RINGS=__RINGS__, ZOUIT=__ZOUIT__, CHZU=__CHZU__, CAND=__CAND__;
+const TILES=__TILES__, TYPES=__TYPES__, PARCEL=__PARCEL__, SAVED=__SAVED__;
+const SHELL_B64="__SHELL__", LSKEY='agroscan:'+PARCEL, SAVED_AT=__SAVED_AT__;
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const imgs={}; let cur=Object.keys(TILES)[0], ready=false;
+let belts=[], draft=[], hover=null, kind=TYPES[0].id, mode='draw', sel=-1, drag=null;
+let view={x:0,y:0,s:1};
+
+for(const k in TILES){ const im=new Image(); im.src='data:image/jpeg;base64,'+TILES[k].data;
+  im.onload=()=>{ imgs[k]=im; if(k===cur&&!ready){ ready=true; fitAll(); initBelts(); } }; }
+
+const T=(id)=>TYPES.find(t=>t.id===id)||TYPES[0];
+function say(t,col){ const m=document.getElementById('sendMsg');
+  m.textContent=t; m.style.color=col||'var(--muted)'; m.style.display=t?'block':'none'; }
+const IW=()=>imgs[cur]?imgs[cur].naturalWidth:1, IH=()=>imgs[cur]?imgs[cur].naturalHeight:1;
+const toScr=(p)=>[p[0]*view.s+view.x, p[1]*view.s+view.y];
+const toImg=(x,y)=>[(x-view.x)/view.s, (y-view.y)/view.s];
+function toMSK(p){ return [META.e0+(p[0]/IW())*(META.e1-META.e0),
+                           META.n1-(p[1]/IH())*(META.n1-META.n0)]; }
+function frMSK(m){ return [(m[0]-META.e0)/(META.e1-META.e0)*IW(),
+                           (META.n1-m[1])/(META.n1-META.n0)*IH()]; }
+function ringArea(pts){ const p=pts.map(toMSK); let s2=0;
+  for(let i=0;i<p.length;i++){ const q=p[(i+1)%p.length]; s2+=p[i][0]*q[1]-q[0]*p[i][1]; }
+  return Math.abs(s2/2)/10000; }
+function areaOf(b){ return ringArea(b.pts)-(b.holes||[]).reduce((s,h)=>s+ringArea(h),0); }
+function perim(pts){ let L=0; for(let i=0;i<pts.length;i++){
+  const a=toMSK(pts[i]), b=toMSK(pts[(i+1)%pts.length]); L+=Math.hypot(b[0]-a[0],b[1]-a[1]); }
+  return L; }
+function inPoly(pt,ring){ let c=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    if((ring[i][1]>pt[1])!==(ring[j][1]>pt[1]) &&
+       pt[0]<(ring[j][0]-ring[i][0])*(pt[1]-ring[i][1])/(ring[j][1]-ring[i][1])+ring[i][0]) c=!c; }
+  return c; }
+const centroid=(p)=>p.reduce((a,q)=>[a[0]+q[0]/p.length,a[1]+q[1]/p.length],[0,0]);
+
+// ── участок: точка внутри и проекция на границу ──────────────────────
+// границу считаем лениво: frMSK зависит от размера подложки, а на момент
+// разбора скрипта картинка ещё не загружена и IW()=1 — тогда весь участок
+// схлопывался в квадрат 1×1 пиксель и обрезка сносила вершины в угол снимка
+let _parPx=null, _parFor=0;
+function parPx(){ if(!_parPx||_parFor!==IW()){ _parFor=IW(); _parPx=RINGS.map(r=>r.map(frMSK)); }
+  return _parPx; }
+function inParcel(p){ const P=parPx(); let ins=inPoly(p,P[0]);
+  for(let i=1;i<P.length;i++) if(inPoly(p,P[i])) ins=!ins;
+  return ins; }
+function snapToParcel(p){ let best=null;
+  for(const r of parPx()) for(let i=0;i<r.length;i++){
+    const a=r[i], b=r[(i+1)%r.length];
+    const abx=b[0]-a[0], aby=b[1]-a[1], L=abx*abx+aby*aby;
+    let t=L<1e-9?0:((p[0]-a[0])*abx+(p[1]-a[1])*aby)/L; t=Math.max(0,Math.min(1,t));
+    const q=[a[0]+abx*t, a[1]+aby*t], d=Math.hypot(q[0]-p[0],q[1]-p[1]);
+    if(!best||d<best[0]) best=[d,q]; }
+  return best[1]; }
+function clipRing(pts){ return pts.map(p=>inParcel(p)?p:snapToParcel(p)); }
+
+// ── отрисовка ────────────────────────────────────────────────────────
+function polyPath(pts){ ctx.beginPath(); pts.forEach((p,i)=>{ const q=toScr(p);
+  i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]); }); ctx.closePath(); }
+function hex2rgba(h,a){ const n=parseInt(h.slice(1),16);
+  return 'rgba('+(n>>16)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
+function drawBelt(b,idx){
+  const col=T(b.kind).col;
+  ctx.lineWidth=idx===sel?3.4:2.2; ctx.strokeStyle=col; ctx.fillStyle=hex2rgba(col,idx===sel?.24:.14);
+  ctx.beginPath();
+  const add=(pts)=>{ pts.forEach((p,i)=>{ const q=toScr(p);
+    i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]); }); ctx.closePath(); };
+  add(b.pts); (b.holes||[]).forEach(add);
+  ctx.fill('evenodd'); ctx.stroke();
+  if(mode==='edit'&&idx===sel){                      // вершины видны только у выбранного
+    ctx.fillStyle='#fff'; ctx.strokeStyle=col; ctx.lineWidth=1.6;
+    b.pts.forEach(p=>{ const q=toScr(p);
+      ctx.beginPath(); ctx.arc(q[0],q[1],5,0,7); ctx.fill(); ctx.stroke(); });
+  }
+  const c=centroid(b.pts), q=toScr(c);
+  ctx.fillStyle='#fff'; ctx.font='600 13px ui-sans-serif'; ctx.textAlign='center';
+  ctx.strokeStyle='rgba(0,0,0,.65)'; ctx.lineWidth=3.4;
+  ctx.strokeText(String(idx+1),q[0],q[1]+4); ctx.fillText(String(idx+1),q[0],q[1]+4);
+}
+function strokeMSK(rings,col,w,dash){
+  ctx.strokeStyle=col; ctx.lineWidth=w; ctx.setLineDash(dash||[]);
+  rings.forEach(r=>{ polyPath(r.map(frMSK)); ctx.stroke(); });
+  ctx.setLineDash([]);
+}
+function draw(){
+  const r=cv.getBoundingClientRect();
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.scale(cv.width/r.width, cv.height/r.height);
+  ctx.fillStyle='#05070a'; ctx.fillRect(0,0,r.width,r.height);
+  if(imgs[cur]) ctx.drawImage(imgs[cur],view.x,view.y,IW()*view.s,IH()*view.s);
+  if(document.getElementById('lZU').checked){
+    strokeMSK(RINGS,'#2ee89a',2.4);
+    strokeMSK(ZOUIT,'#ff5bd8',1.6,[7,5]);
+  }
+  if(document.getElementById('lCH').checked)
+    for(const k in CHZU) strokeMSK(CHZU[k],'#4f8dff',1.4,[3,4]);
+  if(document.getElementById('lAU').checked) strokeMSK(CAND,'#00e1ff',2.0);
+  belts.forEach(drawBelt);
+  if(draft.length){
+    const pts=hover?draft.concat([hover]):draft;
+    const kc=mode==='hole'?'#ff5c7a':T(kind).col;
+    ctx.strokeStyle=kc; ctx.lineWidth=2.2; ctx.setLineDash([6,4]);
+    ctx.beginPath(); pts.forEach((p,i)=>{ const q=toScr(p);
+      i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]); }); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=kc;
+    draft.forEach((p,i)=>{ const q=toScr(p);
+      ctx.beginPath(); ctx.arc(q[0],q[1],i?3.4:5,0,7); ctx.fill(); });
+  }
+}
+function resize(){ const r=cv.getBoundingClientRect(); const d=window.devicePixelRatio||1;
+  cv.width=r.width*d; cv.height=r.height*d; }
+function fitAll(){
+  const r=cv.getBoundingClientRect(); const xs=[],ys=[];
+  RINGS.forEach(rg=>rg.forEach(p=>{ const q=frMSK(p); xs.push(q[0]); ys.push(q[1]); }));
+  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys), pad=1.10;
+  view.s=Math.min(r.width/((x1-x0)*pad), r.height/((y1-y0)*pad));
+  view.x=r.width/2-(x0+x1)/2*view.s; view.y=r.height/2-(y0+y1)/2*view.s;
+  updZoom(); draw();
+}
+function updZoom(){ const r=cv.getBoundingClientRect();
+  document.getElementById('zm').textContent=
+    (view.s/(Math.min(r.width/IW(),r.height/IH())*0.94)).toFixed(1)+'×'; }
+
+// ── список и итоги ───────────────────────────────────────────────────
+function renderList(){
+  const L=document.getElementById('list'); L.innerHTML='';
+  belts.forEach((b,i)=>{
+    const el=document.createElement('div'); el.className='belt'; el.dataset.sel=i===sel?'1':'0';
+    el.innerHTML='<div class="n" style="background:'+T(b.kind).col+'">'+(i+1)+'</div>'+
+      '<div class="m">'+T(b.kind).name+' · <b>'+areaOf(b).toFixed(2).replace('.',',')+' га</b>'+
+      '<br>'+b.pts.length+' точек'+((b.holes||[]).length?' · '+b.holes.length+' выр.':'')+'</div>'+
+      '<button class="pick" title="выбрать">✎</button><button class="del" title="удалить">×</button>';
+    el.querySelector('.pick').onclick=()=>{ sel=i; setMode('edit'); renderList(); draw(); };
+    el.querySelector('.del').onclick=()=>{ belts.splice(i,1); if(sel>=belts.length) sel=-1;
+      renderList(); draw(); store(); };
+    L.appendChild(el);
+  });
+  const t=belts.reduce((s,b)=>s+areaOf(b),0);
+  document.getElementById('tot').textContent=t.toFixed(2).replace('.',',')+' га';
+  const tg=document.getElementById('tags'); tg.innerHTML='';
+  TYPES.forEach(ty=>{
+    const a=belts.filter(b=>b.kind===ty.id).reduce((s,b)=>s+areaOf(b),0);
+    if(a<=0) return;
+    const el=document.createElement('div'); el.className='tag';
+    el.innerHTML='<i style="background:'+ty.col+'"></i>'+ty.name+' <b>'+
+      a.toFixed(2).replace('.',',')+'</b>';
+    tg.appendChild(el);
+  });
+}
+function buildTypes(){
+  const box=document.getElementById('types'); box.innerHTML='';
+  TYPES.forEach(t=>{
+    const b=document.createElement('button');
+    b.innerHTML='<span class="sw" style="background:'+t.col+'"></span>'+t.name+
+      ' <span style="opacity:.6;font-size:10.5px">'+t.chzu+'</span>';
+    b.setAttribute('aria-pressed',t.id===kind); b.style.color=t.id===kind?t.col:'';
+    b.onclick=()=>{ kind=t.id; buildTypes(); draw(); };
+    box.appendChild(b);
+  });
+}
+function buildTiles(){
+  const box=document.getElementById('tiles'); box.innerHTML='';
+  Object.keys(TILES).forEach(k=>{
+    const b=document.createElement('button'); b.textContent=TILES[k].caption;
+    b.setAttribute('aria-pressed',k===cur);
+    b.onclick=()=>{ cur=k; ready=!!imgs[k]; buildTiles(); draw(); };
+    box.appendChild(b);
+  });
+}
+
+// ── сохранение на устройстве ─────────────────────────────────────────
+function store(){
+  try{ localStorage.setItem(LSKEY,JSON.stringify({t:Date.now(),
+        belts:belts.map(b=>({pts:b.pts,holes:b.holes||[],kind:b.kind}))}));
+       const s=document.getElementById('savedTag');
+       s.style.opacity=1; setTimeout(()=>s.style.opacity=0,900);
+  }catch(e){}
+}
+function restore(){
+  try{ const raw=localStorage.getItem(LSKEY); if(!raw) return false;
+       const d=JSON.parse(raw);
+       if(d&&d.belts&&d.belts.length){ belts=d.belts; return true; }
+  }catch(e){}
+  return false;
+}
+
+// ── события ──────────────────────────────────────────────────────────
+const stage=document.getElementById('stage');
+function nearVertex(p){
+  if(sel<0) return -1;
+  const b=belts[sel], R=9/view.s;
+  for(let i=0;i<b.pts.length;i++)
+    if(Math.hypot(b.pts[i][0]-p[0],b.pts[i][1]-p[1])<R) return i;
+  return -1;
+}
+function nearEdge(p){
+  if(sel<0) return -1;
+  const b=belts[sel], R=7/view.s;
+  for(let i=0;i<b.pts.length;i++){
+    const a=b.pts[i], c=b.pts[(i+1)%b.pts.length];
+    const abx=c[0]-a[0], aby=c[1]-a[1], L=abx*abx+aby*aby;
+    let t=L<1e-9?0:((p[0]-a[0])*abx+(p[1]-a[1])*aby)/L;
+    if(t<0||t>1) continue;
+    if(Math.hypot(a[0]+abx*t-p[0], a[1]+aby*t-p[1])<R) return i;
+  }
+  return -1;
+}
+stage.addEventListener('mousemove',e=>{
+  const r=cv.getBoundingClientRect(); const p=toImg(e.clientX-r.left,e.clientY-r.top);
+  const m=toMSK(p);
+  document.getElementById('crd').textContent=m[0].toFixed(0)+' / '+m[1].toFixed(0);
+  if(drag){ belts[drag.b].pts[drag.i]=inParcel(p)?p:snapToParcel(p); draw(); return; }
+  if(draft.length){ hover=p; draw(); }
+  else if(mode==='edit'){ stage.style.cursor=nearVertex(p)>=0?'grab':
+    (nearEdge(p)>=0?'copy':'default'); }
+});
+stage.addEventListener('mousedown',e=>{
+  const r=cv.getBoundingClientRect(); const p=toImg(e.clientX-r.left,e.clientY-r.top);
+  if(e.button===0&&mode==='edit'){
+    const v=nearVertex(p);
+    if(v>=0){ drag={b:sel,i:v}; stage.style.cursor='grabbing'; e.preventDefault(); return; }
+    // выбрать контур под курсором
+    for(let i=belts.length-1;i>=0;i--) if(inPoly(p,belts[i].pts)){ sel=i; renderList(); draw(); return; }
+  }
+  if(e.button===2){                       // правая — снять точку / вершину / контур
+    e.preventDefault();
+    if(draft.length){ draft.pop(); if(!draft.length) hover=null; }
+    else if(mode==='edit'&&sel>=0){
+      const v=nearVertex(p);
+      if(v>=0&&belts[sel].pts.length>3){ belts[sel].pts.splice(v,1); store(); }
+    }
+    else if(belts.length){ belts.pop(); sel=-1; renderList(); store(); }
+    draw(); return;
+  }
+  if(e.button===1){
+    e.preventDefault();
+    const now=Date.now();
+    if(now-midT<380){ fitAll(); midT=0; return; }
+    midT=now; pan=[e.clientX,e.clientY,view.x,view.y];
+  }
+});
+let pan=null, midT=0;
+window.addEventListener('mouseup',()=>{ if(drag){ drag=null; store(); renderList(); }
+  pan=null; stage.style.cursor=mode==='edit'?'default':'crosshair'; });
+window.addEventListener('mousemove',e=>{ if(pan){ view.x=pan[2]+e.clientX-pan[0];
+  view.y=pan[3]+e.clientY-pan[1]; draw(); }});
+stage.addEventListener('click',e=>{
+  if(e.button!==0) return;
+  const r=cv.getBoundingClientRect(); const p=toImg(e.clientX-r.left,e.clientY-r.top);
+  if(mode==='edit'){
+    const ei=nearEdge(p);
+    if(ei>=0&&nearVertex(p)<0){ belts[sel].pts.splice(ei+1,0,p); store(); draw(); }
+    return;
+  }
+  draft.push(p); draw();
+});
+stage.addEventListener('dblclick',e=>{ e.preventDefault(); if(mode!=='edit') finish(); });
+stage.addEventListener('contextmenu',e=>e.preventDefault());
+stage.addEventListener('wheel',e=>{ e.preventDefault();
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const k=e.deltaY<0?1.15:1/1.15, ns=Math.max(0.2,Math.min(14,view.s*k));
+  view.x=mx-(mx-view.x)*(ns/view.s); view.y=my-(my-view.y)*(ns/view.s); view.s=ns;
+  updZoom(); draw(); },{passive:false});
+function finish(){
+  // двойной клик по пути шлёт два click — они успевают положить дубли последней точки
+  for(let i=draft.length-1;i>0;i--)
+    if(Math.hypot(draft[i][0]-draft[i-1][0],draft[i][1]-draft[i-1][1])*view.s<6) draft.splice(i,1);
+  if(draft.length>=3){
+    const pts=clipRing(draft);          // за границу участка контур не выпускаем
+    if(mode==='hole'){
+      const c=centroid(pts); let host=-1;
+      for(let i=belts.length-1;i>=0;i--) if(inPoly(c,belts[i].pts)){ host=i; break; }
+      if(host>=0){ (belts[host].holes=belts[host].holes||[]).push(pts); }
+      else say('Вырез должен лежать внутри уже обведённого контура.','#ffb454');
+    } else { belts.push({pts:pts,holes:[],kind:kind}); sel=belts.length-1; }
+    store();
+  }
+  draft=[]; hover=null; renderList(); draw();
+}
+window.addEventListener('keydown',e=>{
+  if(e.key==='Enter') finish();
+  if(e.key==='Escape'){ draft=[]; hover=null; sel=-1; renderList(); draw(); }
+  if(e.key==='f'||e.key==='а') fitAll();
+  if(e.key==='e'||e.key==='у') setMode(mode==='edit'?'draw':'edit');
+  if(e.key==='h'||e.key==='р') setMode(mode==='hole'?'draw':'hole');
+  if((e.key==='z'||e.key==='я')&&(e.ctrlKey||e.metaKey)){
+    if(draft.length) draft.pop(); else { belts.pop(); sel=-1; }
+    renderList(); store(); draw(); }
+});
+const HINTS={draw:'<kbd>левая</kbd> ставит точку · <kbd>двойная</kbd> замыкает · <kbd>правая</kbd> убирает точку · <kbd>колёсико</kbd> двигает карту · <kbd>двойной по колёсику</kbd> вписывает участок',
+  edit:'<kbd>клик</kbd> по контуру выбирает его · <kbd>тянуть</kbd> вершину — двигает · <kbd>клик по ребру</kbd> вставляет точку · <kbd>правая по вершине</kbd> удаляет',
+  hole:'обведите дыру внутри уже готового контура · <kbd>двойная</kbd> замыкает'};
+function setMode(m){ mode=m;
+  document.getElementById('mOut').setAttribute('aria-pressed',m==='draw');
+  document.getElementById('mEdit').setAttribute('aria-pressed',m==='edit');
+  document.getElementById('mHole').setAttribute('aria-pressed',m==='hole');
+  document.getElementById('modeHint').innerHTML=HINTS[m];
+  stage.style.cursor=m==='edit'?'default':'crosshair';
+  draft=[]; hover=null; draw();
+}
+document.getElementById('mOut').onclick=()=>setMode('draw');
+document.getElementById('mEdit').onclick=()=>setMode('edit');
+document.getElementById('mHole').onclick=()=>setMode('hole');
+['lZU','lCH','lAU'].forEach(id=>document.getElementById(id).onchange=()=>{
+  if(id==='lAU') document.getElementById('candBox').style.display=
+    document.getElementById('lAU').checked&&CAND.length?'flex':'none';
+  draw(); });
+document.getElementById('candAdd').onclick=()=>{
+  CAND.forEach(r=>belts.push({pts:clipRing(r.map(frMSK)),holes:[],kind:'belt'}));
+  say(CAND.length+' контуров автопоиска добавлено — проверьте и поправьте.','#54d98c');
+  renderList(); store(); draw();
+};
+document.getElementById('clr').onclick=()=>{ belts=[]; draft=[]; sel=-1;
+  renderList(); store(); draw(); };
+
+function payload(){
+  return {parcel:PARCEL,crs:META.crs||"местная СК",geometry:"polygons",
+    saved_at:new Date().toISOString(),
+    total_ha:+belts.reduce((s,b)=>s+areaOf(b),0).toFixed(3),
+    by_type:Object.fromEntries(TYPES.map(t=>[t.id,
+      +belts.filter(b=>b.kind===t.id).reduce((s,b)=>s+areaOf(b),0).toFixed(3)]).filter(e=>e[1]>0)),
+    objects:belts.map((b,i)=>({n:i+1,type:b.kind,type_name:T(b.kind).name,chzu:T(b.kind).chzu,
+      area_ha:+areaOf(b).toFixed(3),perimeter_m:+perim(b.pts).toFixed(1),
+      ring:b.pts.map(p=>toMSK(p).map(v=>+v.toFixed(2))),
+      holes:(b.holes||[]).map(h=>h.map(p=>toMSK(p).map(v=>+v.toFixed(2))))}))};
+}
+document.getElementById('exp').onclick=()=>{
+  const o=document.getElementById('out');
+  o.value=JSON.stringify(payload()); o.style.display='block';
+  document.getElementById('cp').style.display='block'; o.select();
+};
+document.getElementById('cp').onclick=async()=>{
+  const o=document.getElementById('out');
+  try{ await navigator.clipboard.writeText(o.value);
+       document.getElementById('cp').textContent='Скопировано';
+       setTimeout(()=>document.getElementById('cp').textContent='Скопировать в буфер',1600);
+  }catch(err){ o.select(); document.execCommand('copy'); }
+};
+document.getElementById('dl').onclick=async()=>{
+  const p=payload();
+  const fc={type:'FeatureCollection',features:p.objects.map(o=>({type:'Feature',
+    properties:{n:o.n,тип:o.type_name,чзу:o.chzu,площадь_га:o.area_ha},
+    geometry:{type:'Polygon',coordinates:[o.ring.concat([o.ring[0]])].concat(
+      o.holes.map(h=>h.concat([h[0]])))}}))};
+  const txt=JSON.stringify(fc);
+  try{
+    const dl=await claude.use('downloads');
+    if(dl){ await dl.save({filename:PARCEL.replace(/:/g,'-')+'_разметка.geojson',data:txt});
+            say('Файл предложен к сохранению.','#54d98c'); return; }
+  }catch(e){}
+  const o=document.getElementById('out');
+  o.value=txt; o.style.display='block'; document.getElementById('cp').style.display='block'; o.select();
+  say('Скачивание недоступно — GeoJSON показан текстом, скопируйте его.','#ffb454');
+};
+document.getElementById('send').onclick=async()=>{
+  if(!belts.length){ say('Сначала обведите хотя бы один контур.','#ffb454'); return; }
+  const btn=document.getElementById('send'); btn.disabled=true; say('Сохраняю…');
+  try{
+    const api=await claude.use('artifact');
+    if(!api){ say('Сохранение недоступно в этом просмотре — нажмите «Показать координаты текстом».','#ffb454');
+              btn.disabled=false; return; }
+    const p=payload();
+    const rows=p.objects.map(o=>'<tr><td>'+o.n+'</td><td>'+o.type_name+'</td><td>'+o.chzu+
+      '</td><td class="r">'+o.area_ha.toFixed(2).replace('.',',')+'</td><td class="r">'+
+      o.ring.length+'</td><td class="r">'+o.holes.length+'</td></tr>').join('');
+    const byType=Object.entries(p.by_type).map(([k,v])=>
+      (TYPES.find(t=>t.id===k)||{name:k}).name+' — '+v.toFixed(2).replace('.',',')+' га').join(' · ');
+    // публикуется лёгкая квитанция: копия инструмента с подложками весит мегабайты
+    // и однажды при сохранении уже потеряла разметку
+    const doc='<!doctype html><html><head><meta charset="utf-8">'+
+      '<meta name="viewport" content="width=device-width,initial-scale=1">'+
+      '<title>Разметка '+PARCEL+' — передано</title><style>'+
+      'body{margin:0;padding:28px;background:#0e1216;color:#e3eaf1;'+
+      'font:14px/1.5 ui-sans-serif,system-ui,sans-serif}'+
+      'h1{font-size:19px;margin:0 0 4px}p{color:#8fa0b0;margin:0 0 18px;font-size:13px}'+
+      'table{border-collapse:collapse;width:100%;max-width:640px;font-size:13px}'+
+      'th,td{padding:7px 10px;border-bottom:1px solid #2a343d;text-align:left}'+
+      'th{color:#8fa0b0;font-weight:600;font-size:11px;text-transform:uppercase}'+
+      '.r{text-align:right;font-variant-numeric:tabular-nums}'+
+      '.tot{margin:16px 0 22px;font-size:15px}.tot b{font-size:22px}'+
+      'pre{background:#0b0f13;border:1px solid #2a343d;border-radius:8px;padding:12px;'+
+      'font:11px/1.45 ui-monospace,monospace;color:#9fd8b4;overflow:auto;max-height:340px;'+
+      'white-space:pre-wrap;word-break:break-all}</style></head><body>'+
+      '<h1>Разметка передана Claude</h1><p>ЗУ '+PARCEL+' · сохранено '+
+      new Date().toLocaleString('ru-RU')+'</p>'+
+      '<table><thead><tr><th>№</th><th>Тип</th><th>ЧЗУ</th><th class="r">Площадь, га</th>'+
+      '<th class="r">Точек</th><th class="r">Вырезов</th></tr></thead><tbody>'+rows+
+      '</tbody></table><div class="tot">Итого <b>'+p.total_ha.toFixed(2).replace('.',',')+
+      ' га</b><br><span style="color:#8fa0b0;font-size:12.5px">'+byType+'</span></div>'+
+      '<pre id="markup-data">'+JSON.stringify(p)+'</pre>'+
+      '<p style="margin-top:16px">Напишите в чат «готово» — Claude прочитает данные '+
+      'и вернёт инструмент.</p></body></html>';
+    await api.publish(doc);
+    say('Передано. Разметка также сохранена в этом браузере.','#54d98c');
+  }catch(err){
+    say('Не удалось сохранить ('+(err&&err.code?err.code:'ошибка')+'). Нажмите «Показать координаты текстом».','#ff8f6b');
+  }
+  btn.disabled=false;
+};
+window.addEventListener('resize',()=>{ resize(); draw(); });
+document.getElementById('hdr').innerHTML=__HDR__;
+// belts хранятся в пикселях подложки, а перевод из местной СК зависит от её
+// размера — поэтому наполняем список только после загрузки картинки
+function initBelts(){
+  const savedBelts=(Array.isArray(SAVED)?SAVED:[]).map(o=>({
+    pts:o.ring.map(frMSK), holes:(o.holes||[]).map(h=>h.map(frMSK)), kind:o.kind||'belt'}));
+  // черновик в браузере может быть новее переданной разметки — берём свежее
+  let d=null; try{ const r=localStorage.getItem(LSKEY); d=r?JSON.parse(r):null; }catch(e){}
+  belts=(d&&d.belts&&d.belts.length&&(!SAVED_AT||d.t>SAVED_AT))?d.belts:savedBelts;
+  renderList(); draw();
+}
+document.getElementById('candBox').style.display='none';
+resize(); buildTypes(); buildTiles(); setMode('draw'); renderList();
+</script>
