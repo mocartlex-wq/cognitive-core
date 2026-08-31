@@ -21,7 +21,7 @@ from .sources import canopy, sentinel
 def _say(t0, msg):
     print('[%5.1f с] %s' % (time.time() - t0, msg), flush=True)
 
-def run(cfg_path, out_dir=None, step_dzz=2):
+def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True):
     t0 = time.time()
     cfg = cfg_mod.load(cfg_path)
     out = out_dir or os.path.join(cfg['_dir'], '..', 'out', cfg['kn'].replace(':', '-'))
@@ -138,6 +138,36 @@ def run(cfg_path, out_dir=None, step_dzz=2):
               open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
     np.save(os.path.join(out, 'cls.npy'), cls); np.save(os.path.join(out, 'mask.npy'), mask)
     np.save(os.path.join(out, 'belt.npy'), belt)
+
+    # ── комплект листов и обменные форматы ─────────────────────────────
+    made = {}
+    if sheets:
+        from .sheets import schema as sh_schema, check_map as sh_check, note as sh_note
+        nb_path = cfg_mod.path_of(cfg, 'neighbors')
+        nb = json.load(open(nb_path)) if nb_path and os.path.exists(nb_path) else []
+        _, den = sh_schema.build(os.path.join(out, 'Схема_ЧЗУ.pdf'), cfg['kn'], rings, res,
+                                 cfg['egrn_ha'], cfg['zone'], nb)
+        _say(t0, 'схема ЧЗУ собрана, масштаб 1:%d' % den)
+        rel = lambda q: q if os.path.isabs(q) else os.path.join(cfg['_dir'], q)
+        bd = [(rel(b['path']), b['caption'], b.get('note', ''))
+              for b in cfg.get('backdrops', [])]
+        bd = [b for b in bd if os.path.exists(b[0])]
+        if bd:
+            E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
+            sh_check.build(os.path.join(out, 'Проверочная_карта.pdf'), cfg['kn'], rings, res,
+                           cfg['egrn_ha'], meta, bd,
+                           fragment=(sum(E) / len(E), sum(N) / len(N), cfg.get('fragment_m', 540)))
+            _say(t0, 'проверочная карта собрана (подложек %d)' % len(bd))
+        sh_note.build(os.path.join(out, 'Пояснительная_записка.pdf'), cfg['kn'], res,
+                      cfg['egrn_ha'], json.load(open(os.path.join(out, 'result.json'))),
+                      cfg.get('place', ''), cfg.get('zone_name', cfg['zone']))
+        _say(t0, 'пояснительная записка собрана')
+    if formats:
+        from . import export
+        made = export.all_formats(out, cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'],
+                                  cfg.get('export', {}).get('simplify_m', 0.0))
+        _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON'
+             % made['точек'])
     print()
     for k in sorted(res):
         print('  ЧЗУ/%s %-58s %7.2f га  контуров %2d' %

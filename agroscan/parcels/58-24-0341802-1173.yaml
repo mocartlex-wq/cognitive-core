@@ -24,3 +24,19 @@ belts:
   h_min: 8.0        # м, высота взрослого насаждения
   elong: 3.0        # вытянутость: полоса линейна, куртина нет
   source: manual    # manual | auto | both — чем наполнять ЧЗУ/4
+
+place: "Пензенская область, Никольский район"
+zone_name: "МСК-58, зона 2"
+neighbors: ../data/1173/neighbors.json    # смежные участки из КПТ
+fragment_m: 540                            # сторона врезки на проверочной карте
+
+backdrops:
+  - path: ../data/1173/bg_google.jpg
+    caption: "ESRI World Imagery, лето, 0,72 м/пиксель"
+    note: "подложка, по которой считаются кроны"
+  - path: ../data/1173/bg_clarity.jpg
+    caption: "ESRI Clarity, межсезонье, 0,36 м/пиксель"
+    note: "листва частично облетела — видна структура посадок"
+
+export:
+  simplify_m: 0.0      # 0 — не упрощать; иначе допуск в метрах для DXF/MIF/каталога
