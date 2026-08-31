@@ -162,7 +162,11 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
         if k is None:
             s.d.rectangle([gx0, gy - s.mm(3), gx1, gy + s.mm(3)], fill='white',
                           outline=ZUG, width=s.W(0.6))
-            s.d.text(((gx0 + gx1) / 2, gy), kn, font=s.F(2.5), fill='black', anchor='mm')
+            # номер подгоняется по ширине образца: 58:28:0500401:74 не влезал
+            fs = 2.5
+            while fs > 1.6 and s.d.textlength(kn, font=s.F(fs)) > (gx1 - gx0) - s.mm(2):
+                fs -= 0.1
+            s.d.text(((gx0 + gx1) / 2, gy), kn, font=s.F(fs), fill='black', anchor='mm')
         else:
             col = PART_COLOR.get(k, (0, 0, 0))
             s.d.rectangle([gx0, gy - s.mm(3), gx1, gy + s.mm(3)], outline=col, width=s.W(0.55))
