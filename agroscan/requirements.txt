@@ -1,0 +1,15 @@
+# Ядро расчёта
+numpy>=1.24
+scipy>=1.10
+scikit-image>=0.20
+shapely>=2.0
+rasterio>=1.3
+pyproj>=3.5
+Pillow>=10.0
+PyYAML>=6.0
+
+# Выгрузки (без openpyxl каталог координат пишется только в CSV)
+openpyxl>=3.1
+
+# Проверка листов и инструмента разметки в браузере
+# playwright>=1.40

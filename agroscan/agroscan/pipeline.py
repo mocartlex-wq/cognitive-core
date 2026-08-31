@@ -14,6 +14,7 @@ from . import classify as cls_mod
 from . import config as cfg_mod
 from . import qa as qa_mod
 from . import zones as z
+from . import cache as cache_mod
 from .geo import Grid
 from .rings import rasterize, vectorize
 from .sources import canopy, sentinel
@@ -21,7 +22,7 @@ from .sources import canopy, sentinel
 def _say(t0, msg):
     print('[%5.1f с] %s' % (time.time() - t0, msg), flush=True)
 
-def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True):
+def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=False):
     t0 = time.time()
     cfg = cfg_mod.load(cfg_path)
     out = out_dir or os.path.join(cfg['_dir'], '..', 'out', cfg['kn'].replace(':', '-'))
@@ -39,19 +40,37 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True):
 
     # ── данные ДЗЗ (прореженная сетка: индексы 10 м, полог 1 м) ─────────
     gd = Grid(meta, cfg['zone'], step=step_dzz)
-    chm = canopy.sample(gd)
+    bbox = (round(float(gd.lon.min()), 5), round(float(gd.lat.min()), 5),
+            round(float(gd.lon.max()), 5), round(float(gd.lat.max()), 5))
+    k_chm = cache_mod.key('chm', bbox=bbox, step=step_dzz, shape=gd.shape)
+    chm = None if no_cache else cache_mod.get_array(k_chm)
+    if chm is None:
+        chm = canopy.sample(gd)
+        cache_mod.put_array(k_chm, chm)
     _say(t0, 'полог: %s' % ('нет покрытия' if chm is None else
                             'медиана %.1f м, p90 %.1f м' % (np.nanmedian(chm[gd.submask(mask)]),
                                                             np.nanpercentile(chm[gd.submask(mask)], 90))))
     year = cfg.get('season_year', time.gmtime().tm_year)
-    sc = sentinel.search((float(gd.lon.min()), float(gd.lat.min()),
-                          float(gd.lon.max()), float(gd.lat.max())),
-                         '%d-%s' % (year, cfg['sentinel']['start']),
-                         '%d-%s' % (year, cfg['sentinel']['end']),
-                         cfg['sentinel']['max_cloud'])
-    comp, used = sentinel.composite(gd, sc, limit=cfg['sentinel']['scenes'])
-    ix = sentinel.indices(comp) if comp else {}
-    _say(t0, 'Sentinel-2: композит из %d сцен%s' % (len(used),
+    k_s2 = cache_mod.key('s2', bbox=bbox, step=step_dzz, year=year,
+                         season=(cfg['sentinel']['start'], cfg['sentinel']['end']),
+                         cloud=cfg['sentinel']['max_cloud'], n=cfg['sentinel']['scenes'])
+    cached = None if no_cache else cache_mod.get_json(k_s2)
+    ix, used = {}, []
+    if cached:
+        used = cached['used']
+        ix = {n: cache_mod.get_array(k_s2 + '_' + n) for n in cached['indices']}
+        ix = {n: v for n, v in ix.items() if v is not None}
+    if not ix:
+        sc = sentinel.search(bbox, '%d-%s' % (year, cfg['sentinel']['start']),
+                             '%d-%s' % (year, cfg['sentinel']['end']),
+                             cfg['sentinel']['max_cloud'])
+        comp, used = sentinel.composite(gd, sc, limit=cfg['sentinel']['scenes'])
+        ix = sentinel.indices(comp) if comp else {}
+        if ix:
+            for n, v in ix.items():
+                cache_mod.put_array(k_s2 + '_' + n, v)
+            cache_mod.put_json(k_s2, {'used': used, 'indices': sorted(ix)})
+    _say(t0, 'Sentinel-2: композит из %d сцен%s%s' % (len(used), ' (из кэша)' if cached else '',
          ', NDMI медиана %.3f' % np.nanmedian(ix['ndmi'][gd.submask(mask)]) if ix else ''))
 
     up = lambda a: None if a is None else np.repeat(np.repeat(a, step_dzz, 0), step_dzz, 1)[:meta['H'], :meta['W']]
@@ -138,6 +157,10 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True):
               open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
     np.save(os.path.join(out, 'cls.npy'), cls); np.save(os.path.join(out, 'mask.npy'), mask)
     np.save(os.path.join(out, 'belt.npy'), belt)
+    if chm is not None:
+        np.save(os.path.join(out, 'chm.npy'), chm)
+    if 'ndvi' in ix:
+        np.save(os.path.join(out, 'ndvi.npy'), ix['ndvi'])
 
     # ── комплект листов и обменные форматы ─────────────────────────────
     made = {}
