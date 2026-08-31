@@ -99,6 +99,10 @@ def _grade(v, steps):
             return name
     return steps[-1][1]
 
+def _ru(x):
+    """Десятичный разделитель — запятая: в таблице листа он такой же."""
+    return x.replace('.', ',') if isinstance(x, str) else x
+
 def interpret(rows):
     """Список выводов: (заголовок, строки, цвет-подсветка или None)."""
     if not rows:
@@ -166,4 +170,4 @@ def interpret(rows):
             'В подпахотном слое %.0f смоль/кг.' % bot.get('cec', cec),
             ('Поглощающий комплекс развит, удобрения удерживаются.' if cec >= 25
              else 'Удобрения вносить дробно: комплекс удерживает их слабо.')], None))
-    return out
+    return [(_ru(h), [_ru(l) for l in lines], c) for h, lines, c in out]
