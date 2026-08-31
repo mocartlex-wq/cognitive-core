@@ -6,11 +6,15 @@
 ## Запуск
 
 ```bash
-python3 -m agroscan run parcels/58-24-0341802-1173.yaml   # один участок
-python3 -m agroscan batch parcels --log batch_log.json     # пачка
-python3 -m agroscan new 58:24:0341802:1234                 # заготовка конфига
-python3 -m agroscan cache                                  # что накоплено, --clear чистит
+cd agroscan
+python3 cli.py run parcels/58-24-0341802-1173.yaml   # один участок
+python3 cli.py batch parcels --log batch_log.json     # пачка
+python3 cli.py new 58:24:0341802:1234                 # заготовка конфига
+python3 cli.py cache                                  # что накоплено, --clear чистит
 ```
+
+`cli.py` работает из любой директории; `python3 -m agroscan` — только из этой
+папки, потому что в корне репозитория лежит каталог с тем же именем.
 
 Один вызов проходит весь путь: граница из КПТ → карта высот полога →
 композит Sentinel-2 → классификация зарастания → защитные лесные полосы →
