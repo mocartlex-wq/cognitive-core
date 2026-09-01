@@ -8,6 +8,7 @@ USAGE = """agroscan — анализ зарастания и подготовк�
 
   python -m agroscan run <конфиг.yaml> [--no-sheets] [--no-formats] [--no-cache]
   python -m agroscan batch <шаблон|папка> [--log журнал.json]
+  python -m agroscan prepare <КПТ.xml> <кадастровый:номер> [--place "..."] [--no-cover-all]
   python -m agroscan new <кадастровый:номер> [--zone msk58-2]
   python -m agroscan cache [--clear]
 """
@@ -18,7 +19,9 @@ def main(argv):
     cmd = argv[1]; args = argv[2:]
     flag = lambda f: f in args
     opt = lambda f, d=None: args[args.index(f) + 1] if f in args and args.index(f) + 1 < len(args) else d
-    pos = [a for a in args if not a.startswith('--') and args[args.index(a) - 1] not in ('--log', '--zone')]
+    NAMED = ('--log', '--zone', '--place')
+    pos = [a for a in args if not a.startswith('--')
+           and (args.index(a) == 0 or args[args.index(a) - 1] not in NAMED)]
 
     if cmd == 'run':
         from .pipeline import run
@@ -32,6 +35,13 @@ def main(argv):
             print('не найдено конфигов по «%s»' % p); return 1
         process(cfgs, log_path=opt('--log', 'batch_log.json'),
                 sheets=not flag('--no-sheets'), formats=not flag('--no-formats'))
+    elif cmd == 'prepare':
+        from .prepare import run as prep
+        res = prep(pos[0], pos[1], place=opt('--place', ''),
+                   cover_all=not flag('--no-cover-all'))
+        print('\nготово: %s' % res['конфиг'])
+        for k, v in res.items():
+            print('   %-14s %s' % (k, v))
     elif cmd == 'new':
         kn = pos[0]; zone = opt('--zone', 'msk58-2')
         tag = kn.replace(':', '-')

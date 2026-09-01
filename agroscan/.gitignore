@@ -8,3 +8,5 @@ cache/
 out/
 __pycache__/
 *.pyc
+data/kpt/*.xml
+data/kpt/*.zip
