@@ -13,6 +13,7 @@
 """
 import html as _html
 import json
+import math
 import os
 import re
 import ssl
@@ -93,6 +94,46 @@ def _dispatch(resp, name):
                 return d.get('params') or {}
     return {}
 
+class _Session:
+    """Одна сессия с картой: страница даёт токен и снимок компонента.
+
+    Дальше все вызовы идут в /livewire/update — так же, как их делает
+    собственный клиент сайта.
+    """
+
+    def __init__(self, lon, lat, zoom=14, timeout=120):
+        self.timeout = timeout
+        self.op = _opener()
+        self.url = '%s/map?lat=%.4f&lng=%.4f&zoom=%d' % (BASE, lat, lon, zoom)
+        page = self.op.open(urllib.request.Request(self.url, headers={'User-Agent': UA}),
+                            timeout=timeout).read().decode('utf-8', 'replace')
+        self.tok = re.search(r'name="csrf-token" content="([^"]+)"', page).group(1)
+        self.snap = _html.unescape(re.findall(r'wire:snapshot="([^"]+)"', page)[0])
+
+    def call(self, method, params=None):
+        body = json.dumps({'_token': self.tok, 'components': [
+            {'snapshot': self.snap, 'updates': {},
+             'calls': [{'path': '', 'method': method, 'params': params or []}]}]}).encode()
+        req = urllib.request.Request(BASE + '/livewire/update', data=body, headers={
+            'User-Agent': UA, 'Content-Type': 'application/json', 'X-Livewire': '1',
+            'X-CSRF-TOKEN': self.tok, 'Referer': self.url})
+        return json.loads(self.op.open(req, timeout=self.timeout).read().decode())
+
+    def load(self, lon, lat, delta, zoom):
+        return self.call('loadFeatures', [
+            {'_southWest': {'lat': lat - delta, 'lng': lon - delta},
+             '_northEast': {'lat': lat + delta, 'lng': lon + delta}},
+            {'lat': lat, 'lng': lon}, zoom])
+
+def index_of(title):
+    """«Ч<sup>в</sup>» → «чв»: индекс в том виде, в каком он в легенде."""
+    return re.sub(r'<[^>]+>', '', _html.unescape(title or '')).strip().lower()
+
+def km_between(lat1, lon1, lat2, lon2):
+    """Расстояние по земле, км — на таких дистанциях плоскости достаточно."""
+    return math.hypot((lat1 - lat2) * 111.3,
+                      (lon1 - lon2) * 111.3 * math.cos(math.radians((lat1 + lat2) / 2)))
+
 def lookup(lon, lat, delta=0.01, zoom=14, timeout=120):
     """Контур карты под точкой: индекс, название, сопутствующие, порода.
 
@@ -100,38 +141,97 @@ def lookup(lon, lat, delta=0.01, zoom=14, timeout=120):
     покрытия карты — вызывающий код обязан это пережить.
     """
     try:
-        op = _opener()
-        url = '%s/map?lat=%.4f&lng=%.4f&zoom=%d' % (BASE, lat, lon, zoom)
-        page = op.open(urllib.request.Request(url, headers={'User-Agent': UA}),
-                       timeout=timeout).read().decode('utf-8', 'replace')
-        tok = re.search(r'name="csrf-token" content="([^"]+)"', page).group(1)
-        snap = _html.unescape(re.findall(r'wire:snapshot="([^"]+)"', page)[0])
-
-        def call(method, params):
-            body = json.dumps({'_token': tok, 'components': [
-                {'snapshot': snap, 'updates': {},
-                 'calls': [{'path': '', 'method': method, 'params': params}]}]}).encode()
-            req = urllib.request.Request(BASE + '/livewire/update', data=body, headers={
-                'User-Agent': UA, 'Content-Type': 'application/json', 'X-Livewire': '1',
-                'X-CSRF-TOKEN': tok, 'Referer': url})
-            return json.loads(op.open(req, timeout=timeout).read().decode())
-
-        got = call('loadFeatures', [
-            {'_southWest': {'lat': lat - delta, 'lng': lon - delta},
-             '_northEast': {'lat': lat + delta, 'lng': lon + delta}},
-            {'lat': lat, 'lng': lon}, zoom])
-        feats = _dispatch(got, 'livewire-map:add-features').get('features') or []
+        s = _Session(lon, lat, zoom, timeout)
+        feats = _dispatch(s.load(lon, lat, delta, zoom),
+                          'livewire-map:add-features').get('features') or []
         hit = next((f for f in feats if point_in((lon, lat), f['geometry'])), None)
         if not hit:
             return None
         fid = (hit.get('properties') or {}).get('id') or hit.get('id')
-        data = _dispatch(call('showFeatureData', [fid]), 'livewire-map:show-feature-data')
+        data = _dispatch(s.call('showFeatureData', [fid]), 'livewire-map:show-feature-data')
         res = parse_rows((data.get('feature') or {}).get('data'))
         if not res.get('название'):
             return None
         res.update({'id': fid, 'источник': SOURCE,
                     'ссылка': '%s/map?lat=%.4f&lng=%.4f&zoom=13&feature=%s'
                               % (BASE, lat, lon, fid)})
+        return res
+    except Exception:
+        return None
+
+def contours(lon, lat, delta=0.16, zoom=11, timeout=180):
+    """Контуры карты в габарите — для обзорной карты в записке.
+
+    Отдаёт геометрию, индекс и цвета самой карты, чтобы лист выглядел
+    так же, как источник, и специалист узнавал раскраску.
+    """
+    try:
+        s = _Session(lon, lat, zoom, timeout)
+        feats = _dispatch(s.load(lon, lat, delta, zoom),
+                          'livewire-map:add-features').get('features') or []
+    except Exception:
+        return []
+    out = []
+    for f in feats:
+        pr = f.get('properties') or {}
+        col = (pr.get('colors') or {}).get('default') or {}
+        out.append({'id': pr.get('id'), 'индекс': index_of(pr.get('title')),
+                    'заливка': col.get('fill') or '#dddddd',
+                    'обводка': col.get('stroke') or '#888888',
+                    'geometry': f.get('geometry')})
+    return out
+
+def profiles(lon, lat, delta=1.0, zoom=9, timeout=240):
+    """Полевые разрезы в габарите, отсортированные по удалению от точки.
+
+    Координаты в базе округлены до 0,01° — это ±1 км, и дальше эта
+    погрешность обязана быть видна в отчёте.
+    """
+    try:
+        s = _Session(lon, lat, zoom, timeout)
+        got = _dispatch(s.load(lon, lat, delta, zoom), 'livewire-map:add-profiles')
+    except Exception:
+        return []
+    out = []
+    for p in got.get('profiles') or []:
+        try:
+            a, b = float(p['latitude']), float(p['longitude'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append({'id': p.get('id'), 'lat': a, 'lon': b,
+                    'км': round(km_between(lat, lon, a, b), 1)})
+    return sorted(out, key=lambda x: x['км'])
+
+PROFILE_FIELDS = {'Название почвы по ПК РФ': 'тип',
+                  'Название почвы по WRB 2006': 'wrb',
+                  'Генетический тип почвообразующей породы': 'порода',
+                  'Хозяйственное использование': 'использование',
+                  'Источник данных': 'источник',
+                  'Код разреза': 'код',
+                  'Административный регион РФ': 'регион'}
+
+def parse_profile(tables):
+    """Карточка разреза → поля, которые читает агроном."""
+    out = {}
+    rows = (tables or [{}])[0].get('data') or []
+    for r in rows:
+        if len(r) >= 2 and r[0] in PROFILE_FIELDS:
+            v = _clean(r[1])
+            if v and v != 'не указано':
+                out[PROFILE_FIELDS[r[0]]] = v
+    return out
+
+def profile(pid, lon=45.0, lat=53.0, timeout=180):
+    """Данные разреза по его номеру. None — если не отдался."""
+    try:
+        s = _Session(lon, lat, 10, timeout)
+        d = _dispatch(s.call('showPointData', [pid]), 'livewire-map:show-feature-data')
+        f = d.get('feature') or {}
+        res = parse_profile(((f.get('data') or {}).get('tables')))
+        if not res:
+            return None
+        res['id'] = pid
+        res['ссылка'] = '%s/map?lat=%.4f&lng=%.4f&zoom=12&profile=%s' % (BASE, lat, lon, pid)
         return res
     except Exception:
         return None

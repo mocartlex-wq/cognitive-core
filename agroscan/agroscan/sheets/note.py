@@ -5,6 +5,8 @@
 методика, отчёт проверок, допущения. Числа не набиваются руками, поэтому
 записка не может разойтись со схемой.
 """
+from PIL import Image
+
 from ..sheet import Sheet, fmt_ha, fmt_m2
 
 class Note:
@@ -55,6 +57,18 @@ class Note:
             out.append(cur)
         return '\n'.join(out)
 
+    def image(self, img, w_mm=155, gap_mm=3.0):
+        """Врезка во всю ширину колонки; не влезла — уходит на новую страницу."""
+        w = self.s.mm(w_mm)
+        h = int(img.height * w / img.width)
+        if self.y + h + self.s.mm(gap_mm) > self.bottom:
+            self.new_page()
+        x = self.L
+        self.s.page.paste(img.resize((w, h), Image.LANCZOS), (x, int(self.y)))
+        self.s.d.rectangle([x, int(self.y), x + w, int(self.y) + h],
+                           outline=(60, 60, 60), width=self.s.W(0.3))
+        self.y += h + self.s.mm(gap_mm)
+
     def text(self, t, size=2.65, gap=3.6, color=(35, 35, 35)):
         f = self.s.F(size)
         t = self.wrap(t, f)
@@ -78,13 +92,16 @@ TITLES = {'Схема_ЧЗУ.pdf': 'схема расположения част
           'Приложение_рельеф.pdf': 'рельеф и овражно-балочная сеть',
           'Приложение_почвы.pdf': 'почвенная характеристика и карта показателей'}
 
+def _ru_num(v):
+    return ('%g' % v).replace('.', ',')
+
 def attachments_line(attachments=()):
     have = [TITLES[f] for f in attachments if f in TITLES]
     return ('Приложения: %s; каталог координат; обменные файлы DXF и MIF/MID.'
             % ('; '.join(have) if have else 'схема расположения частей ЗУ'))
 
 def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зона 2',
-          attachments=()):
+          attachments=(), soil_image=None):
     n = Note()
     s = n.s
     s.d.text((s.PW / 2, n.y), 'Пояснительная записка', font=s.F(4.6, True), fill='black', anchor='ma')
@@ -229,6 +246,36 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
                          % (fr['название'].lower(), w['wrb']))
         n.text('\n'.join(L))
         n.y += n.s.mm(2)
+
+        # карта: утверждение о типе почвы должно быть проверяемым —
+        # специалист берёт подписанную линию сетки и сверяет сам
+        if soil_image is not None:
+            n.image(soil_image)
+            n.text('Участок показан красным контуром. Сетка координат — WGS-84; '
+                   'цвет заливки и индексы контуров взяты с самой карты.',
+                   size=2.4, gap=3.4, color=(90, 90, 90))
+            n.y += n.s.mm(1)
+
+        pf = sl.get('разрезы') or {}
+        if pf:
+            near = pf.get('ближайший')
+            same = pf.get('того_же_типа')
+            P0 = []
+            if near:
+                P0.append('Ближайший полевой разрез базы — № %s, %s км%s.'
+                          % (near['id'], _ru_num(near['км']),
+                             ', %s' % near['тип'].lower() if near.get('тип') else ''))
+            if same and (not near or same['id'] != near['id']):
+                P0.append('Ближайший разрез того же типа почвы — № %s, %s км.'
+                          % (same['id'], _ru_num(same['км'])))
+            elif near and not same:
+                P0.append('Разрезов того же типа почвы в просмотренном радиусе нет.')
+            P0.append('В радиусе 25 км разрезов %s: полевых данных, характеризующих '
+                      'этот участок, в открытой базе нет — приведённые значения '
+                      'модельные.' % ('нет' if not pf.get('в_радиусе_25км') else
+                                      '%d' % pf['в_радиусе_25км']))
+            n.text('\n'.join(P0))
+            n.y += n.s.mm(2)
 
         r = lambda v, f='%.1f': (f % v).replace('.', ',')
         P = ['Профиль по данным SoilGrids v2.0 (ISRIC), усреднение по %d точкам внутри участка:'

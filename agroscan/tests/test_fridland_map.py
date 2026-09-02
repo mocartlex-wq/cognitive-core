@@ -61,6 +61,64 @@ def test_lookup_survives_dead_host():
     finally:
         fm.BASE = base
 
+# ── карточка разреза и обзорная карта ───────────────────────────────────
+PROFILE_ROWS = [{'data': [
+    ['Идентификатор разреза в БД', 757],
+    ['Код разреза', 'Alb-594-423'],
+    ['Источник данных', 'Лебедева И.И., Семина Е.В. Почвы лесостепи. — М.: Колос, 1974.'],
+    ['Авторское название почвы', 'не указано'],
+    ['Название почвы по ПК РФ', 'Серые лесные'],
+    ['Название почвы по WRB 2006', 'Greyic Phaeozems Albic'],
+    ['Административный регион РФ', 'Пензенская область'],
+    ['Генетический тип почвообразующей породы', 'покровные суглинки'],
+    ['Хозяйственное использование', 'пашня'],
+]}]
+
+def test_profile_card_parsed():
+    r = fm.parse_profile(PROFILE_ROWS)
+    assert r['тип'] == 'Серые лесные' and r['использование'] == 'пашня', r
+    assert r['код'] == 'Alb-594-423' and 'Лебедева' in r['источник'], r
+    assert 'Авторское название почвы' not in str(r), '«не указано» в карточку не идёт'
+
+def test_index_from_title():
+    assert fm.index_of('Ч<sup>в</sup>') == 'чв'
+    assert fm.index_of('А<sup>н</sup>') == 'ан'
+    assert fm.index_of(None) == ''
+
+def test_distance_is_real_kilometres():
+    """От 1173 до ближайшего разреза базы — 48 км: цифра из отчёта."""
+    d = fm.km_between(53.125, 44.900, 53.48, 44.48)
+    assert 47 < d < 50, d
+    assert fm.km_between(53.0, 45.0, 53.0, 45.0) == 0
+
+def test_map_frame_keeps_aspect_and_covers_parcel():
+    from agroscan.sheets import fridland as sf
+    rings = [[(44.89, 53.12), (44.91, 53.12), (44.91, 53.13), (44.89, 53.13)]]
+    b = sf.bbox_of(rings, pad_km=11.0, aspect=1.45)
+    assert b[0] < 44.89 and b[2] > 44.91 and b[1] < 53.12 and b[3] > 53.13
+    import math
+    w = (b[2] - b[0]) * 111.3 * math.cos(math.radians(53.125))
+    h = (b[3] - b[1]) * 111.3
+    assert abs(w / h - 1.45) < 0.02, (w, h)
+    assert 20 < h < 35, 'кадр порядка 25 км, а не области целиком'
+
+def test_projection_puts_point_where_expected():
+    from agroscan.sheets import fridland as sf
+    pr = sf.projector((44.8, 53.0, 45.0, 53.2), (1000, 1000))
+    assert pr(44.9, 53.1) == (500.0, 500.0)
+    x, y = pr(44.8, 53.2)
+    assert (x, y) == (0.0, 0.0), 'северо-запад — левый верхний угол'
+    assert sf.grid_step(0.2) == 0.05 and sf.grid_step(2.0) == 0.5
+
+def test_same_type_picks_matching_profile():
+    from agroscan.pipeline import _same_type
+    prof = [{'id': 1, 'км': 48, 'тип': 'Серые лесные'},
+            {'id': 2, 'км': 98, 'тип': 'Черноземы выщелоченные'}]
+    assert _same_type(prof, 'Черноземы выщелоченные')['id'] == 2
+    assert _same_type(prof, 'Солонцы') is None
+    assert _same_type([], 'Черноземы выщелоченные') is None
+
+
 if __name__ == '__main__':
     n = 0
     for name, fn in sorted(globals().items()):

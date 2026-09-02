@@ -39,6 +39,64 @@ def _say(t0, msg):
 # в известковании.
 SOIL_MAP_LAYERS = ('soc', 'clay', 'phh2o')
 
+def _fridland_extras(rings, zone, pw, cache_mod, no_cache, kn):
+    """Обзорная карта почвенных контуров и ближайшие полевые разрезы.
+
+    Контуры и точки разрезов кэшируются: соседние участки в пачке лягут
+    в тот же кадр и в сеть не пойдут. Ничего не ответило — возвращаются
+    пустые значения, записка соберётся без карты.
+    """
+    from .geo import Local
+    from .sheets import fridland as sh_fr
+    img, prof = None, {}
+    if not pw:
+        return img, prof
+    lon, lat = pw
+    key = (round(lon, 2), round(lat, 2))
+    k_c = cache_mod.key('fridland_contours', pt=key, delta=0.16)
+    cont = None if no_cache else cache_mod.get_json(k_c)
+    if cont is None:
+        cont = fridland_map.contours(lon, lat, delta=0.16)
+        if cont:
+            cache_mod.put_json(k_c, cont)
+    k_p = cache_mod.key('fridland_profiles', pt=key, delta=1.0)
+    pts = None if no_cache else cache_mod.get_json(k_p)
+    if pts is None:
+        pts = fridland_map.profiles(lon, lat, delta=1.0)
+        if pts:
+            cache_mod.put_json(k_p, pts)
+    rings_wgs = [Local(zone).to_wgs(r) for r in rings]
+    if cont:
+        img = sh_fr.render(rings_wgs, cont, pts or [], size=(3600, 2400), kn=kn)
+    if pts:
+        # тип каждого разреза — отдельная карточка; берём ближние и кэшируем,
+        # иначе на пачке участков это лишние сотни запросов
+        typed = []
+        for p in pts[:12]:
+            k = cache_mod.key('fridland_profile', pid=p['id'])
+            card = None if no_cache else cache_mod.get_json(k)
+            if card is None:
+                card = fridland_map.profile(p['id'], lon, lat) or {}
+                cache_mod.put_json(k, card)
+            typed.append(dict(p, тип=card.get('тип'), ссылка=card.get('ссылка'),
+                              источник=card.get('источник')))
+        prof = {'ближайший': typed[0] if typed else None, 'просмотренные': typed,
+                'в_радиусе_25км': sum(1 for p in pts if p['км'] <= 25),
+                'всего_просмотрено': len(pts)}
+    return img, prof
+
+def _same_type(prof, name):
+    """Ближайший разрез того же типа почвы, что и контур карты."""
+    if not prof or not name:
+        return None
+    key = name.split()[0].lower().replace('ё', 'е')[:7]
+    for p in prof:
+        t = (p.get('тип') or '').lower().replace('ё', 'е')
+        if key and key in t:
+            return p
+    return None
+
+
 def _soil_map(grid, mask, pts, nodes, meta, cache_mod, no_cache):
     """Слои SoilGrids на сетке участка, их разброс в границах и значения в точках.
 
@@ -260,6 +318,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                            cfg['egrn_ha'], meta, bd,
                            fragment=(sum(E) / len(E), sum(N) / len(N), cfg.get('fragment_m', 540)))
             _say(t0, 'проверочная карта собрана (подложек %d)' % len(bd))
+    soil_img = None                 # обзорная карта почв для записки, если соберётся
+
     # ── приложения: обоснование принятых решений ───────────────────────
     if appendices and cfg.get('appendices', True):
         want = cfg.get('appendices', True)
@@ -418,6 +478,21 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                         if sm:
                             _say(t0, 'карта Фридланда: %s (%s), контур %s'
                                  % (sm['название'], sm['индекс'], sm['id']))
+                    # обзорная карта почвенной карты и полевые разрезы:
+                    # утверждение о типе почвы должно быть проверяемым
+                    fr_img, fr_prof = None, {}
+                    try:
+                        fr_img, fr_prof = _fridland_extras(rings, cfg['zone'], pw,
+                                                           cache_mod, no_cache, cfg['kn'])
+                        if fr_prof.get('ближайший'):
+                            типы = [p for p in [fr_prof['ближайший']] if p]
+                            _say(t0, 'разрезы: ближайший № %s в %s км (%s), в радиусе 25 км — %d'
+                                 % (fr_prof['ближайший']['id'], fr_prof['ближайший']['км'],
+                                    fr_prof['ближайший'].get('тип') or 'тип не указан',
+                                    fr_prof['в_радиусе_25км']))
+                    except Exception as e:
+                        _say(t0, 'обзорная карта почв: пропущена (%s)' % str(e)[:60])
+
                     # карта: те же слои, но по площади — специалисту нужно видеть,
                     # куда легли точки и однороден ли массив
                     smap, sstats, spoints = _soil_map(gg, mask, pts, pnodes, meta,
@@ -441,8 +516,13 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                               open(os.path.join(out, 'soil.json'), 'w'),
                               ensure_ascii=False, indent=1)
                     # записка собирается позже и берёт почвы отсюда
+                    if fr_prof and sm:
+                        fr_prof['того_же_типа'] = _same_type(fr_prof.get('просмотренные'),
+                                                             sm.get('название'))
+                    soil_img = fr_img          # картинка в JSON не идёт — только в записку
                     report['почвы'] = {'профиль': srows, 'wrb': wrb, 'карта_почв': sm,
-                                       'слои': sstats, 'точек': used_pts, 'выводы': concl}
+                                       'слои': sstats, 'точек': used_pts, 'выводы': concl,
+                                       'разрезы': fr_prof}
                     top = list(srows.values())[0]
                     _say(t0, 'почвы: %s, гумус %.1f %%, pH %.1f (точек %d)%s'
                          % (soil_src.texture_class(top['clay'], top['silt'], top['sand']),
@@ -469,7 +549,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         sh_note.build(os.path.join(out, 'Пояснительная_записка.pdf'), cfg['kn'], res,
                       cfg['egrn_ha'], report, cfg.get('place', ''),
                       cfg.get('zone_name', cfg['zone']),
-                      attachments=sorted(f for f in os.listdir(out) if f.endswith('.pdf')))
+                      attachments=sorted(f for f in os.listdir(out) if f.endswith('.pdf')),
+                      soil_image=soil_img)
         _say(t0, 'пояснительная записка собрана')
 
     if formats:
