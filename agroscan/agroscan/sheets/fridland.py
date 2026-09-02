@@ -54,6 +54,24 @@ def bbox_of(rings, pad_km=11.0, aspect=1.45):
         b[1] -= d; b[3] += d
     return tuple(b)
 
+def frame_pad_km(parcel_w_km, parcel_h_km, aspect, fill=0.20, min_pad=0.35):
+    """Отступ вокруг участка, при котором он займёт fill ширины кадра.
+
+    Постоянный отступ плохо переносится на поток: у мелкого ЗУ кадр
+    выходил пустым, у крупного — тесным. Считаем от размера участка,
+    но не подпускаем контур вплотную к рамке.
+    """
+    need_h = parcel_w_km / (aspect * max(fill, 1e-3))
+    return max((need_h - parcel_h_km) / 2, parcel_h_km * 0.15, min_pad)
+
+def size_km(rings):
+    """Габарит участка в километрах: ширина, высота, широта центра."""
+    pts = [p for r in rings for p in r]
+    lat = sum(p[1] for p in pts) / len(pts)
+    w = (max(p[0] for p in pts) - min(p[0] for p in pts)) * 111.3 * math.cos(math.radians(lat))
+    h = (max(p[1] for p in pts) - min(p[1] for p in pts)) * 111.3
+    return w, h, lat
+
 def projector(bbox, size):
     """Долгота/широта → пиксель кадра (равнопромежуточная, широта вверх)."""
     lon0, lat0, lon1, lat1 = bbox
@@ -152,18 +170,35 @@ def _frame(size, bbox, contours, rings_wgs, profiles=(), F=20, kn='', scale=True
         # первыми и раньше залезали под неё
         tag = 'ЗУ %s' % kn
         tw = d.textlength(tag, font=fb)
-        def _free(x, y):
+        pts = [pr(*p) for r in rings_wgs for p in r]
+        pbox = (min(p[0] for p in pts), min(p[1] for p in pts),
+                max(p[0] for p in pts), max(p[1] for p in pts))
+
+        def _hits(box, x, y):
+            return (x < box[2] and x + tw > box[0]
+                    and y - F < box[3] and y + F * 1.6 > box[1])
+
+        def _free(x, y, strict=True):
             if not (0 < x and x + tw < W and F * 2 < y < H - F * 2):
                 return False
-            if avoid:                    # под врезкой-обзором подписи не ставим
-                return not (x < avoid[2] and x + tw > avoid[0]
-                            and y - F < avoid[3] and y + F * 1.6 > avoid[1])
-            return True
-        for dx, dy in ((F * 3, -F * 3), (F * 3, F * 3),
-                       (-F * 3 - tw, -F * 3), (-F * 3 - tw, F * 3),
-                       (F * 3, -F * 7), (-F * 3 - tw, F * 7)):
-            lx, ly = px + dx, py + dy
-            if _free(lx, ly):
+            if avoid and _hits(avoid, x, y):     # под врезкой-обзором подписи не ставим
+                return False
+            # и по возможности не поверх самого участка — он теперь крупный
+            return not (strict and _hits(pbox, x, y))
+
+        spots = [(F * 3, -F * 3), (F * 3, F * 3), (-F * 3 - tw, -F * 3), (-F * 3 - tw, F * 3),
+                 (F * 3, -F * 7), (-F * 3 - tw, F * 7),
+                 ((pbox[2] - px) + F * 2, 0), (pbox[0] - px - tw - F * 2, 0),
+                 (0, (pbox[3] - py) + F * 2.5), (0, (pbox[1] - py) - F * 2.5)]
+        lx, ly = px + F * 3, py - F * 3
+        for strict in (True, False):
+            found = False
+            for dx, dy in spots:
+                if _free(px + dx, py + dy, strict):
+                    lx, ly = px + dx, py + dy
+                    found = True
+                    break
+            if found:
                 break
         label_box = (lx - F, ly - F, lx + tw + F, ly + F * 1.6)
 
@@ -213,7 +248,7 @@ def _frame(size, bbox, contours, rings_wgs, profiles=(), F=20, kn='', scale=True
     return mp, pr, (px, py)
 
 def render(rings_wgs, contours, profiles=(), size=(3600, 2400), kn='',
-           near_km=3.5, wide_km=16.0):
+           fill=0.20, wide_km=16.0):
     """Лист карты: крупный план участка, врезка-обзор и легенда.
 
     Владелец обвёл на прежней карте область вокруг участка — «покрупнее».
@@ -236,7 +271,9 @@ def render(rings_wgs, contours, profiles=(), size=(3600, 2400), kn='',
     LEG_H = int(F * 1.9) * rows_leg + int(F * 2.6)
     MAP_H = size[1] - LEG_H
 
-    near = bbox_of(rings_wgs, pad_km=near_km, aspect=W / MAP_H)
+    pw, ph, _ = size_km(rings_wgs)
+    near = bbox_of(rings_wgs, pad_km=frame_pad_km(pw, ph, W / MAP_H, fill),
+                   aspect=W / MAP_H)
     # место врезки выбираем до отрисовки кадра: иначе подпись участка
     # встаёт там же и уходит под врезку
     iw = int(W * 0.30)

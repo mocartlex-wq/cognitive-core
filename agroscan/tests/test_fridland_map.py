@@ -140,6 +140,38 @@ def test_zoom_frame_sits_inside_the_overview():
     wide_km = (wide[2] - wide[0]) * 111.3 * math.cos(math.radians(53.125))
     assert near_km < wide_km / 2, 'крупный план обязан быть заметно крупнее обзора'
 
+def test_frame_zooms_to_parcel_size():
+    """Кадр считается от участка: он должен занимать пятую часть ширины.
+
+    Раньше отступ был постоянный (3,5 км), и участок 1,6 км занимал 10 %
+    кадра — владелец попросил вдвое крупнее.
+    """
+    import math
+    from agroscan.sheets import fridland as sf
+    rings = [[(44.888, 53.118), (44.912, 53.118), (44.912, 53.133), (44.888, 53.133)]]
+    aspect = 1.88
+    w, h, lat = sf.size_km(rings)
+    b = sf.bbox_of(rings, pad_km=sf.frame_pad_km(w, h, aspect), aspect=aspect)
+    fw = (b[2] - b[0]) * 111.3 * math.cos(math.radians(lat))
+    assert 0.18 <= w / fw <= 0.22, (w, fw, w / fw)
+
+def test_frame_survives_odd_parcels():
+    """Крошечный участок не прилипает к рамке, вытянутый — не вылезает."""
+    import math
+    from agroscan.sheets import fridland as sf
+    tiny = [[(45.0, 53.0), (45.0025, 53.0), (45.0025, 53.0018), (45.0, 53.0018)]]
+    w, h, lat = sf.size_km(tiny)
+    pad = sf.frame_pad_km(w, h, 1.88)
+    assert pad >= 0.35, pad
+    b = sf.bbox_of(tiny, pad_km=pad, aspect=1.88)
+    assert (b[3] - b[1]) * 111.3 > 0.7, 'кадр не схлопывается'
+
+    tall = [[(45.0, 52.97), (45.014, 52.97), (45.014, 53.024), (45.0, 53.024)]]
+    w, h, lat = sf.size_km(tall)
+    b = sf.bbox_of(tall, pad_km=sf.frame_pad_km(w, h, 1.88), aspect=1.88)
+    assert b[1] < 52.97 and b[3] > 53.024, 'вытянутый участок целиком в кадре'
+    assert h / ((b[3] - b[1]) * 111.3) <= 0.8, 'по высоте остаётся поле'
+
 
 if __name__ == '__main__':
     n = 0
