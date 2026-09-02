@@ -14,6 +14,7 @@ class Note:
         self.proto = Sheet(w_mm, h_mm, dpi=dpi, ss=2, margin_mm=10)
         self.w_mm, self.h_mm, self.dpi = w_mm, h_mm, dpi
         self.pages = []
+        self.n_sec = 0                  # номера разделов считаются, а не пишутся руками
         self.new_page()
 
     def new_page(self):
@@ -34,9 +35,31 @@ class Note:
         self.s.d.text((self.L, self.y), t, font=self.s.F(size, True), fill='black')
         self.y += self.s.mm(5.0)
 
+    def section(self, t, size=3.6):
+        """Раздел с автонумерацией: выпал раздел — номера не скачут."""
+        self.n_sec += 1
+        self.head('%d. %s' % (self.n_sec, t), size=size)
+
+    def wrap(self, t, font):
+        """Перенос по ширине колонки: длинная строка иначе уходит за рамку."""
+        wmax = self.R - self.L
+        out = []
+        for para in t.split('\n'):
+            cur = ''
+            for word in para.split(' '):
+                probe = (cur + ' ' + word).strip()
+                if not cur or self.s.d.textlength(probe, font=font) <= wmax:
+                    cur = probe
+                else:
+                    out.append(cur); cur = word
+            out.append(cur)
+        return '\n'.join(out)
+
     def text(self, t, size=2.65, gap=3.6, color=(35, 35, 35)):
+        f = self.s.F(size)
+        t = self.wrap(t, f)
         self.need(gap * (t.count('\n') + 1))
-        self.s.d.multiline_text((self.L, self.y), t, font=self.s.F(size), fill=color,
+        self.s.d.multiline_text((self.L, self.y), t, font=f, fill=color,
                                 spacing=self.s.mm(1.35))
         self.y += self.s.mm(gap) * (t.count('\n') + 1)
 
@@ -46,7 +69,22 @@ class Note:
                      fill=(90, 90, 90), anchor='ma')
         return self.pages[0].save(path, extra_pages=self.pages[1:])
 
-def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зона 2'):
+# Перечень приложений собирается по факту: они выпускаются не для каждого
+# участка, и записка не должна обещать того, чего в комплекте нет.
+TITLES = {'Схема_ЧЗУ.pdf': 'схема расположения частей ЗУ',
+          'Проверочная_карта.pdf': 'проверочная карта без заливки',
+          'Приложение_ИК.pdf': 'материалы съёмки в ИК-диапазоне',
+          'Приложение_динамика.pdf': 'ряд NDVI и датировка выбытия из оборота',
+          'Приложение_рельеф.pdf': 'рельеф и овражно-балочная сеть',
+          'Приложение_почвы.pdf': 'почвенная характеристика и карта показателей'}
+
+def attachments_line(attachments=()):
+    have = [TITLES[f] for f in attachments if f in TITLES]
+    return ('Приложения: %s; каталог координат; обменные файлы DXF и MIF/MID.'
+            % ('; '.join(have) if have else 'схема расположения частей ЗУ'))
+
+def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зона 2',
+          attachments=()):
     n = Note()
     s = n.s
     s.d.text((s.PW / 2, n.y), 'Пояснительная записка', font=s.F(4.6, True), fill='black', anchor='ma')
@@ -57,14 +95,14 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
         n.y += s.mm(4.6)
     n.y += s.mm(4.4)
 
-    n.head('1. Объект')
+    n.section('Объект')
     n.text('Кадастровый номер:  %s\nМестоположение:  %s\n'
            'Категория:  земли сельскохозяйственного назначения\n'
            'Площадь по сведениям ЕГРН:  %s м² (%s га)\nСистема координат:  %s'
            % (kn, place or '—', fmt_m2(egrn_ha), fmt_ha(egrn_ha), zone_name))
     n.y += s.mm(3)
 
-    n.head('2. Ведомость частей')
+    n.section('Ведомость частей')
     keys = sorted(parts)
     cols = [n.L, n.L + s.mm(22), n.L + s.mm(112), n.L + s.mm(146), n.R]
     HH = s.mm(8.2)
@@ -109,7 +147,7 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
             % (fmt_ha(a1 + a2), fmt_ha(a1), fmt_ha(a2))))
     n.y += s.mm(3)
 
-    n.head('3. Исходные материалы')
+    n.section('Исходные материалы')
     sc = result.get('сцены_sentinel', [])
     src = ['• ESRI World Imagery и Clarity, 0,72 и 0,36 м/пиксель — проективное покрытие крон;']
     if sc:
@@ -120,7 +158,7 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
     n.text('\n'.join(src))
     n.y += s.mm(3)
 
-    n.head('4. Как разделены части')
+    n.section('Как разделены части')
     n.text('Проективное покрытие крон считается в скользящем окне 25 м. Пороги покрытия:\n'
            '10 % — слабое зарастание, 30 % — среднее, 60 % и выше — сильное. В ЧЗУ/1 вошли все\n'
            'три градации: по методике раскорчёвке подлежит любая древесная растительность.\n'
@@ -134,8 +172,10 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
     n.y += s.mm(3)
 
     b = result.get('лесополосы') or {}
-    if b:
-        n.head('5. Защитные лесные насаждения')
+    # полос нет — раздела нет: пустая таблица «найдено 0 полос площадью — га»
+    # только сбивает читателя
+    if b.get('найдено_полос') or b.get('ручная_га'):
+        n.section('Защитные лесные насаждения')
         n.text('Состав ЧЗУ/4 принят по разметке правообладателя. Автоматический поиск по высоте\n'
                'полога выполнен как проверка: найдено %s полос общей площадью %s га, покрытие\n'
                'осевых линий ручной разметки %s %%, точность в зоне разметки %s %%.\n'
@@ -146,9 +186,83 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
                   str(b.get('новых_полос_га', '—')).replace('.', ',')))
         n.y += s.mm(3)
 
+
+    sl = result.get('почвы') or {}
+    if sl.get('профиль'):
+        rows = sl['профиль']
+        top = list(rows.values())[0]
+        bot = list(rows.values())[-1]
+        hz = list(rows)
+        n.section('Почвенная характеристика')
+        fr = sl.get('карта_почв') or {}
+        L = []
+        if fr.get('название'):
+            L.append('Тип почвы по Почвенной карте РСФСР 1:2 500 000 (Фридланд и др., 1988):')
+            L.append('%s — индекс %s%s%s.'
+                     % (fr['название'], fr.get('индекс', '—'),
+                        ', код %s' % fr['код'] if fr.get('код') else '',
+                        ', почвообразующая порода — %s' % fr['порода'].lower()
+                        if fr.get('порода') else ''))
+            if fr.get('сопутствующие'):
+                L.append('Сопутствующие почвы контура: %s.' % ', '.join(fr['сопутствующие']).lower())
+            L.append('Контур карты измеряется километрами и характеризует массив, '
+                     'а не участок.')
+        w = sl.get('wrb') or {}
+        if w.get('wrb'):
+            prob = dict((k, v) for k, v in (w.get('вероятности') or []))
+            ru = w.get('русское_соответствие') or ''
+            L.append('Классификация WRB по SoilGrids: %s%s%s.'
+                     % (w['wrb'],
+                        ' (%d %%)' % prob[w['wrb']] if prob.get(w['wrb']) else '',
+                        ' — ориентировочно %s' % ru if ru else ''))
+            if fr.get('название'):
+                # согласие проверяем по словам названия: чернозёмы карты должны
+                # находиться и в русском соответствии класса WRB
+                key = fr['название'].split()[0].lower().replace('ё', 'е')[:7]
+                agree = key and key in ru.lower().replace('ё', 'е')
+                L.append('Источники согласуются: обе системы указывают на один ряд почв. '
+                         'Точного соответствия между ними не бывает — WRB опирается на '
+                         'диагностические горизонты, отечественная классификация на генезис.'
+                         if agree else
+                         'Источники расходятся: карта даёт «%s», модель — «%s». '
+                         'Расхождение снимается полевым обследованием.'
+                         % (fr['название'].lower(), w['wrb']))
+        n.text('\n'.join(L))
+        n.y += n.s.mm(2)
+
+        r = lambda v, f='%.1f': (f % v).replace('.', ',')
+        P = ['Профиль по данным SoilGrids v2.0 (ISRIC), усреднение по %d точкам внутри участка:'
+             % sl.get('точек', 0)]
+        for name, v in rows.items():
+            P.append('%s — глина %s %%, гумус %s %%, pH %s, плотность %s г/см³.'
+                     % (name, r(v['clay']), r(v['humus']), r(v['phh2o']),
+                        r(v.get('bdod', 0), '%.2f')))
+        st = sl.get('слои') or {}
+        if st:
+            got = []
+            for key, lab, unit in (('humus', 'гумус', ' %'), ('clay', 'глина', ' %'),
+                                   ('phh2o', 'pH', '')):
+                if key in st:
+                    got.append('%s %s…%s%s' % (lab, r(st[key][0]), r(st[key][2]), unit))
+            P.append('Разброс в границах участка по растровым слоям (ячейка 250 м): %s.'
+                     % ', '.join(got))
+        n.text('\n'.join(P))
+        n.y += n.s.mm(2)
+
+        cz = [h for h, _, _ in (sl.get('выводы') or [])]
+        if cz:
+            n.text('Выводы для вовлечения в оборот:\n' + '\n'.join('• ' + t for t in cz))
+            n.y += n.s.mm(2)
+        n.text('SoilGrids — модельное предсказание с шагом 250 м, а не полевая съёмка; '
+               'гумус в слое 0–5 см завышен: модель относит к нему лесную подстилку.\n'
+               'Для проектной документации требуется отбор проб аккредитованной лабораторией.\n'
+               'Профиль по горизонтам, тип почвы и карта распределения показателей — '
+               'в приложении «Почвенная характеристика».', size=2.5, color=(70, 70, 70))
+        n.y += n.s.mm(3)
+
     qa = result.get('qa', {})
     if qa:
-        n.head('6. Контроль')
+        n.section('Контроль')
         n.text('Все проверки геометрии пройдены.' if qa.get('пройдено')
                else 'ВНИМАНИЕ: часть проверок не пройдена.', size=2.7,
                color=(20, 90, 20) if qa.get('пройдено') else (160, 0, 0))
@@ -161,7 +275,7 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
         n.text('\n'.join(lines))
         n.y += s.mm(3)
 
-    n.head('7. Принятые допущения')
+    n.section('Принятые допущения')
     n.text('1. Контуры ЧЗУ/4 обведены правообладателем; автоматический поиск даёт кандидатов\n'
            '   и в состав части не входит без его подтверждения.\n'
            '2. Границы ЗОУИТ приняты по сведениям КПТ, а не дешифрированы по снимку;\n'
@@ -171,6 +285,5 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
            '4. Контуры получены по данным дистанционного зондирования и подлежат\n'
            '   подтверждению при обследовании на местности.')
     n.y += s.mm(4)
-    n.text('Приложения: схема расположения частей ЗУ; проверочная карта без заливки;\n'
-           'каталог координат; обменные файлы DXF и MIF/MID.', size=2.5, color=(60, 60, 60))
+    n.text(attachments_line(attachments), size=2.5, color=(60, 60, 60))
     return n.save(path)

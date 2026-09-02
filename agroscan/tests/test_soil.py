@@ -57,7 +57,7 @@ def test_texture_advice_matches_class():
 
 def test_wrb_mapping():
     """Соответствие WRB даёт русское название, но не выдумывает его."""
-    assert soil.WRB_RU['Phaeozems'].startswith('тёмно-серые')
+    assert 'выщелоченные чернозёмы' in soil.WRB_RU['Phaeozems']
     assert soil.WRB_RU['Chernozems'] == 'чернозёмы'
     assert soil.WRB_RU.get('Andosols') is None, 'для неизвестного класса нет соответствия'
 

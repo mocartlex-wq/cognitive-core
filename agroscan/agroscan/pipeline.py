@@ -17,7 +17,8 @@ from . import zones as z
 from . import cache as cache_mod
 from .geo import Grid
 from .rings import rasterize, vectorize
-from .sources import canopy, dem as dem_src, landcover, landsat, sentinel, soil as soil_src
+from .sources import (canopy, dem as dem_src, fridland_map, landcover, landsat,
+                      sentinel, soil as soil_src)
 
 def _skip(t0, what, e):
     """Приложение не собралось — конвейер идёт дальше, но причина видна.
@@ -225,12 +226,14 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         o, i, a = z.to_rings(Z[k])
         res[k] = {'outer': o, 'inner': i, 'areaHa': a, 'название': cfg['parts'].get(k, '')}
         json.dump(res[k], open(os.path.join(out, 'chzu%s.json' % k), 'w'))
-    json.dump({'kn': cfg['kn'], 'egrn_ha': cfg['egrn_ha'],
-               'части': {k: round(v['areaHa'], 4) for k, v in res.items()},
-               'сумма': round(sum(v['areaHa'] for v in res.values()), 4),
-               'классы': {str(c): round(a, 4) for c, a in ar.items()},
-               'лесополосы': b_info, 'сцены_sentinel': used, 'qa': qa},
-              open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
+    report = {'kn': cfg['kn'], 'egrn_ha': cfg['egrn_ha'],
+              'части': {k: round(v['areaHa'], 4) for k, v in res.items()},
+              'сумма': round(sum(v['areaHa'] for v in res.values()), 4),
+              'классы': {str(c): round(a, 4) for c, a in ar.items()},
+              'лесополосы': b_info, 'сцены_sentinel': used, 'qa': qa}
+    _dump_report = lambda: json.dump(report, open(os.path.join(out, 'result.json'), 'w'),
+                                     ensure_ascii=False, indent=1)
+    _dump_report()
     np.save(os.path.join(out, 'cls.npy'), cls); np.save(os.path.join(out, 'mask.npy'), mask)
     np.save(os.path.join(out, 'belt.npy'), belt)
     if chm is not None:
@@ -241,7 +244,7 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     # ── комплект листов и обменные форматы ─────────────────────────────
     made = {}
     if sheets:
-        from .sheets import schema as sh_schema, check_map as sh_check, note as sh_note
+        from .sheets import schema as sh_schema, check_map as sh_check
         nb_path = cfg_mod.path_of(cfg, 'neighbors')
         nb = json.load(open(nb_path)) if nb_path and os.path.exists(nb_path) else []
         _, den = sh_schema.build(os.path.join(out, 'Схема_ЧЗУ.pdf'), cfg['kn'], rings, res,
@@ -257,10 +260,6 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                            cfg['egrn_ha'], meta, bd,
                            fragment=(sum(E) / len(E), sum(N) / len(N), cfg.get('fragment_m', 540)))
             _say(t0, 'проверочная карта собрана (подложек %d)' % len(bd))
-        sh_note.build(os.path.join(out, 'Пояснительная_записка.pdf'), cfg['kn'], res,
-                      cfg['egrn_ha'], json.load(open(os.path.join(out, 'result.json'))),
-                      cfg.get('place', ''), cfg.get('zone_name', cfg['zone']))
-        _say(t0, 'пояснительная записка собрана')
     # ── приложения: обоснование принятых решений ───────────────────────
     if appendices and cfg.get('appendices', True):
         want = cfg.get('appendices', True)
@@ -396,13 +395,29 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                         wrb = soil_src.classification(*pw)
                         if wrb:
                             cache_mod.put_json(k_wrb, wrb)
+                    if wrb:
+                        # соответствие берём из текущей таблицы, а не из кэша:
+                        # иначе уточнённая формулировка не доходит до листа
+                        wrb['русское_соответствие'] = soil_src.WRB_RU.get(wrb['wrb'])
+                    # Тип по бумажной карте: индекс из конфига имеет приоритет,
+                    # иначе контур спрашивается у soil-db по координате центра.
                     sm = cfg.get('soil_map') or None
                     if sm and not (sm.get('индекс') or '').strip():
-                        sm = None          # индекс не заполнен — блока карты не будет
+                        sm = None
                     if sm and sm.get('индекс') and not sm.get('название'):
                         row = soil_src.fridland(index=sm['индекс'])
                         if row:
                             sm = dict(sm, название=row['название'], код=row['код'])
+                    if sm is None and pw:
+                        k_fr = cache_mod.key('fridland', pt=(round(pw[0], 2), round(pw[1], 2)))
+                        sm = None if no_cache else cache_mod.get_json(k_fr)
+                        if sm is None:
+                            sm = fridland_map.lookup(*pw)
+                            if sm:
+                                cache_mod.put_json(k_fr, sm)
+                        if sm:
+                            _say(t0, 'карта Фридланда: %s (%s), контур %s'
+                                 % (sm['название'], sm['индекс'], sm['id']))
                     # карта: те же слои, но по площади — специалисту нужно видеть,
                     # куда легли точки и однороден ли массив
                     smap, sstats, spoints = _soil_map(gg, mask, pts, pnodes, meta,
@@ -425,6 +440,9 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                                'точки': spoints},
                               open(os.path.join(out, 'soil.json'), 'w'),
                               ensure_ascii=False, indent=1)
+                    # записка собирается позже и берёт почвы отсюда
+                    report['почвы'] = {'профиль': srows, 'wrb': wrb, 'карта_почв': sm,
+                                       'слои': sstats, 'точек': used_pts, 'выводы': concl}
                     top = list(srows.values())[0]
                     _say(t0, 'почвы: %s, гумус %.1f %%, pH %.1f (точек %d)%s'
                          % (soil_src.texture_class(top['clay'], top['silt'], top['sand']),
@@ -441,6 +459,18 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                     _say(t0, 'ИК-материалы: композиты из каналов Sentinel-2')
             except Exception as e:
                 _say(t0, 'ИК-материалы: лист пропущен (%s)' % str(e)[:70])
+
+    # Записка собирается последней: почвы, рельеф и датировка считаются
+    # в приложениях, а записка на них ссылается — раньше она выходила
+    # до них и о почве сказать не могла.
+    if sheets:
+        from .sheets import note as sh_note
+        _dump_report()
+        sh_note.build(os.path.join(out, 'Пояснительная_записка.pdf'), cfg['kn'], res,
+                      cfg['egrn_ha'], report, cfg.get('place', ''),
+                      cfg.get('zone_name', cfg['zone']),
+                      attachments=sorted(f for f in os.listdir(out) if f.endswith('.pdf')))
+        _say(t0, 'пояснительная записка собрана')
 
     if formats:
         from . import export
