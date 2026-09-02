@@ -171,3 +171,69 @@ def interpret(rows):
             ('Поглощающий комплекс развит, удобрения удерживаются.' if cec >= 25
              else 'Удобрения вносить дробно: комплекс удерживает их слабо.')], None))
     return [(_ru(h), [_ru(l) for l in lines], c) for h, lines, c in out]
+
+# ── тип почвы ───────────────────────────────────────────────────────────
+CLASSIFY = 'https://rest.isric.org/soilgrids/v2.0/classification/query'
+
+# Соответствие WRB и русской классификации — ОРИЕНТИРОВОЧНОЕ: системы
+# построены на разных признаках, WRB опирается на диагностические горизонты,
+# отечественная — на генезис. Даём как подсказку, а не как перевод.
+WRB_RU = {
+    'Phaeozems': 'тёмно-серые лесные и лугово-чернозёмные',
+    'Chernozems': 'чернозёмы',
+    'Luvisols': 'серые лесные',
+    'Albeluvisols': 'дерново-подзолистые',
+    'Retisols': 'дерново-подзолистые',
+    'Podzols': 'подзолы',
+    'Greyzems': 'серые лесные',
+    'Kastanozems': 'каштановые',
+    'Gleysols': 'глеевые',
+    'Fluvisols': 'аллювиальные',
+    'Arenosols': 'песчаные',
+    'Cambisols': 'буроземы',
+    'Umbrisols': 'дерново-гумусовые',
+    'Solonetz': 'солонцы',
+    'Solonchaks': 'солончаки',
+    'Histosols': 'торфяные',
+}
+
+def classification(lon, lat, n=5, timeout=180, tries=3):
+    """Класс WRB по координатам: ведущий и распределение вероятностей.
+
+    Эндпоинт классификации отвечает от десяти секунд до нескольких минут и
+    иногда обрывается, поэтому попытки повторяются, а при неудаче
+    возвращается None: лист собирается без блока, а не падает.
+    """
+    ca = '/root/.ccr/ca-bundle.crt'
+    url = '%s?lon=%.5f&lat=%.5f&number_classes=%d' % (CLASSIFY, lon, lat, n)
+    for attempt in range(tries):
+        cmd = ['curl', '-sS', '--max-time', str(timeout), url]
+        if os.path.exists(ca):
+            cmd[1:1] = ['--cacert', ca]
+        r = subprocess.run(cmd, capture_output=True)
+        if r.returncode == 0 and r.stdout.lstrip().startswith(b'{'):
+            try:
+                d = json.loads(r.stdout)
+            except Exception:
+                continue
+            top = d.get('wrb_class_name')
+            if top:
+                return {'wrb': top, 'русское_соответствие': WRB_RU.get(top),
+                        'вероятности': [(k, v) for k, v in d.get('wrb_class_probability', [])]}
+    return None
+
+def fridland(index=None, code=None, path=None):
+    """Тип по легенде почвенной карты РСФСР 1:2 500 000 (Фридланд и др., 1988).
+
+    Карта показывается на soil-db.ru; открытого интерфейса к её контурам нет,
+    поэтому индекс участка задаётся в конфиге вручную, а здесь по нему
+    подставляется полное название из легенды.
+    """
+    path = path or os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), 'data', 'fridland_legend.json')
+    if not os.path.exists(path):
+        return None
+    for row in json.load(open(path, encoding='utf-8')):
+        if (index and row['индекс'] == index) or (code and str(row['код']) == str(code)):
+            return row
+    return None

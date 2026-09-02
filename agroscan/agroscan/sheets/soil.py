@@ -36,7 +36,8 @@ def _table(s, x0, y0, title, rows, width):
     s.d.line([x0, y - s.mm(0.6), x0 + width, y - s.mm(0.6)], fill='black', width=s.W(0.55))
     return y + s.mm(3.0)
 
-def build(path, kn, rows, conclusions, egrn_ha, place='', points=0):
+def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
+          wrb=None, soil_map=None):
     if not rows:
         return None
     s = Sheet(297, 210, dpi=400, ss=2, margin_mm=8, title_mm=13)
@@ -53,6 +54,41 @@ def build(path, kn, rows, conclusions, egrn_ha, place='', points=0):
     TW = sum(s.mm(w) for _, w in COLS)
     x0 = s.IN0 + s.mm(4)
     y = s.margin + s.title_h + s.mm(6)
+
+    # Тип почвы: то, чего в свойствах нет, а агроном спрашивает первым.
+    # Два источника разной природы — модельная классификация и бумажная
+    # карта; расхождение между ними не сглаживаем, а показываем.
+    if wrb or soil_map:
+        s.d.text((x0, y), 'Тип почвы', font=s.F(3.4, True), fill='black')
+        y += s.mm(6)
+        if wrb:
+            p = dict(wrb.get('вероятности') or []).get(wrb.get('wrb'))
+            s.d.text((x0, y), 'Классификация WRB (SoilGrids):', font=s.F(2.6), fill=(60, 60, 60))
+            s.d.text((x0 + s.mm(52), y), '%s%s' % (wrb['wrb'], ' — %d %%' % p if p else ''),
+                     font=s.F(2.7, True), fill='black')
+            y += s.mm(4.4)
+            if wrb.get('русское_соответствие'):
+                s.d.text((x0 + s.mm(52), y), 'ориентировочно: %s' % wrb['русское_соответствие'],
+                         font=s.F(2.5), fill=(90, 90, 90))
+                y += s.mm(4.2)
+            other = [x for x in (wrb.get('вероятности') or []) if x[0] != wrb['wrb']][:3]
+            if other:
+                s.d.text((x0 + s.mm(52), y), 'далее: ' + ', '.join('%s %d %%' % x for x in other),
+                         font=s.F(2.4), fill=(120, 120, 120))
+                y += s.mm(4.6)
+        if soil_map and soil_map.get('название'):
+            s.d.text((x0, y), 'Почвенная карта РСФСР:', font=s.F(2.6), fill=(60, 60, 60))
+            s.d.text((x0 + s.mm(52), y), '%s (индекс %s)'
+                     % (soil_map['название'], soil_map.get('индекс', '—')),
+                     font=s.F(2.7, True), fill='black')
+            y += s.mm(4.4)
+            s.d.text((x0 + s.mm(52), y),
+                     'масштаб 1:2 500 000 — контур измеряется километрами '
+                     'и характеризует массив, а не участок',
+                     font=s.F(2.4), fill=(120, 120, 120))
+            y += s.mm(4.6)
+        y += s.mm(3)
+
     y = _table(s, x0, y, 'Профиль по горизонтам · площадь участка %s га'
                % ('%.2f' % egrn_ha).replace('.', ','), rows, TW)
     s.d.text((x0, y + s.mm(1.0)),

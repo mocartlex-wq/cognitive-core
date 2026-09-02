@@ -44,6 +44,25 @@ def test_poor_humus_recommends_organics():
     txt = ' '.join(' '.join(l) for _, l, _ in out)
     assert 'внесение органики' in txt, txt
 
+
+def test_wrb_mapping():
+    """Соответствие WRB даёт русское название, но не выдумывает его."""
+    assert soil.WRB_RU['Phaeozems'].startswith('тёмно-серые')
+    assert soil.WRB_RU['Chernozems'] == 'чернозёмы'
+    assert soil.WRB_RU.get('Andosols') is None, 'для неизвестного класса нет соответствия'
+
+def test_fridland_legend():
+    """Легенда почвенной карты читается и отвечает по индексу."""
+    r = soil.fridland(index='чв')
+    assert r and 'выщелоченные' in r['название'], r
+    assert soil.fridland(index='нетакого') is None
+    import json as _j, os as _o
+    path = _o.path.join(_o.path.dirname(_o.path.dirname(_o.path.abspath(__file__))),
+                        'data', 'fridland_legend.json')
+    rows = _j.load(open(path, encoding='utf-8'))
+    assert len(rows) > 250, len(rows)
+    assert all({'код', 'индекс', 'название'} <= set(x) for x in rows)
+
 if __name__ == '__main__':
     n = 0
     for name, fn in sorted(globals().items()):

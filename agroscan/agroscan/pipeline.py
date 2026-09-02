@@ -326,15 +326,39 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                 else:
                     from .sheets import soil as sh_soil
                     concl = soil_src.interpret(srows)
+                    # классификация WRB отвечает долго и не всегда — кэшируем,
+                    # а при отказе лист собирается без блока типа почвы
+                    # берём точку, ближайшую к центру участка: первая из списка
+                    # зависит от порядка обхода маски и класс от прогона к прогону плавал
+                    ctr = (float(np.mean([q[0] for q in pts])), float(np.mean([q[1] for q in pts]))) \
+                        if pts else None
+                    pw = min(pts, key=lambda q: (q[0] - ctr[0]) ** 2 + (q[1] - ctr[1]) ** 2) \
+                        if pts else None
+                    k_wrb = cache_mod.key('wrb', pt=(round(pw[0], 3), round(pw[1], 3)) if pw else None)
+                    wrb = None if no_cache else cache_mod.get_json(k_wrb)
+                    if wrb is None and pw:
+                        wrb = soil_src.classification(*pw)
+                        if wrb:
+                            cache_mod.put_json(k_wrb, wrb)
+                    sm = cfg.get('soil_map') or None
+                    if sm and not (sm.get('индекс') or '').strip():
+                        sm = None          # индекс не заполнен — блока карты не будет
+                    if sm and sm.get('индекс') and not sm.get('название'):
+                        row = soil_src.fridland(index=sm['индекс'])
+                        if row:
+                            sm = dict(sm, название=row['название'], код=row['код'])
                     sh_soil.build(os.path.join(out, 'Приложение_почвы.pdf'), cfg['kn'], srows,
-                                  concl, cfg['egrn_ha'], cfg.get('place', ''), used_pts)
-                    json.dump({'точек': used_pts, 'профиль': srows},
+                                  concl, cfg['egrn_ha'], cfg.get('place', ''), used_pts,
+                                  wrb=wrb, soil_map=sm)
+                    json.dump({'точек': used_pts, 'профиль': srows, 'wrb': wrb,
+                               'карта_почв': sm},
                               open(os.path.join(out, 'soil.json'), 'w'),
                               ensure_ascii=False, indent=1)
                     top = list(srows.values())[0]
-                    _say(t0, 'почвы: %s, гумус %.1f %%, pH %.1f (точек %d)'
+                    _say(t0, 'почвы: %s, гумус %.1f %%, pH %.1f (точек %d)%s'
                          % (soil_src.texture_class(top['clay'], top['silt'], top['sand']),
-                            top['humus'], top['phh2o'], used_pts))
+                            top['humus'], top['phh2o'], used_pts,
+                            ' | WRB ' + wrb['wrb'] if wrb else ' | WRB не ответил'))
             except Exception as e:
                 _say(t0, 'почвы: лист пропущен (%s)' % str(e)[:70])
 
