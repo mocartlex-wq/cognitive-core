@@ -8,7 +8,7 @@
 import numpy as np
 from PIL import Image
 
-from ..sheet import Sheet, ZUG, fmt_ha
+from ..sheet import Sheet, draw_rings, fmt_ha
 
 def _hillshade(z, cell_m, az=315.0, alt=45.0):
     gy, gx = np.gradient(z.astype(float), cell_m)
@@ -51,17 +51,7 @@ def build(path, kn, rings, res, egrn_ha, meta, image_path=None,
     GH = s.PH - s.margin - s.mm(6) - GY0
     tw = int((GW - s.mm(5)) / 2); th = min(int(GH * 0.98), tw)
 
-    # и снимок, и отмывка построены на кадре meta — контур кладём в его привязке,
-    # иначе граница на двух картинках оказывается в разных местах
-    def overlay(img):
-        from PIL import ImageDraw
-        od = ImageDraw.Draw(img)
-        pr = lambda e, n: ((e - meta['e0']) / (meta['e1'] - meta['e0']) * img.width,
-                           (meta['n1'] - n) / (meta['n1'] - meta['n0']) * img.height)
-        w = max(2, int(img.width / 300))
-        for r in rings:
-            od.line([pr(*p) for p in r] + [pr(*r[0])], fill=ZUG, width=w)
-        return img
+    overlay = lambda img: draw_rings(img, rings, meta)
 
     x = GX0
     if image_path:

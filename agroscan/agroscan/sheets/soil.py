@@ -37,7 +37,7 @@ def _table(s, x0, y0, title, rows, width):
     return y + s.mm(3.0)
 
 def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
-          wrb=None, soil_map=None):
+          wrb=None, soil_map=None, map_page=None):
     if not rows:
         return None
     s = Sheet(297, 210, dpi=400, ss=2, margin_mm=8, title_mm=13)
@@ -71,7 +71,9 @@ def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
                 s.d.text((x0 + s.mm(52), y), 'ориентировочно: %s' % wrb['русское_соответствие'],
                          font=s.F(2.5), fill=(90, 90, 90))
                 y += s.mm(4.2)
-            other = [x for x in (wrb.get('вероятности') or []) if x[0] != wrb['wrb']][:3]
+            # из кэша вероятности приходят списками, из сети — кортежами:
+            # без tuple() форматирование списка валит весь лист
+            other = [tuple(x) for x in (wrb.get('вероятности') or []) if x[0] != wrb['wrb']][:3]
             if other:
                 s.d.text((x0 + s.mm(52), y), 'далее: ' + ', '.join('%s %d %%' % x for x in other),
                          font=s.F(2.4), fill=(120, 120, 120))
@@ -168,5 +170,7 @@ def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
              'Для проектной документации нужен почвенный анализ аккредитованной лабораторией. '
              'Гумус в слое 0–5 см завышен: модель относит к нему лесную подстилку.',
              font=s.F(2.5), fill=(90, 90, 90))
-    s.save(path)
+    # карта идёт второй страницей того же приложения: специалист смотрит
+    # цифры и тут же видит, откуда они и как меняются по участку
+    s.save(path, extra_pages=[map_page] if map_page is not None else ())
     return path

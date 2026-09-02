@@ -100,8 +100,13 @@ def _grade(v, steps):
     return steps[-1][1]
 
 def _ru(x):
-    """Десятичный разделитель — запятая: в таблице листа он такой же."""
-    return x.replace('.', ',') if isinstance(x, str) else x
+    """Десятичный разделитель — запятая, но только внутри числа.
+
+    Замена всех точек подряд превращала конец предложения в запятую:
+    «…мнётся техникой,» вместо точки.
+    """
+    import re
+    return re.sub(r'(?<=\d)\.(?=\d)', ',', x) if isinstance(x, str) else x
 
 def interpret(rows):
     """Список выводов: (заголовок, строки, цвет-подсветка или None)."""
@@ -112,16 +117,23 @@ def interpret(rows):
     out = []
 
     cls = texture_class(top['clay'], top['silt'], top['sand'])
-    heavy = top['clay'] >= 27
+    # Вывод о проходимости привязан к тому же порогу, что и название класса:
+    # раньше «средний суглинок» сопровождался фразой «состав лёгкий».
+    if top['clay'] >= 27:
+        how = ['Для раскорчёвки это значит: работать по сухому — во влажном',
+               'состоянии такой грунт залипает и мнётся техникой.']
+    elif top['clay'] >= 20:
+        how = ['Для раскорчёвки состав удобный: техника проходит, но по сырому',
+               'колея всё же продавливается — работы планировать на сухой период.']
+    else:
+        how = ['Состав лёгкий: техника проходит и во влажном состоянии,',
+               'но почва склонна к иссушению и ветровой эрозии.']
     out.append(('Гранулометрический состав — %s.' % cls, [
         'Глина %.0f–%.0f %%, пыль %.0f–%.0f %%, песок %.0f–%.0f %% по профилю.'
         % (min(r['clay'] for r in rows.values()), max(r['clay'] for r in rows.values()),
            min(r['silt'] for r in rows.values()), max(r['silt'] for r in rows.values()),
-           min(r['sand'] for r in rows.values()), max(r['sand'] for r in rows.values())),
-        ('Для раскорчёвки это значит: работать по сухому — во влажном'
-         if heavy else 'Состав лёгкий: техника проходит и во влажном состоянии,'),
-        ('состоянии такой грунт залипает и мнётся техникой.'
-         if heavy else 'но почва склонна к иссушению и ветровой эрозии.')], None))
+           min(r['sand'] for r in rows.values()), max(r['sand'] for r in rows.values()))]
+        + how, None))
 
     h = top['humus']
     lvl = _grade(h, [(2, 'низкий'), (4, 'средний'), (6, 'повышенный'), (99, 'высокий')])
@@ -237,3 +249,29 @@ def fridland(index=None, code=None, path=None):
         if (index and row['индекс'] == index) or (code and str(row['код']) == str(code)):
             return row
     return None
+
+# ── растровые слои: те же данные, что в таблице, но по площади ──────────
+VRT = 'https://files.isric.org/soilgrids/latest/data/%s/%s_%s_mean.vrt'
+
+# Растр отдаёт величины в единицах хранения, как и точечный API, но
+# множителя в файле нет — он берётся отсюда. Проверено сверкой с точечным
+# запросом в тех же координатах: глина 292 → 29,2 %, плотность 111 → 1,11.
+D_FACTOR = {'clay': 10, 'sand': 10, 'silt': 10, 'soc': 10,
+            'phh2o': 10, 'cec': 10, 'bdod': 100, 'nitrogen': 100}
+
+def raster(grid, prop='soc', depth='0-5cm'):
+    """Слой SoilGrids на сетке участка, в единицах таблицы (nan вне данных).
+
+    Читается окно глобального COG по /vsicurl — целиком файл не качается.
+    Отказ сети не должен ронять лист, поэтому исключение гасится и
+    возвращается None: страница карты просто не строится.
+    """
+    url = '/vsicurl/' + VRT % (prop, prop, depth)
+    try:
+        a = grid.sample(url)
+    except Exception:
+        return None
+    import numpy as _np
+    a = _np.asarray(a, _np.float32) / D_FACTOR.get(prop, 1)
+    a[a <= 0] = _np.nan               # nodata SoilGrids приходит нулём/отрицательным
+    return a

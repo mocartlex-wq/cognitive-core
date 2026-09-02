@@ -177,6 +177,25 @@ class Sheet:
         img.save(path, 'PDF', resolution=self.DPI, save_all=bool(rest), append_images=rest)
         return path
 
+def meta_px(meta, w, h):
+    """Координаты местной СК → пиксель картинки, снятой в кадре meta."""
+    return lambda e, n: ((e - meta['e0']) / (meta['e1'] - meta['e0']) * w,
+                         (meta['n1'] - n) / (meta['n1'] - meta['n0']) * h)
+
+def draw_rings(img, rings, meta, color=ZUG, width=None):
+    """Контур участка поверх картинки в привязке кадра meta.
+
+    И снимок, и производные растры (отмывка рельефа, заливка почв) строятся
+    на одном кадре, поэтому контур на них должен ложиться одинаково —
+    иначе граница на двух картинках оказывается в разных местах.
+    """
+    od = ImageDraw.Draw(img)
+    pr = meta_px(meta, img.width, img.height)
+    w = width or max(2, int(img.width / 300))
+    for r in rings:
+        od.line([pr(*p) for p in r] + [pr(*r[0])], fill=color, width=w)
+    return img
+
 def fmt_m2(ha):
     """Площадь в квадратных метрах с неразрывными пробелами по разрядам."""
     return format(int(round(ha * 10000)), ',d').replace(',', ' ')

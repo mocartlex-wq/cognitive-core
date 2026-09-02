@@ -19,8 +19,63 @@ from .geo import Grid
 from .rings import rasterize, vectorize
 from .sources import canopy, dem as dem_src, landcover, landsat, sentinel, soil as soil_src
 
+def _skip(t0, what, e):
+    """Приложение не собралось — конвейер идёт дальше, но причина видна.
+
+    С AGROSCAN_DEBUG=1 печатается полная трассировка: без неё сообщение
+    «лист пропущен (…)» приходится расследовать вслепую.
+    """
+    if os.environ.get('AGROSCAN_DEBUG'):
+        import traceback
+        traceback.print_exc()
+    _say(t0, '%s: лист пропущен (%s)' % (what, str(e)[:70]))
+
 def _say(t0, msg):
     print('[%5.1f с] %s' % (time.time() - t0, msg), flush=True)
+
+# Слои для карты почв: гумус (через органический углерод), гранулометрия
+# и кислотность — по ним видно и плодородие, и тяжесть состава, и нужду
+# в известковании.
+SOIL_MAP_LAYERS = ('soc', 'clay', 'phh2o')
+
+def _soil_map(grid, mask, pts, nodes, meta, cache_mod, no_cache):
+    """Слои SoilGrids на сетке участка, их разброс в границах и значения в точках.
+
+    Числа для карты берутся из тех же растров, что и заливка: подпись точки
+    и цвет под ней не могут разойтись. Отказ слоя не критичен — карта
+    строится по тем, что ответили.
+    """
+    from .sources import soil as soil_src
+    sub = grid.submask(mask)
+    arrays, stats = {}, {}
+    for prop in SOIL_MAP_LAYERS:
+        k = cache_mod.key('soilgrid', prop=prop, shape=list(grid.shape),
+                          bbox=[round(meta[q], 1) for q in ('e0', 'e1', 'n0', 'n1')])
+        a = None if no_cache else cache_mod.get_array(k)
+        if a is None:
+            a = soil_src.raster(grid, prop)
+            if a is not None:
+                cache_mod.put_array(k, a)
+        if a is None:
+            continue
+        name = 'humus' if prop == 'soc' else prop
+        if prop == 'soc':
+            a = a / 10 * soil_src.HUMUS_K       # г/кг → % углерода → гумус
+        arrays[name] = a
+        v = a[sub & np.isfinite(a)]
+        if v.size:
+            stats[name] = [round(float(v.min()), 2), round(float(np.median(v)), 2),
+                           round(float(v.max()), 2)]
+    points = []
+    for i, ((lon, lat), (r, c)) in enumerate(zip(pts, nodes), 1):
+        val = {}
+        for name, a in arrays.items():
+            x = float(a[r, c])
+            val[name] = round(x, 2) if np.isfinite(x) else None
+        points.append({'№': i, 'lon': round(lon, 5), 'lat': round(lat, 5),
+                       'px': float((grid.xs[c] + 0.5) / meta['W']),
+                       'py': float((grid.ys[r] + 0.5) / meta['H']), 'знач': val})
+    return arrays, stats, points
 
 def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=False,
         appendices=True):
@@ -235,7 +290,7 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                          % (rel['stats']['уклон_медиана'], rel['stats']['форм_найдено'],
                             rel['stats']['оврагов'], rel['stats']['исключается_га']))
             except Exception as e:
-                _say(t0, 'рельеф: лист пропущен (%s)' % str(e)[:70])
+                _skip(t0, 'рельеф', e)
 
         if 'dynamics' in want:
             try:
@@ -297,22 +352,23 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                          % (scope, len(ser), ts['год_выбытия'],
                             ts.get('возраст_зарастания_лет', '—')))
             except Exception as e:
-                _say(t0, 'динамика: лист пропущен (%s)' % str(e)[:70])
+                _skip(t0, 'динамика', e)
 
         if 'soil' in want:
             try:
                 # точки берём внутри маски участка: одна ячейка SoilGrids — 250 м,
                 # по центру и краям значения расходятся на несколько процентов
                 ys, xs = np.nonzero(mask[::16, ::16])
-                pts = []
+                pts, pnodes = [], []
+                gg = Grid(meta, cfg['zone'], step=16)
                 if len(ys):
                     idx = np.linspace(0, len(ys) - 1, min(5, len(ys))).astype(int)
-                    gg = Grid(meta, cfg['zone'], step=16)
                     for i in idx:
                         r, c = ys[i], xs[i]
                         if r < gg.shape[0] and c < gg.shape[1]:
                             k = r * gg.shape[1] + c
                             pts.append((float(gg.lon[k]), float(gg.lat[k])))
+                            pnodes.append((int(r), int(c)))
                 k_soil = cache_mod.key('soil', pts=[(round(a, 3), round(b, 3)) for a, b in pts])
                 cached_soil = None if no_cache else cache_mod.get_json(k_soil)
                 if cached_soil:
@@ -347,11 +403,26 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                         row = soil_src.fridland(index=sm['индекс'])
                         if row:
                             sm = dict(sm, название=row['название'], код=row['код'])
+                    # карта: те же слои, но по площади — специалисту нужно видеть,
+                    # куда легли точки и однороден ли массив
+                    smap, sstats, spoints = _soil_map(gg, mask, pts, pnodes, meta,
+                                                      cache_mod, no_cache)
+                    page = None
+                    if smap:
+                        from .sheets import soil_map as sh_smap
+                        page = sh_smap.build(cfg['kn'], rings, meta,
+                                             cfg_mod.path_of(cfg, 'image'),
+                                             smap, spoints, cfg.get('place', ''),
+                                             stats=sstats, egrn_ha=cfg['egrn_ha'],
+                                             table_top=list(srows.values())[0])
+                    _say(t0, 'карта почв: %s' % ('слоёв %d, точек %d' % (len(smap), len(spoints))
+                                                 if page else 'пропущена (нет слоёв)'))
                     sh_soil.build(os.path.join(out, 'Приложение_почвы.pdf'), cfg['kn'], srows,
                                   concl, cfg['egrn_ha'], cfg.get('place', ''), used_pts,
-                                  wrb=wrb, soil_map=sm)
+                                  wrb=wrb, soil_map=sm, map_page=page)
                     json.dump({'точек': used_pts, 'профиль': srows, 'wrb': wrb,
-                               'карта_почв': sm},
+                               'карта_почв': sm, 'карта_слои': sstats,
+                               'точки': spoints},
                               open(os.path.join(out, 'soil.json'), 'w'),
                               ensure_ascii=False, indent=1)
                     top = list(srows.values())[0]
@@ -360,7 +431,7 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                             top['humus'], top['phh2o'], used_pts,
                             ' | WRB ' + wrb['wrb'] if wrb else ' | WRB не ответил'))
             except Exception as e:
-                _say(t0, 'почвы: лист пропущен (%s)' % str(e)[:70])
+                _skip(t0, 'почвы', e)
 
         if 'ir' in want and bands:
             try:
