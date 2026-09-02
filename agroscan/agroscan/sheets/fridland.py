@@ -11,7 +11,7 @@
 """
 import math
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from ..sheet import SERIF, SERIF_B
 from ..sources import fridland_map as fm
@@ -85,6 +85,23 @@ def grid_step(span_deg):
         if span_deg / s <= 8:
             return s
     return 1.0
+
+def hatch_mask(size, poly_px, step, width):
+    """Маска диагональной штриховки внутри контура участка.
+
+    Сплошная заливка спрятала бы цвет почвенного контура, а тонкая линия
+    на тёмном фоне не читается — штриховка оставляет видимым и то и другое.
+    """
+    W, H = size
+    shape = Image.new('L', size, 0)
+    sd = ImageDraw.Draw(shape)
+    for ring, hole in poly_px:
+        sd.polygon(ring, fill=0 if hole else 255)
+    pat = Image.new('L', size, 0)
+    pd = ImageDraw.Draw(pat)
+    for c in range(0, W + H, max(2, int(step))):
+        pd.line([(c, 0), (c - H, H)], fill=255, width=max(1, int(width)))
+    return ImageChops.multiply(shape, pat)
 
 def _polys(geom):
     if not geom:
@@ -222,8 +239,23 @@ def _frame(size, bbox, contours, rings_wgs, profiles=(), F=20, kn='', scale=True
             d.text((x + r * 1.6, y), 'разрез %s' % p['id'], font=fs, fill=(20, 20, 20),
                    anchor='lm', stroke_width=max(2, F // 6), stroke_fill='white')
 
-    for r in rings_wgs:                  # участок
-        d.line([pr(*p) for p in r] + [pr(*r[0])], fill=PARCEL, width=max(2, W // 260))
+    # участок: штриховка, белая подложка и красный контур поверх —
+    # тонкая линия на тёмно-коричневом фоне терялась
+    poly_px = [([pr(*p) for p in r], i > 0) for i, r in enumerate(rings_wgs)]
+    mask = hatch_mask(size, poly_px, step=W / 60, width=max(2, W // 900))
+    mp.paste(Image.new('RGB', size, PARCEL), (0, 0), mask)
+    lw = max(3, W // 200)
+    for r in rings_wgs:
+        pts_r = [pr(*p) for p in r] + [pr(*r[0])]
+        d.line(pts_r, fill='white', width=lw + max(2, W // 500))
+        d.line(pts_r, fill=PARCEL, width=lw)
+    allp = [pr(*p) for r in rings_wgs for p in r]
+    if (max(p[0] for p in allp) - min(p[0] for p in allp) < W / 60
+            and max(p[1] for p in allp) - min(p[1] for p in allp) < H / 40):
+        # в мелком масштабе (врезка) контур схлопывается — ставим маркер
+        rr = max(4, W // 90)
+        d.ellipse([px - rr, py - rr, px + rr, py + rr], outline=PARCEL,
+                  width=max(2, W // 300))
     if label_box:
         d.line([(px, py), (lx if lx > px else lx + tw, ly + F * 0.6)], fill=PARCEL,
                width=max(2, W // 800))
@@ -248,7 +280,7 @@ def _frame(size, bbox, contours, rings_wgs, profiles=(), F=20, kn='', scale=True
     return mp, pr, (px, py)
 
 def render(rings_wgs, contours, profiles=(), size=(3600, 2400), kn='',
-           fill=0.20, wide_km=16.0):
+           fill=0.28, wide_km=16.0):
     """Лист карты: крупный план участка, врезка-обзор и легенда.
 
     Владелец обвёл на прежней карте область вокруг участка — «покрупнее».

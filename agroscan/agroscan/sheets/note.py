@@ -96,7 +96,10 @@ def _ru_num(v):
     return ('%g' % v).replace('.', ',')
 
 def attachments_line(attachments=()):
-    have = [TITLES[f] for f in attachments if f in TITLES]
+    # имена файлов начинаются с участка и вида работ, поэтому сверяем
+    # не полное имя, а название документа в конце
+    from ..naming import doc_kind
+    have = [TITLES[doc_kind(f)] for f in attachments if doc_kind(f) in TITLES]
     return ('Приложения: %s; каталог координат; обменные файлы DXF и MIF/MID.'
             % ('; '.join(have) if have else 'схема расположения частей ЗУ'))
 

@@ -10,6 +10,7 @@ import time
 import numpy as np
 
 from . import belts as belts_mod
+from . import naming
 from . import classify as cls_mod
 from . import config as cfg_mod
 from . import qa as qa_mod
@@ -305,8 +306,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         from .sheets import schema as sh_schema, check_map as sh_check
         nb_path = cfg_mod.path_of(cfg, 'neighbors')
         nb = json.load(open(nb_path)) if nb_path and os.path.exists(nb_path) else []
-        _, den = sh_schema.build(os.path.join(out, 'Схема_ЧЗУ.pdf'), cfg['kn'], rings, res,
-                                 cfg['egrn_ha'], cfg['zone'], nb)
+        _, den = sh_schema.build(os.path.join(out, naming.fname(cfg, 'Схема_ЧЗУ.pdf')),
+                                 cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'], nb)
         _say(t0, 'схема ЧЗУ собрана, масштаб 1:%d' % den)
         rel = lambda q: q if os.path.isabs(q) else os.path.join(cfg['_dir'], q)
         bd = [(rel(b['path']), b['caption'], b.get('note', ''))
@@ -314,8 +315,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         bd = [b for b in bd if os.path.exists(b[0])]
         if bd:
             E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
-            sh_check.build(os.path.join(out, 'Проверочная_карта.pdf'), cfg['kn'], rings, res,
-                           cfg['egrn_ha'], meta, bd,
+            sh_check.build(os.path.join(out, naming.fname(cfg, 'Проверочная_карта.pdf')),
+                           cfg['kn'], rings, res, cfg['egrn_ha'], meta, bd,
                            fragment=(sum(E) / len(E), sum(N) / len(N), cfg.get('fragment_m', 540)))
             _say(t0, 'проверочная карта собрана (подложек %d)' % len(bd))
     soil_img = None                 # обзорная карта почв для записки, если соберётся
@@ -341,7 +342,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                 else:
                     D = np.repeat(np.repeat(dm, 4, 0), 4, 1)[:meta['H'], :meta['W']]
                     rel = relief_mod.analyze(D, mask, mpp)
-                    sh_relief.build(os.path.join(out, 'Приложение_рельеф.pdf'), cfg['kn'], rings,
+                    sh_relief.build(os.path.join(out, naming.fname(cfg, 'Приложение_рельеф.pdf')),
+                                    cfg['kn'], rings,
                                     rel, cfg['egrn_ha'], meta, cfg_mod.path_of(cfg, 'image'))
                     json.dump({'stats': rel['stats'], 'формы': rel['формы'], 'тайлы': tiles},
                               open(os.path.join(out, 'relief.json'), 'w'), ensure_ascii=False, indent=1)
@@ -403,7 +405,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                             if len(v):
                                 extra.append(('Высота полога, медиана', '%.0f м' % np.median(v),
                                               'Meta/WRI Canopy Height, ~1 м'))
-                    sh_dyn.build(os.path.join(out, 'Приложение_динамика.pdf'), cfg['kn'], rings,
+                    sh_dyn.build(os.path.join(out, naming.fname(cfg, 'Приложение_динамика.pdf')),
+                                 cfg['kn'], rings,
                                  meta, ser, ts, cfg['egrn_ha'], extra, scope=scope)
                     json.dump(ts, open(os.path.join(out, 'timeseries.json'), 'w'),
                               ensure_ascii=False, indent=1)
@@ -507,7 +510,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                                              table_top=list(srows.values())[0])
                     _say(t0, 'карта почв: %s' % ('слоёв %d, точек %d' % (len(smap), len(spoints))
                                                  if page else 'пропущена (нет слоёв)'))
-                    sh_soil.build(os.path.join(out, 'Приложение_почвы.pdf'), cfg['kn'], srows,
+                    sh_soil.build(os.path.join(out, naming.fname(cfg, 'Приложение_почвы.pdf')),
+                                  cfg['kn'], srows,
                                   concl, cfg['egrn_ha'], cfg.get('place', ''), used_pts,
                                   wrb=wrb, soil_map=sm, map_page=page)
                     json.dump({'точек': used_pts, 'профиль': srows, 'wrb': wrb,
@@ -534,7 +538,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         if 'ir' in want and bands:
             try:
                 pr = {k: v['outer'] for k, v in res.items()}
-                if sh_ir.build(os.path.join(out, 'Приложение_ИК.pdf'), cfg['kn'], rings, meta,
+                if sh_ir.build(os.path.join(out, naming.fname(cfg, 'Приложение_ИК.pdf')),
+                               cfg['kn'], rings, meta,
                                bands, cfg['egrn_ha'], pr, used):
                     _say(t0, 'ИК-материалы: композиты из каналов Sentinel-2')
             except Exception as e:
@@ -546,17 +551,21 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     if sheets:
         from .sheets import note as sh_note
         _dump_report()
-        sh_note.build(os.path.join(out, 'Пояснительная_записка.pdf'), cfg['kn'], res,
+        sh_note.build(os.path.join(out, naming.fname(cfg, 'Пояснительная_записка.pdf')),
+                      cfg['kn'], res,
                       cfg['egrn_ha'], report, cfg.get('place', ''),
                       cfg.get('zone_name', cfg['zone']),
-                      attachments=sorted(f for f in os.listdir(out) if f.endswith('.pdf')),
+                      attachments=sorted(f for f in os.listdir(out)
+                                         if f.endswith('.pdf')
+                                         and f.startswith(naming.prefix(cfg))),
                       soil_image=soil_img)
         _say(t0, 'пояснительная записка собрана')
 
     if formats:
         from . import export
         made = export.all_formats(out, cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'],
-                                  cfg.get('export', {}).get('simplify_m', 0.0))
+                                  cfg.get('export', {}).get('simplify_m', 0.0),
+                                  prefix=naming.prefix(cfg))
         _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON'
              % made['точек'])
     print()

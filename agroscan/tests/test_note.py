@@ -52,14 +52,16 @@ def test_note_without_soil_still_builds():
 
 def test_soil_section_present():
     p = _build({'qa': {'пройдено': True, 'проверки': []}, 'почвы': SOIL},
-               attachments=['Схема_ЧЗУ.pdf', 'Приложение_почвы.pdf'])
+               attachments=['58-24-0341802-1173_анализ_зарастания_Схема_ЧЗУ.pdf',
+                            '58-24-0341802-1173_анализ_зарастания_Приложение_почвы.pdf'])
     assert os.path.getsize(p) > 10000
 
 def test_attachments_listed_only_when_made():
     """Перечень приложений собирается по факту, а не обещается заранее."""
-    one = sh_note.attachments_line(['Схема_ЧЗУ.pdf'])
+    pre = '58-24-0341802-1173_анализ_зарастания_'
+    one = sh_note.attachments_line([pre + 'Схема_ЧЗУ.pdf'])
     assert 'схема расположения частей ЗУ' in one and 'почвенная' not in one, one
-    both = sh_note.attachments_line(['Схема_ЧЗУ.pdf', 'Приложение_почвы.pdf'])
+    both = sh_note.attachments_line([pre + 'Схема_ЧЗУ.pdf', pre + 'Приложение_почвы.pdf'])
     assert 'почвенная характеристика' in both, both
     assert 'рельеф' not in both, 'приложения, которого нет, в перечне быть не должно'
     assert sh_note.attachments_line([]).startswith('Приложения:')

@@ -32,6 +32,7 @@ egrn_ha: %(ha).4f
 zone: %(zone)s
 place: "%(place)s"
 zone_name: "%(zone_name)s"
+вид_работ: "анализ зарастания"   # попадает в имена файлов комплекта
 
 rings: ../data/%(tag)s/rings.json
 meta:  ../data/%(tag)s/bgmeta.json

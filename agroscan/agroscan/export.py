@@ -178,15 +178,16 @@ def geojson(path, rings, parts, zone, wgs=False):
     json.dump(fc, open(path, 'w', encoding='utf-8'), ensure_ascii=False)
     return path
 
-def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0):
-    tag = kn.replace(':', '-')
+def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None):
+    """Обменные форматы комплекта. prefix — «<КН>_<вид работ>» для имён файлов."""
+    pre = prefix or kn.replace(':', '-')
+    P = lambda name: os.path.join(out_dir, '%s_%s' % (pre, name))
     made = {}
-    made['dxf'] = dxf(os.path.join(out_dir, tag + '.dxf'), rings, parts, tol_m)
-    made['mif'] = mif(os.path.join(out_dir, tag + '.mif'), rings, parts, zone, tol_m)
-    cat, npts = catalog(os.path.join(out_dir, 'Каталог_координат.csv'), parts, zone, tol_m)
+    made['dxf'] = dxf(P('Границы_частей.dxf'), rings, parts, tol_m)
+    made['mif'] = mif(P('Границы_частей.mif'), rings, parts, zone, tol_m)
+    cat, npts = catalog(P('Каталог_координат.csv'), parts, zone, tol_m)
     made['каталог'] = cat; made['точек'] = npts
-    made['ведомость'] = areas_table(os.path.join(out_dir, 'Ведомость_площадей.csv'), parts, egrn_ha)
-    made['geojson_msk'] = geojson(os.path.join(out_dir, tag + '_msk.geojson'), rings, parts, zone)
-    made['geojson_wgs'] = geojson(os.path.join(out_dir, tag + '_wgs84.geojson'), rings, parts,
-                                  zone, wgs=True)
+    made['ведомость'] = areas_table(P('Ведомость_площадей.csv'), parts, egrn_ha)
+    made['geojson_msk'] = geojson(P('Границы_частей_msk.geojson'), rings, parts, zone)
+    made['geojson_wgs'] = geojson(P('Границы_частей_wgs84.geojson'), rings, parts, zone, wgs=True)
     return made
