@@ -118,6 +118,28 @@ def test_same_type_picks_matching_profile():
     assert _same_type(prof, 'Солонцы') is None
     assert _same_type([], 'Черноземы выщелоченные') is None
 
+def test_scale_bar_fits_the_frame():
+    """Линейка занимает до трети кадра: раньше выходило то полкадра, то 50 км."""
+    from agroscan.sheets import fridland as sf
+    for span in (2.0, 8.0, 16.3, 35.0, 120.0):
+        km = sf.scale_bar_km(span)
+        assert km / span <= 0.34, (span, km)
+        assert km / span >= 0.10, (span, km)
+    assert sf.scale_bar_km(16.3) == 5 and sf.scale_bar_km(10.4) == 2
+
+def test_zoom_frame_sits_inside_the_overview():
+    """Рамка крупного плана на врезке обязана лежать внутри обзорного кадра."""
+    from agroscan.sheets import fridland as sf
+    rings = [[(44.89, 53.12), (44.91, 53.12), (44.91, 53.13), (44.89, 53.13)]]
+    near = sf.bbox_of(rings, pad_km=3.5, aspect=1.88)
+    wide = sf.bbox_of(rings, pad_km=16.0, aspect=1.5)
+    assert wide[0] < near[0] and near[2] < wide[2], (near, wide)
+    assert wide[1] < near[1] and near[3] < wide[3], (near, wide)
+    import math
+    near_km = (near[2] - near[0]) * 111.3 * math.cos(math.radians(53.125))
+    wide_km = (wide[2] - wide[0]) * 111.3 * math.cos(math.radians(53.125))
+    assert near_km < wide_km / 2, 'крупный план обязан быть заметно крупнее обзора'
+
 
 if __name__ == '__main__':
     n = 0

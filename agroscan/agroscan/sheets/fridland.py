@@ -81,11 +81,146 @@ def _label_spot(pr, poly, size):
         return None
     return (sum(p[0] for p in ins) / len(ins), sum(p[1] for p in ins) / len(ins))
 
-def render(rings_wgs, contours, profiles=(), size=(2400, 1650), pad_km=11.0, kn=''):
-    """Карта как одно изображение: контуры, участок, сетка, легенда."""
+def scale_bar_km(span_km):
+    """Длина линейки: самое крупное круглое число, занимающее до трети кадра.
+
+    Жёсткое «5 км» и узкое окно 15–30 % давали то полкадра, то откат
+    на 50 км, и линейка растягивалась на всю карту.
+    """
+    best = 0.5
+    for km in (0.5, 1, 2, 5, 10, 20, 50, 100):
+        if km / span_km <= 0.33:
+            best = km
+    return best
+
+def _frame(size, bbox, contours, rings_wgs, profiles=(), F=20, kn='', scale=True,
+           labels=True, avoid=None):
+    """Один кадр карты: заливки, сетка, участок. Возвращает изображение.
+
+    Один и тот же код рисует и крупный план, и обзорную врезку — иначе
+    они разъезжаются в мелочах и перестают быть одной картой.
+    """
+    W, H = size
+    fb = ImageFont.truetype(SERIF_B, F)
+    fs = ImageFont.truetype(SERIF, int(F * 0.85))
+    mp = Image.new('RGB', size, 'white')
+    d = ImageDraw.Draw(mp)
+    pr = projector(bbox, size)
+    used = [c for c in contours if c.get('geometry')]
+
+    for c in used:
+        for poly in _polys(c['geometry']):
+            d.polygon([pr(x, y) for x, y in poly[0]], fill=_hex(c['заливка']))
+    for c in used:                       # обводки поверх всех заливок
+        for poly in _polys(c['geometry']):
+            d.line([pr(x, y) for x, y in poly[0]] + [pr(*poly[0][0])],
+                   fill=_hex(c['обводка'], (100, 100, 100)), width=max(1, W // 700))
+
+    # координатная сетка — то, ради чего лист и делается
+    step = grid_step(max(bbox[2] - bbox[0], bbox[3] - bbox[1]))
+    lon = math.ceil(bbox[0] / step) * step
+    while lon < bbox[2]:
+        x = pr(lon, bbox[3])[0]
+        d.line([(x, 0), (x, H)], fill=GRID, width=max(1, W // 1200))
+        if labels:
+            # подписи ставим у обеих рамок: врезка-обзор закрывает один угол,
+            # и одиночная подпись могла оказаться под ней
+            t = ('%.2f°' % lon).replace('.', ',')
+            for yy in (H - F * 1.4, F * 0.4):
+                d.text((x + F * 0.3, yy), t, font=fs, fill=GRID,
+                       stroke_width=max(2, F // 6), stroke_fill='white')
+        lon += step
+    lat = math.ceil(bbox[1] / step) * step
+    while lat < bbox[3]:
+        y = pr(bbox[0], lat)[1]
+        d.line([(0, y), (W, y)], fill=GRID, width=max(1, W // 1200))
+        if labels:
+            t = ('%.2f°' % lat).replace('.', ',')
+            d.text((F * 0.4, y - F * 1.3), t, font=fs, fill=GRID,
+                   stroke_width=max(2, F // 6), stroke_fill='white')
+            if y < H - F * 4:        # в правом нижнем углу стоит масштабная линейка
+                d.text((W - F * 0.4, y - F * 1.3), t, font=fs, fill=GRID, anchor='ra',
+                       stroke_width=max(2, F // 6), stroke_fill='white')
+        lat += step
+
+    cx = sum(p[0] for p in rings_wgs[0]) / len(rings_wgs[0])
+    cy = sum(p[1] for p in rings_wgs[0]) / len(rings_wgs[0])
+    px, py = pr(cx, cy)
+    label_box = None
+    if kn:
+        # место подписи резервируем заранее: индексы контуров рисуются
+        # первыми и раньше залезали под неё
+        tag = 'ЗУ %s' % kn
+        tw = d.textlength(tag, font=fb)
+        def _free(x, y):
+            if not (0 < x and x + tw < W and F * 2 < y < H - F * 2):
+                return False
+            if avoid:                    # под врезкой-обзором подписи не ставим
+                return not (x < avoid[2] and x + tw > avoid[0]
+                            and y - F < avoid[3] and y + F * 1.6 > avoid[1])
+            return True
+        for dx, dy in ((F * 3, -F * 3), (F * 3, F * 3),
+                       (-F * 3 - tw, -F * 3), (-F * 3 - tw, F * 3),
+                       (F * 3, -F * 7), (-F * 3 - tw, F * 7)):
+            lx, ly = px + dx, py + dy
+            if _free(lx, ly):
+                break
+        label_box = (lx - F, ly - F, lx + tw + F, ly + F * 1.6)
+
+    if labels:
+        for c in used:                   # индексы контуров
+            for poly in _polys(c['geometry']):
+                spot = _label_spot(pr, poly, size)
+                busy = label_box and (label_box[0] < spot[0] < label_box[2]
+                                      and label_box[1] < spot[1] < label_box[3]) if spot else False
+                if spot and c.get('индекс') and not busy:
+                    d.text(spot, c['индекс'], font=fb, fill=(30, 30, 30), anchor='mm',
+                           stroke_width=max(2, F // 5), stroke_fill='white')
+                break
+
+    for p in profiles:                   # разрезы, если попали в кадр
+        if bbox[0] < p['lon'] < bbox[2] and bbox[1] < p['lat'] < bbox[3]:
+            x, y = pr(p['lon'], p['lat'])
+            r = F * 0.45
+            d.ellipse([x - r, y - r, x + r, y + r], fill='white', outline=(20, 20, 20),
+                      width=max(1, W // 1200))
+            d.text((x + r * 1.6, y), 'разрез %s' % p['id'], font=fs, fill=(20, 20, 20),
+                   anchor='lm', stroke_width=max(2, F // 6), stroke_fill='white')
+
+    for r in rings_wgs:                  # участок
+        d.line([pr(*p) for p in r] + [pr(*r[0])], fill=PARCEL, width=max(2, W // 260))
+    if label_box:
+        d.line([(px, py), (lx if lx > px else lx + tw, ly + F * 0.6)], fill=PARCEL,
+               width=max(2, W // 800))
+        # плашка под подписью: белого контура вокруг букв мало, когда под ними
+        # проходит граница контура карты
+        d.rectangle([lx - F * 0.4, ly - F * 0.6, lx + tw + F * 0.4, ly + F * 0.95],
+                    fill='white', outline=PARCEL, width=max(1, W // 1600))
+        d.text((lx, ly - F * 0.4), tag, font=fb, fill=PARCEL)
+
+    if scale:
+        span_km = (bbox[2] - bbox[0]) * 111.3 * math.cos(math.radians(cy))
+        km = scale_bar_km(span_km)
+        w_px = km / span_km * W
+        x0, y0 = W - w_px - F * 2, H - F * 2.6
+        d.rectangle([x0, y0, x0 + w_px, y0 + F * 0.6], fill='white', outline=(30, 30, 30))
+        d.rectangle([x0, y0, x0 + w_px / 2, y0 + F * 0.6], fill=(30, 30, 30))
+        d.text((x0, y0 - F * 1.25), '0', font=fs, fill=(30, 30, 30),
+               stroke_width=max(2, F // 6), stroke_fill='white')
+        d.text((x0 + w_px, y0 - F * 1.25), ('%g км' % km).replace('.', ','), font=fs,
+               fill=(30, 30, 30), anchor='ma', stroke_width=max(2, F // 6), stroke_fill='white')
+    d.rectangle([0, 0, W - 1, H - 1], outline=(40, 40, 40), width=max(2, W // 1200))
+    return mp, pr, (px, py)
+
+def render(rings_wgs, contours, profiles=(), size=(3600, 2400), kn='',
+           near_km=3.5, wide_km=16.0):
+    """Лист карты: крупный план участка, врезка-обзор и легенда.
+
+    Владелец обвёл на прежней карте область вокруг участка — «покрупнее».
+    Кадр 35 км показывал контекст, но не участок; теперь главный кадр
+    крупный, а контекст ушёл во врезку с рамкой увеличенного места.
+    """
     W = size[0]
-    # шрифт считаем от конечного размера на листе: карта уходит в записку
-    # шириной 155 мм, при F = W/105 подписи выходили в миллиметр высотой
     F = max(12, int(W / 62))
     f = ImageFont.truetype(SERIF, F)
     fb = ImageFont.truetype(SERIF_B, F)
@@ -100,109 +235,54 @@ def render(rings_wgs, contours, profiles=(), size=(2400, 1650), pad_km=11.0, kn=
     rows_leg = (len(legend) + 1) // 2
     LEG_H = int(F * 1.9) * rows_leg + int(F * 2.6)
     MAP_H = size[1] - LEG_H
-    bbox = bbox_of(rings_wgs, pad_km=pad_km, aspect=W / MAP_H)
-    pr = projector(bbox, (W, MAP_H))
 
-    img = Image.new('RGB', size, 'white')
-    # карта рисуется в собственном холсте: полигоны кадром не обрезаются
-    # и иначе затекают в полосу легенды
-    mp = Image.new('RGB', (W, MAP_H), 'white')
-    d = ImageDraw.Draw(mp)
-
-    for c in used:
-        for poly in _polys(c['geometry']):
-            d.polygon([pr(x, y) for x, y in poly[0]], fill=_hex(c['заливка']))
-    for c in used:                       # обводки поверх всех заливок
-        for poly in _polys(c['geometry']):
-            d.line([pr(x, y) for x, y in poly[0]] + [pr(*poly[0][0])],
-                   fill=_hex(c['обводка'], (100, 100, 100)), width=max(1, W // 900))
-
-    # координатная сетка — то, ради чего лист и делается
-    step = grid_step(max(bbox[2] - bbox[0], bbox[3] - bbox[1]))
-    lon = math.ceil(bbox[0] / step) * step
-    while lon < bbox[2]:
-        x = pr(lon, bbox[3])[0]
-        d.line([(x, 0), (x, MAP_H)], fill=GRID, width=max(1, W // 1600))
-        d.text((x + F * 0.3, MAP_H - F * 1.4), ('%.2f°' % lon).replace('.', ','),
-               font=fs, fill=GRID, stroke_width=max(2, F // 6), stroke_fill='white')
-        lon += step
-    lat = math.ceil(bbox[1] / step) * step
-    while lat < bbox[3]:
-        y = pr(bbox[0], lat)[1]
-        d.line([(0, y), (W, y)], fill=GRID, width=max(1, W // 1600))
-        d.text((F * 0.4, y - F * 1.3), ('%.2f°' % lat).replace('.', ','),
-               font=fs, fill=GRID, stroke_width=max(2, F // 6), stroke_fill='white')
-        lat += step
-
-    # место подписи участка резервируем заранее: индексы контуров рисуются
-    # первыми и раньше залезали под неё
+    near = bbox_of(rings_wgs, pad_km=near_km, aspect=W / MAP_H)
+    # место врезки выбираем до отрисовки кадра: иначе подпись участка
+    # встаёт там же и уходит под врезку
+    iw = int(W * 0.30)
+    ih = int(iw / 1.5)
+    m = int(F * 0.8)
+    prm = projector(near, (W, MAP_H))
     cx = sum(p[0] for p in rings_wgs[0]) / len(rings_wgs[0])
     cy = sum(p[1] for p in rings_wgs[0]) / len(rings_wgs[0])
-    px, py = pr(cx, cy)
-    tag = 'ЗУ %s' % kn if kn else 'земельный участок'
-    tw = d.textlength(tag, font=fb)
-    for dx, dy in ((F * 4, -F * 3), (F * 4, F * 3), (-F * 4 - tw, -F * 3), (-F * 4 - tw, F * 3)):
-        lx, ly_ = px + dx, py + dy
-        if 0 < lx and lx + tw < W and F * 2 < ly_ < MAP_H - F * 2:
-            break
-    label_box = (lx - F, ly_ - F, lx + tw + F, ly_ + F * 1.6)
+    parcel_px = prm(cx, cy)
+    corners = [(m, m), (W - iw - m, m), (m, MAP_H - ih - int(F * 3.6))]
+    ix, iy = max(corners, key=lambda c: (c[0] + iw / 2 - parcel_px[0]) ** 2
+                                        + (c[1] + ih / 2 - parcel_px[1]) ** 2)
+    box = (ix - m / 2, iy - m / 2, ix + iw + m / 2, iy + ih + m / 2)
 
-    def _busy(spot):
-        return (label_box[0] < spot[0] < label_box[2]) and (label_box[1] < spot[1] < label_box[3])
+    mp, pr, _ = _frame((W, MAP_H), near, used, rings_wgs, profiles, F=F, kn=kn, avoid=box)
 
-    for c in used:                       # индексы контуров
-        for poly in _polys(c['geometry']):
-            spot = _label_spot(pr, poly, (W, MAP_H))
-            if spot and c.get('индекс') and not _busy(spot):
-                d.text(spot, c['индекс'], font=fb, fill=(30, 30, 30), anchor='mm',
-                       stroke_width=max(2, F // 5), stroke_fill='white')
-            break
+    # врезка-обзор: показывает, где мы, и что именно увеличено
+    wide = bbox_of(rings_wgs, pad_km=wide_km, aspect=iw / ih)
+    ins, ipr, _ = _frame((iw, ih), wide, used, rings_wgs, F=max(9, int(F * 0.62)),
+                         scale=False, labels=False)
+    di = ImageDraw.Draw(ins)
+    x0, y0 = ipr(near[0], near[3]); x1, y1 = ipr(near[2], near[1])
+    di.rectangle([x0, y0, x1, y1], outline=PARCEL, width=max(2, iw // 150))
+    d = ImageDraw.Draw(mp)
+    d.rectangle(list(box), fill='white')
+    mp.paste(ins, (ix, iy))
+    d.rectangle([ix, iy, ix + iw, iy + ih], outline=(40, 40, 40), width=max(2, W // 1200))
+    d.text((ix + F * 0.4, iy + F * 0.3), 'обзор', font=fb, fill=(30, 30, 30),
+           stroke_width=max(2, F // 5), stroke_fill='white')
 
-    for p in profiles:                   # разрезы, если попали в кадр
-        if bbox[0] < p['lon'] < bbox[2] and bbox[1] < p['lat'] < bbox[3]:
-            x, y = pr(p['lon'], p['lat'])
-            r = F * 0.45
-            d.ellipse([x - r, y - r, x + r, y + r], fill='white', outline=(20, 20, 20),
-                      width=max(1, W // 1200))
-            d.text((x + r * 1.6, y), 'разрез %s' % p['id'], font=fs, fill=(20, 20, 20),
-                   anchor='lm', stroke_width=max(2, F // 6), stroke_fill='white')
-
-    for r in rings_wgs:                  # участок
-        d.line([pr(*p) for p in r] + [pr(*r[0])], fill=PARCEL, width=max(3, W // 300))
-    d.line([(px, py), (lx if lx > px else lx + tw, ly_ + F * 0.6)], fill=PARCEL,
-           width=max(2, W // 800))
-    # плашка под подписью: белого контура вокруг букв мало, когда под ними
-    # проходит граница контура карты
-    d.rectangle([lx - F * 0.4, ly_ - F * 0.6, lx + tw + F * 0.4, ly_ + F * 0.95],
-                fill='white', outline=PARCEL, width=max(1, W // 1600))
-    d.text((lx, ly_ - F * 0.4), tag, font=fb, fill=PARCEL)
-
-    # масштабная линейка
-    km = 5.0
-    w_px = km / ((bbox[2] - bbox[0]) * 111.3 * math.cos(math.radians(cy))) * W
-    x0, y0 = W - w_px - F * 2, MAP_H - F * 2.6
-    d.rectangle([x0, y0, x0 + w_px, y0 + F * 0.6], fill='white', outline=(30, 30, 30))
-    d.rectangle([x0, y0, x0 + w_px / 2, y0 + F * 0.6], fill=(30, 30, 30))
-    d.text((x0, y0 - F * 1.25), '0', font=fs, fill=(30, 30, 30),
-           stroke_width=max(2, F // 6), stroke_fill='white')
-    d.text((x0 + w_px, y0 - F * 1.25), '%d км' % km, font=fs, fill=(30, 30, 30), anchor='ma',
-           stroke_width=max(2, F // 6), stroke_fill='white')
-    d.rectangle([0, 0, W - 1, MAP_H - 1], outline=(40, 40, 40), width=max(2, W // 1200))
+    img = Image.new('RGB', size, 'white')
     img.paste(mp, (0, 0))
     d = ImageDraw.Draw(img)
 
     # легенда: цвет — индекс — название из легенды карты
     ly = MAP_H + int(F * 0.9)
-    d.text((0, ly), 'Контуры карты в кадре', font=fb, fill='black')
+    d.text((0, ly), 'Контуры карты', font=fb, fill='black')
     ly += int(F * 1.7)
     colw = W // 2
-    for i, ix in enumerate(legend):
-        col = next(c for c in used if c['индекс'] == ix)
+    for i, ix_ in enumerate(legend):
+        col = next(c for c in used if c['индекс'] == ix_)
         x = (i % 2) * colw
         y = ly + (i // 2) * int(F * 1.9)
         d.rectangle([x, y, x + F * 1.4, y + F], fill=_hex(col['заливка']),
                     outline=(90, 90, 90))
-        d.text((x + F * 2.0, y - F * 0.1), '%s — %s' % (ix, names.get(ix) or 'нет в легенде'),
+        d.text((x + F * 2.0, y - F * 0.1), '%s — %s' % (ix_, names.get(ix_) or 'нет в легенде'),
                font=f, fill=(40, 40, 40))
     d.text((W - F * 0.5, MAP_H + int(F * 0.9)),
            'Почвенная карта РСФСР 1:2 500 000 (Фридланд и др., 1988) · '

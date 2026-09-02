@@ -53,10 +53,10 @@ def _fridland_extras(rings, zone, pw, cache_mod, no_cache, kn):
         return img, prof
     lon, lat = pw
     key = (round(lon, 2), round(lat, 2))
-    k_c = cache_mod.key('fridland_contours', pt=key, delta=0.16)
+    k_c = cache_mod.key('fridland_contours', pt=key, delta=0.25)
     cont = None if no_cache else cache_mod.get_json(k_c)
     if cont is None:
-        cont = fridland_map.contours(lon, lat, delta=0.16)
+        cont = fridland_map.contours(lon, lat, delta=0.25)
         if cont:
             cache_mod.put_json(k_c, cont)
     k_p = cache_mod.key('fridland_profiles', pt=key, delta=1.0)
