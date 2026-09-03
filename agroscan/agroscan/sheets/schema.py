@@ -8,7 +8,8 @@ A4 альбомная, 400 dpi. Состав частей, их назначен
 import math
 import numpy as np
 
-from ..sheet import Sheet, PART_COLOR, PART_HATCH, ZUG, RED, fmt_ha, fmt_m2
+from .. import areas
+from ..sheet import Sheet, PART_COLOR, PART_HATCH, ZUG, RED, fmt_ha, fmt_int, fmt_m2
 from ..geo import Local
 
 LEGEND = {
@@ -47,11 +48,46 @@ def _compass(s, cx, cy):
                         ('З', (cx - R - s.mm(2.9), cy)), ('В', (cx + R + s.mm(2.9), cy))]:
         s.d.text((a_, b_), t, font=s.F(2.7, True), fill='black', anchor='mm')
 
-def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
-    """parts — {ключ: {'outer','inner','areaHa','название'}} в порядке отрисовки."""
+def extreme_points(ring):
+    """Индексы четырёх крайних вершин: север, юг, запад, восток.
+
+    Одна вершина бывает крайней сразу в двух направлениях (на
+    58:17:0130701:29 юго-восточный угол был и самым южным, и самым
+    восточным) — тогда подпись координат печаталась дважды. Берём
+    следующую по этому направлению, чтобы точек было ровно четыре.
+    """
+    orders = (sorted(range(len(ring)), key=lambda i: -ring[i][1]),   # север
+              sorted(range(len(ring)), key=lambda i: ring[i][1]),    # юг
+              sorted(range(len(ring)), key=lambda i: ring[i][0]),    # запад
+              sorted(range(len(ring)), key=lambda i: -ring[i][0]))   # восток
+    used, idx = set(), []
+    for order in orders:
+        for i in order:
+            if i not in used:
+                used.add(i); idx.append(i); break
+    return idx
+
+
+def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, layout=None):
+    """parts — {ключ: {'outer','inner','areaHa','название'}} в порядке отрисовки.
+
+    layout — сохранённые правообладателем позиции подвижных подписей в
+    миллиметрах от левого верхнего угла листа: {'kn': [x, y], 'coord0': …,
+    'legend': …, 'stamp': …}. Чего нет — ставится автоматически, как раньше.
+    Итоговые позиции возвращаются третьим значением, чтобы редактор
+    открывался ровно там, где сейчас стоят подписи.
+    """
+    layout = layout or {}
+    used = {}
     keys = sorted(parts)
     s = Sheet(297, 210)
-    P = s.map_field(rings, pad_m=260, shift_mm=28)
+    # Поле карты подстраивается под размер участка: постоянные 260 м вокруг
+    # границы на участке 2 га оставляли контур пятном в углу листа, а вокруг —
+    # пустоту. Отступ считаем от габарита, но не мельче 60 м: смежники и
+    # подписи координат должны помещаться.
+    E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
+    span = max(max(E) - min(E), max(N) - min(N))
+    P = s.map_field(rings, pad_m=max(60.0, min(260.0, span * 0.35)), shift_mm=28)
     TW, TBL = s.mm(103), s.mm(12 + 14 * (len(keys) + 3))
     SW, SH = s.mm(62), s.mm(30)
     s.block(s.MW - TW, s.MH - TBL, s.MW, s.MH)
@@ -90,6 +126,9 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
     # кадастровый номер: рисуется до подписей частей и сразу занимает своё место
     E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
     x, y = P(sum(E) / len(E), sum(N) / len(N))
+    if layout.get('kn'):                       # позиция от правообладателя
+        x = s.mm(layout['kn'][0]) - s.MX0; y = s.mm(layout['kn'][1]) - s.MY0
+    used['kn'] = [round((x + s.MX0) / s.MM, 2), round((y + s.MY0) / s.MM, 2)]
     f_kn = s.F(2.9)
     bb = s.md.textbbox((x, y), kn, font=f_kn, anchor='mm')
     box = [bb[0] - s.mm(1.4), bb[1] - s.mm(1.0), bb[2] + s.mm(1.4), bb[3] + s.mm(1.0)]
@@ -106,25 +145,35 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
 
     # географические координаты характерных точек
     loc = Local(zone); f_geo = s.F(2.5); out = rings[0]
-    idx = [int(np.argmax([p[1] for p in out])), int(np.argmin([p[1] for p in out])),
-           int(np.argmin([p[0] for p in out])), int(np.argmax([p[0] for p in out]))]
-    for i, (ox, oy) in zip(idx, [(0, -1), (0, 1), (-1, 0), (0.4, -1)]):
+    idx = extreme_points(out)
+    for j, (i, (ox, oy)) in enumerate(zip(idx, [(0, -1), (0, 1), (-1, 0), (0.4, -1)])):
         e, n = out[i]; lon, lat = loc.to_wgs([(e, n)])[0]
         x, y = P(e, n)
         tx = ty = None
-        for cx_, cy_ in [(ox, oy), (1.1, .6), (1.1, -.6), (-1.1, .6), (-1.1, -.6), (0, -1.4), (0, 1.4)]:
+        saved = layout.get('coord%d' % j)
+        if saved:
+            tx, ty = s.mm(saved[0]) - s.MX0, s.mm(saved[1]) - s.MY0
+        for cx_, cy_ in ([] if tx is not None else
+                         [(ox, oy), (1.1, .6), (1.1, -.6), (-1.1, .6),
+                          (-1.1, -.6), (0, -1.4), (0, 1.4)]):
             a, b = x + cx_ * s.mm(13), y + cy_ * s.mm(8)
-            if s.free(a - s.mm(11), b - s.mm(4.5), a + s.mm(11), b + s.mm(4.5)):
+            if s.free(a - s.mm(13), b - s.mm(4.5), a + s.mm(13), b + s.mm(7.0)):
                 tx, ty = a, b; break
         if tx is None:
             tx = min(max(x + ox * s.mm(13), s.mm(12)), s.MW - s.mm(12))
             ty = min(max(y + oy * s.mm(8), s.mm(5)), s.MH - s.mm(5))
+        used['coord%d' % j] = [round((tx + s.MX0) / s.MM, 2), round((ty + s.MY0) / s.MM, 2)]
         s.md.line([(x, y), (tx, ty)], fill='black', width=s.W(0.24))
         s.md.text((tx, ty - s.mm(1.9)), '%.7f' % lat, font=f_geo, fill='black', anchor='mm',
                   stroke_width=s.W(0.6), stroke_fill='white')
         s.md.line([(tx - s.mm(9), ty), (tx + s.mm(9), ty)], fill='white', width=s.W(0.8))
         s.md.line([(tx - s.mm(9), ty), (tx + s.mm(9), ty)], fill='black', width=s.W(0.26))
         s.md.text((tx, ty + s.mm(1.9)), '%.7f' % lon, font=f_geo, fill='black', anchor='mm',
+                  stroke_width=s.W(0.6), stroke_fill='white')
+        # кадастровые координаты той же точки: в документе работают с МСК,
+        # а не с широтой и долготой (X — север, Y — восток)
+        s.md.text((tx, ty + s.mm(5.0)), ('X %.2f  Y %.2f' % (n, e)).replace('.', ','),
+                  font=s.F(2.1), fill=(70, 70, 70), anchor='mm',
                   stroke_width=s.W(0.6), stroke_fill='white')
         s.md.ellipse([x - s.mm(.5), y - s.mm(.5), x + s.mm(.5), y + s.mm(.5)], fill='black')
 
@@ -139,6 +188,9 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
 
     # таблица условных обозначений
     tx0 = s.IN1 - s.mm(2) - TW; ty0 = s.PH - s.margin - s.mm(2) - TBL
+    if layout.get('legend'):
+        tx0, ty0 = s.mm(layout['legend'][0]), s.mm(layout['legend'][1])
+    used['legend'] = [round(tx0 / s.MM, 2), round(ty0 / s.MM, 2)]
     s.d.rectangle([tx0, ty0, tx0 + TW, ty0 + TBL], fill='white', outline='black', width=s.W(0.55))
     s.d.text((tx0 + TW / 2, ty0 + s.mm(1.1)), 'Условные обозначения:', font=s.F(3.0),
              fill='black', anchor='ma')
@@ -151,12 +203,15 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
     for cx_ in (c1, c2):
         s.d.line([cx_, hdr, cx_, ty0 + TBL], fill='black', width=s.W(0.3))
     f_c = s.F(2.25)
-    rows = [(k, LEGEND.get(k, parts[k].get('название', '')), parts[k]['areaHa'])
+    # площадь берём сведённую с ЕГРН: на :29 по координатам выходило
+    # 21 911,61 м², и в легенде рядом стояли 21 912 и 21 911 у одного контура
+    rows = [(k, LEGEND.get(k, parts[k].get('название', '')), areas.m2(parts[k]))
             for k in sorted(keys, key=lambda q: -parts[q]['areaHa'])]
-    rows.append((None, 'Контур и кадастровый номер земельного участка\nсогласно сведений ЕГРН', egrn_ha))
+    rows.append((None, 'Контур и кадастровый номер земельного участка\nсогласно сведений ЕГРН',
+                 int(round(egrn_ha * 10000))))
     y = hdr + s.mm(6)
     hgt = (ty0 + TBL - y) / len(rows)
-    for k, desc, ha in rows:
+    for k, desc, m2 in rows:
         gy = y + hgt / 2
         gx0, gx1 = tx0 + s.mm(4), c1 - s.mm(4)
         if k is None:
@@ -190,7 +245,8 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
                      stroke_width=s.W(0.5), stroke_fill='white')
         s.d.multiline_text((c1 + s.mm(2.0), gy), desc, font=f_c, fill='black', anchor='lm',
                            spacing=s.mm(0.9))
-        s.d.multiline_text(((c2 + tx0 + TW) / 2, gy), '(%s м²)\n(%s га)' % (fmt_m2(ha), fmt_ha(ha)),
+        s.d.multiline_text(((c2 + tx0 + TW) / 2, gy),
+                           '(%s м²)\n(%s га)' % (fmt_int(m2), fmt_ha(m2 / 10000.0)),
                            font=f_c, fill='black', anchor='mm', align='center', spacing=s.mm(0.9))
         y += hgt
         if y < ty0 + TBL - 1:
@@ -198,6 +254,9 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
 
     # штамп «Утверждаю»
     sx0, sy0 = s.IN0 + s.mm(2), s.PH - s.margin - s.mm(2) - SH
+    if layout.get('stamp'):
+        sx0, sy0 = s.mm(layout['stamp'][0]), s.mm(layout['stamp'][1])
+    used['stamp'] = [round(sx0 / s.MM, 2), round(sy0 / s.MM, 2)]
     s.d.rectangle([sx0, sy0, sx0 + SW, sy0 + SH], fill='white', outline='black', width=s.W(0.55))
     s.d.text((sx0 + SW / 2, sy0 + s.mm(2.0)), 'Утверждаю:', font=s.F(2.9), fill='black', anchor='ma')
     s.d.text((sx0 + SW / 2, sy0 + s.mm(6.4)), '_________________________', font=s.F(2.4),
@@ -209,4 +268,4 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None):
     s.d.text((sx0 + s.mm(38), sy0 + s.mm(15.4)), '/______________/', font=s.F(2.1), fill='black')
     s.d.text((sx0 + s.mm(5), sy0 + s.mm(23)), '«____» ______________ 20____ г.', font=s.F(2.1), fill='black')
     s.save(path)
-    return path, s.denominator()
+    return path, s.denominator(), used

@@ -198,7 +198,11 @@ def draw_rings(img, rings, meta, color=ZUG, width=None):
 
 def fmt_m2(ha):
     """Площадь в квадратных метрах с неразрывными пробелами по разрядам."""
-    return format(int(round(ha * 10000)), ',d').replace(',', ' ')
+    return fmt_int(round(ha * 10000))
+
+def fmt_int(v):
+    """Целое число с пробелами по разрядам (площадь уже в метрах)."""
+    return format(int(v), ',d').replace(',', ' ')
 
 def fmt_ha(ha):
     return ('%.2f' % ha).replace('.', ',')

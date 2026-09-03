@@ -31,6 +31,7 @@ kn: "%(kn)s"
 egrn_ha: %(ha).4f
 zone: %(zone)s
 place: "%(place)s"
+ориентир: "%(landmark)s"
 zone_name: "%(zone_name)s"
 вид_работ: "анализ зарастания"   # попадает в имена файлов комплекта
 
@@ -78,6 +79,11 @@ def run(kpt_path, kn, root=None, margin_m=130, mpp=0.60, zoom=17, place='',
     if rec is None:
         raise ValueError('участок %s в КПТ не найден' % kn)
     zone = kpt.zone_of(rec.get('sk_id') or sk, kn=kn, rings=rec['кольца'])
+    # адрес и ориентир берём из КПТ, а не с рук: на :29 в конфиг был вписан
+    # чужой район, тогда как в выгрузке стоит Малосердобинский
+    place = place or kpt.address_of(rec)
+    landmark = kpt.landmark_of(rec)
+    say('адрес из КПТ: %s%s' % (place or '—', '; ориентир: ' + landmark if landmark else ''))
     rings = rec['кольца']
     ha_xy = kpt.area_of(rings) / 1e4
     ha = (rec['площадь_егрн'] or kpt.area_of(rings)) / 1e4
@@ -153,7 +159,7 @@ def run(kpt_path, kn, root=None, margin_m=130, mpp=0.60, zoom=17, place='',
               else '# markup: ../data/%s/markup.json   # разметка правообладателя, когда появится' % tag)
     open(cfg_path, 'w', encoding='utf-8').write(CONFIG % {
         'kn': kn, 'ha': ha, 'zone': zone, 'tag': tag, 'mpp': mpp,
-        'kpt': os.path.basename(kpt_path), 'place': place,
+        'kpt': os.path.basename(kpt_path), 'place': place, 'landmark': landmark,
         'zone_name': zone.upper().replace('MSK', 'МСК-').replace('-', ' зона ', 1)
         if zone.startswith('msk') else zone,
         'cover': 'true' if cover_all else 'false', 'parts': parts, 'markup': markup})

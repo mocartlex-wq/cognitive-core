@@ -9,6 +9,7 @@ import os
 import time
 import numpy as np
 
+from . import areas
 from . import belts as belts_mod
 from . import naming
 from . import classify as cls_mod
@@ -334,9 +335,19 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     for k in sorted(Z):
         o, i, a = z.to_rings(Z[k])
         res[k] = {'outer': o, 'inner': i, 'areaHa': a, 'название': cfg['parts'].get(k, '')}
+    # целые метры сводятся с площадью ЕГРН: по координатам ЧЗУ/1 на :29
+    # даёт 21 911,61 м², и без сведения в документе стояли 21 912 и 21 911
+    fit = areas.fit(res, cfg['egrn_ha'], cover_all=cfg.get('cover_all', True),
+                    extra_ha=forest_ha)
+    _say(t0, 'площади сведены с ЕГРН: %s' % ('сумма %d м² = %d м²' % (fit['сумма_м2'], fit['цель_м2'])
+                                             if fit['сведено'] else 'не требуется (%d м² против %d м²)'
+                                             % (fit['сумма_м2'], fit['цель_м2'])))
+    for k in sorted(res):
         json.dump(res[k], open(os.path.join(out, 'chzu%s.json' % k), 'w'))
     report = {'kn': cfg['kn'], 'egrn_ha': cfg['egrn_ha'],
               'части': {k: round(v['areaHa'], 4) for k, v in res.items()},
+              'части_м2': {k: areas.m2(v) for k, v in res.items()},
+              'сведение_площадей': fit,
               'сумма': round(sum(v['areaHa'] for v in res.values()), 4),
               'классы': {str(c): round(a, 4) for c, a in ar.items()},
               'лесополосы': b_info, 'сцены_sentinel': used, 'qa': qa,
@@ -359,9 +370,24 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         from .sheets import schema as sh_schema, check_map as sh_check
         nb_path = cfg_mod.path_of(cfg, 'neighbors')
         nb = json.load(open(nb_path)) if nb_path and os.path.exists(nb_path) else []
-        _, den = sh_schema.build(os.path.join(out, naming.fname(cfg, 'Схема_ЧЗУ.pdf')),
-                                 cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'], nb)
-        _say(t0, 'схема ЧЗУ собрана, масштаб 1:%d' % den)
+        from . import layout_tool
+        lay_path = cfg_mod.path_of(cfg, 'layout') if cfg.get('layout') else None
+        schema_pdf = os.path.join(out, naming.fname(cfg, 'Схема_ЧЗУ.pdf'))
+        _, den, lay = sh_schema.build(schema_pdf, cfg['kn'], rings, res, cfg['egrn_ha'],
+                                      cfg['zone'], nb, layout=layout_tool.load(lay_path))
+        _say(t0, 'схема ЧЗУ собрана, масштаб 1:%d%s'
+             % (den, ' (раскладка правообладателя)' if lay_path
+                and os.path.exists(lay_path) else ''))
+        # редактор раскладки: правообладатель двигает подписи сам
+        try:
+            from PIL import Image as _Im
+            import pymupdf as _mu
+            png = naming.fname(cfg, 'Схема_ЧЗУ.png')
+            _mu.open(schema_pdf)[0].get_pixmap(dpi=150).save(os.path.join(out, png))
+            layout_tool.build(os.path.join(out, naming.fname(cfg, 'Схема_редактор.html')),
+                              png, (297, 210), lay, cfg['kn'])
+        except Exception as e:
+            _say(t0, 'редактор раскладки: пропущен (%s)' % str(e)[:60])
         rel = lambda q: q if os.path.isabs(q) else os.path.join(cfg['_dir'], q)
         bd = [(rel(b['path']), b['caption'], b.get('note', ''))
               for b in cfg.get('backdrops', [])]
@@ -622,7 +648,7 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         sh_note.build(os.path.join(out, naming.fname(cfg, 'Пояснительная_записка.pdf')),
                       cfg['kn'], res,
                       cfg['egrn_ha'], report, cfg.get('place', ''),
-                      cfg.get('zone_name', cfg['zone']),
+                      cfg.get('zone_name', cfg['zone']), landmark=cfg.get('ориентир', ''),
                       attachments=sorted(f for f in os.listdir(out)
                                          if f.endswith('.pdf')
                                          and f.startswith(naming.prefix(cfg))),
@@ -631,11 +657,15 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
 
     if formats:
         from . import export
+        nb_path = cfg_mod.path_of(cfg, 'neighbors')
+        nb_ex = json.load(open(nb_path)) if nb_path and os.path.exists(nb_path) else []
         made = export.all_formats(out, cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'],
                                   cfg.get('export', {}).get('simplify_m', 0.0),
-                                  prefix=naming.prefix(cfg))
-        _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON'
-             % made['точек'])
+                                  prefix=naming.prefix(cfg),
+                                  image=cfg_mod.path_of(cfg, 'image'), meta=meta, neighbors=nb_ex)
+        _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON%s'
+             % (made['точек'], ', DXF с растром' if made.get('dxf_растр') else
+                ' (DXF с растром пропущен: нет ezdxf)'))
     print()
     for k in sorted(res):
         print('  ЧЗУ/%s %-58s %7.2f га  контуров %2d' %

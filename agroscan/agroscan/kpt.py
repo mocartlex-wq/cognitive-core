@@ -76,6 +76,55 @@ def _area(el):
     except Exception:
         return None
 
+def _fias(el):
+    """Адрес из ФИАС-блока: «Пензенская область, Малосердобинский район,
+    Старославкинский сельсовет».
+
+    В КПТ readable_address бывает короче ФИАС-блока (на :29 — только область
+    и район), поэтому собираем сами и сравниваем полноту в address_of.
+    """
+    parts = []
+    reg = _text(el, 'address_fias/level_settlement/region/value')
+    if reg:
+        parts.append(reg)
+    for tag, full in (('district', 'район'), ('city', 'сельсовет')):
+        name = _text(el, 'address_fias/level_settlement/%s/name_%s' % (tag, tag))
+        typ = (_text(el, 'address_fias/level_settlement/%s/type_%s' % (tag, tag)) or '').strip()
+        if not name:
+            continue
+        typ = {'р-н': 'район', 'с/с': 'сельсовет'}.get(typ, typ or full)
+        parts.append('%s %s' % (name, typ))
+    return ', '.join(parts) or None
+
+def address_of(rec):
+    """Что писать в «Местоположение»: описательный адрес или сборка из ФИАС.
+
+    Описательный readable_address (выписка :74 — «Местоположение установлено
+    относительно ориентира…») содержит больше, чем ФИАС, и отдаётся как есть.
+    Короткий (:29 — «обл. Пензенская, р-н Малосердобинский») заменяется
+    сборкой, где есть сельсовет.
+    """
+    a = (rec.get('адрес') or '').strip()
+    f = (rec.get('адрес_фиас') or '').strip()
+    if not f:
+        return a or ''
+    if not a:
+        return f
+    return a if len(a) > len(f) else f
+
+def landmark_of(rec):
+    """Ориентир одной строкой: «с. Новое Славкино, примерно в 4.9 км,
+    по направлению на юго-восток от ориентира»."""
+    name = (rec.get('ориентир') or '').strip()
+    desc = (rec.get('ориентир_описание') or '').strip()
+    if not name and not desc:
+        return ''
+    desc = desc.replace('Участок находится', '').strip(' .,')
+    desc = desc[0].lower() + desc[1:] if desc else ''
+    out = ', '.join(x for x in (name, desc) if x)
+    out = re.sub(r'(?<=\d)\.(?=\d)', ',', out)          # 4.9 км → 4,9 км
+    return re.sub(r'\b(с|д|п|г|пос|ст)\.(?=[А-ЯЁ])', r'\1. ', out)
+
 def parse(path, want=('land_record', 'zones_and_territories_record')):
     """Потоково разобрать КПТ. Возвращает (участки, зоны, sk_id большинства)."""
     parcels, zones = [], []
@@ -94,6 +143,10 @@ def parse(path, want=('land_record', 'zones_and_territories_record')):
                 parcels.append({'кн': kn, 'кольца': rings, 'площадь_егрн': _area(el),
                                 'категория': _text(el, 'category/type/value'),
                                 'разрешённое': _text(el, 'permitted_use/permitted_use_established/by_document'),
+                                'адрес': _text(el, 'readable_address'),
+                                'адрес_фиас': _fias(el),
+                                'ориентир': _text(el, 'rel_position/ref_point_name'),
+                                'ориентир_описание': _text(el, 'rel_position/location_description'),
                                 'sk_id': sk})
         else:
             code = _text(el, 'type_boundary/code')

@@ -86,6 +86,43 @@ def test_catches_part_inside_forest():
     assert not q['пройдено'], q
     assert 'части не накладываются на лесничества' in q['провалено'], q['провалено']
 
+def test_extra_points_are_found_and_removed():
+    """Лишние вершины: совпадающая и лежащая на прямой.
+
+    Прямо из :29: каталог координат выходил на 15 точек вместо 12 по КПТ —
+    со строкой длиной 0,00 м и углом 180°00\'00". Обратный случай здесь
+    первый: испорченное кольцо обязано быть распознано как грязное.
+    """
+    dirty = [[0, 0], [50, 0], [100, 0],              # средняя точка на прямой
+             [100, 100], [100.0000001, 100.0000001],  # совпадающая вершина
+             [0, 100]]
+    assert z.extra_points([dirty]) == 2, z.clean_ring(dirty)
+    clean = z.clean_ring(dirty)
+    assert len(clean) == 4 and z.extra_points([clean]) == 0, clean
+    assert abs(Polygon(clean).area - Polygon(dirty).area) < 0.01
+
+    # обобщать контур чистка не должна: вершина в 5 мм от прямой — геометрия
+    near = [[0, 0], [50, 0.005], [100, 0], [100, 100], [0, 100]]
+    assert z.clean_ring(near) == near
+
+    # реальная геометрия чистку переживает: квадрат со срезанным углом
+    keep = [[0, 0], [100, 0], [100, 100], [50, 100.5], [0, 100]]
+    assert z.clean_ring(keep) == keep
+
+def test_qa_sees_dirty_rings():
+    """Проверка «нет лишних точек» падает, если чистку отключить."""
+    parcel = _box(0, 0, 100, 100)
+    Z = {'1': Polygon([(0, 0), (50, 0), (100, 0), (100, 100), (0, 100)])}  # лишняя середина
+    q = qa_mod.check(Z, parcel, 1.0)
+    assert q['пройдено'], q['провалено']
+    orig = z.to_rings
+    try:                                          # чистка выключена — брак виден
+        z.to_rings = lambda g, minha=0.0002, clean=True: orig(g, minha, False)
+        q = qa_mod.check(Z, parcel, 1.0)
+    finally:
+        z.to_rings = orig
+    assert 'в координатах нет лишних точек' in q['провалено'], q['провалено']
+
 
 if __name__ == '__main__':
     ok = 0

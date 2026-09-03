@@ -50,6 +50,20 @@ def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01, cover_all=True,
         add('части не накладываются на лесничества', over <= 0.01, over, '0 м²',
             'лесничество на участке %.4f га' % forest_ha)
 
+    # лишние вершины: совпадающие и лежащие на прямой. На :29 каталог
+    # координат выходил на 15 точек вместо 12 по КПТ — со строкой длиной
+    # 0,00 м и углом 180°00'00\", которой в межевом документе быть не может
+    from . import zones as _z
+    extra = 0; dropped = 0
+    for k, g in zones.items():
+        o, i, _ = _z.to_rings(g)                     # то, что уйдёт в каталог
+        raw, ri, _ = _z.to_rings(g, clean=False)     # то, что дал разбор полигонов
+        extra += _z.extra_points(o) + _z.extra_points(i)
+        dropped += (sum(map(len, raw)) + sum(map(len, ri))
+                    - sum(map(len, o)) - sum(map(len, i)))
+    add('в координатах нет лишних точек', extra == 0, extra, '0 шт',
+        'при чистке снято %d вершин без геометрии' % dropped)
+
     slivers = []
     for k, g in zones.items():
         for p in (g.geoms if isinstance(g, MultiPolygon) else [g]):

@@ -14,6 +14,7 @@ import math
 import os
 import numpy as np
 
+from . import areas
 from .geo import Local
 
 def normalize(rings):
@@ -25,7 +26,10 @@ def normalize(rings):
     out = []
     for r in rings:
         a = np.asarray(r, float)
-        if len(a) > 1 and np.allclose(a[0], a[-1]):
+        # сравнение только по абсолютной разнице: np.allclose с относительным
+        # допуском 1e-5 на координатах МСК (2,2 млн м) считал «совпавшими»
+        # точки в 22 м друг от друга и молча выбрасывал живую вершину ЕГРН
+        if len(a) > 1 and np.max(np.abs(a[0] - a[-1])) < 1e-6:
             a = a[:-1]
         s = float(np.sum(a[:, 0] * np.roll(a[:, 1], -1) - np.roll(a[:, 0], -1) * a[:, 1]))
         if s > 0:                      # против часовой → развернуть
@@ -75,13 +79,107 @@ def dxf(path, rings, parts, tol_m=0.0):
         f.write('0\nENDSEC\n0\nEOF\n')
     return path
 
+# ── DXF с привязанным растром (AutoCAD R2000) ───────────────────────────
+# Цвета слоёв те же, что на схеме: инженер открывает чертёж и видит
+# привычную раскладку, а не случайные номера ACI.
+DXF_RGB = {'Granica_ZU': (0, 176, 80), 'CHZU_1': (0, 0, 205), 'CHZU_2': (0, 140, 0),
+           'CHZU_3': (230, 0, 190), 'CHZU_4': (95, 75, 15), 'Smezhnye': (210, 0, 0),
+           'Podpisi': (0, 0, 0), 'Podlozhka': (128, 128, 128)}
+DXF_HATCH = {'CHZU_1': 'ANSI31', 'CHZU_2': 'ANSI32', 'CHZU_3': 'ANSI37', 'CHZU_4': 'ANSI33'}
+
+def world_file(path, meta):
+    """Файл привязки .jgw: пиксель → метры местной СК.
+
+    Нужен на случай, если растр подгружают вручную (IMAGEATTACH читает
+    привязку из него), а не через готовый DXF.
+    """
+    sx = (meta['e1'] - meta['e0']) / meta['W']
+    sy = (meta['n1'] - meta['n0']) / meta['H']
+    open(path, 'w').write('%.10f\n0.0\n0.0\n%.10f\n%.4f\n%.4f\n'
+                          % (sx, -sy, meta['e0'] + sx / 2, meta['n1'] - sy / 2))
+    return path
+
+def dxf_raster(path, rings, parts, image_path, meta, kn='', neighbors=None, tol_m=0.0):
+    """DXF R2000: контуры частей поверх привязанного снимка.
+
+    R12 из dxf() читается всюду, но растр в нём хранить нечем: IMAGE
+    появился только в R14. Здесь пишется R2000 через ezdxf, снимок
+    кладётся рядом с чертежом и вставляется в координатах местной СК —
+    в AutoCAD чертёж открывается сразу с подложкой.
+    """
+    try:
+        import ezdxf
+    except ImportError:
+        return None
+    import shutil
+    base = os.path.splitext(path)[0]
+    img_name = os.path.basename(base) + os.path.splitext(image_path)[1]
+    img_dst = os.path.join(os.path.dirname(path), img_name)
+    if os.path.abspath(image_path) != os.path.abspath(img_dst):
+        shutil.copyfile(image_path, img_dst)
+    world_file(os.path.splitext(img_dst)[0] + '.jgw', meta)
+
+    doc = ezdxf.new('R2000', setup=True)
+    doc.header['$INSUNITS'] = 6                     # метры
+    msp = doc.modelspace()
+    for name, rgb in DXF_RGB.items():
+        doc.layers.add(name).rgb = rgb
+    # растр первым: порядок отрисовки в AutoCAD — порядок записи сущностей
+    idef = doc.add_image_def(filename=img_name, size_in_pixel=(meta['W'], meta['H']))
+    msp.add_image(idef, insert=(meta['e0'], meta['n0']),
+                  size_in_units=(meta['e1'] - meta['e0'], meta['n1'] - meta['n0']),
+                  dxfattribs={'layer': 'Podlozhka'})
+    doc.set_raster_variables(frame=0, quality=1, units='m')
+
+    poly = lambda r, layer, w: msp.add_lwpolyline(
+        [(float(x), float(y)) for x, y in r], close=True,
+        dxfattribs={'layer': layer, 'const_width': w})
+    for r in normalize(rings):
+        poly(r, 'Granica_ZU', 0.6)
+    for nb in (neighbors or []):
+        for r in nb.get('rings', []):
+            poly(r, 'Smezhnye', 0.0)
+    for name, p in _layers(parts):
+        layer = name.replace('ЧЗУ_', 'CHZU_')
+        outer = simplify(normalize(p['outer']), tol_m)
+        inner = simplify(normalize(p.get('inner', [])), tol_m)
+        for r in outer:
+            poly(r, layer, 0.3)
+        for r in inner:
+            poly(r, layer, 0.3)
+        if DXF_HATCH.get(layer) and outer:
+            h = msp.add_hatch(dxfattribs={'layer': layer})
+            h.set_pattern_fill(DXF_HATCH[layer], scale=3.0)
+            h.rgb = DXF_RGB[layer]
+            for r in outer:
+                h.paths.add_polyline_path([(float(x), float(y)) for x, y in r], is_closed=True)
+            for r in inner:
+                h.paths.add_polyline_path([(float(x), float(y)) for x, y in r], is_closed=True,
+                                          flags=0)
+        # подпись в самой «толстой» точке контура, а не в центре тяжести:
+        # у вытянутых частей центр тяжести уезжает за пределы полигона
+        from shapely.geometry import Polygon as _P
+        big = max(outer, key=lambda r: _P(r).area) if outer else None
+        if big is not None:
+            c = _P(big).representative_point()
+            msp.add_text(name.replace('_', '/'), height=6.0,
+                         dxfattribs={'layer': 'Podpisi'}).set_placement((c.x, c.y))
+    if kn:
+        c = normalize(rings)[0]
+        msp.add_text(kn, height=6.0, dxfattribs={'layer': 'Podpisi'}).set_placement(
+            (float(sum(q[0] for q in c) / len(c)), float(sum(q[1] for q in c) / len(c))))
+    doc.set_modelspace_vport(height=(meta['n1'] - meta['n0']) * 1.1,
+                             center=((meta['e0'] + meta['e1']) / 2, (meta['n0'] + meta['n1']) / 2))
+    doc.saveas(path)
+    return path
+
 # ── MIF/MID для MapInfo ─────────────────────────────────────────────────
 def mif(path, rings, parts, zone, tol_m=0.0):
     base = os.path.splitext(path)[0]
     items = [('Граница ЗУ', normalize(rings)[0], 0.0)]
     for name, p in _layers(parts):
         for r in simplify(normalize(p['outer']), tol_m):
-            items.append((name, r, p['areaHa']))
+            items.append((name, r, areas.ha(p)))
     with open(base + '.mif', 'w', encoding='cp1251', errors='replace') as f:
         f.write('Version 300\nCharset "WindowsCyrillic"\nDelimiter ","\n')
         f.write('CoordSys Earth Projection 8, 1001, "m", 46.05, 0, 1, 2300000, -5514743.504\n')
@@ -143,15 +241,17 @@ def catalog(path, parts, zone, tol_m=0.0, xlsx=True):
     return made, len(rows) - 1
 
 def areas_table(path, parts, egrn_ha):
-    """Ведомость площадей частей."""
-    rows = [('Обозначение', 'Наименование', 'Площадь, м²', 'Площадь, га', 'Доля, %', 'Контуров')]
+    """Ведомость площадей частей: метры сведены с ЕГРН, гектары считаны из них."""
+    rows = [('Обозначение', 'Наименование', 'Площадь, кв.м', 'Площадь, га', 'Доля, %', 'Контуров')]
+    egrn_m2 = int(round(egrn_ha * 10000))
     for name, p in _layers(parts, prefix='ЧЗУ/'):
-        rows.append((name, p.get('название', ''), int(round(p['areaHa'] * 10000)),
-                     round(p['areaHa'], 4), round(100 * p['areaHa'] / egrn_ha, 2),
-                     len(p['outer'])))
-    tot = sum(p['areaHa'] for _, p in _layers(parts))
-    rows.append(('Итого', 'площадь ЗУ по сведениям ЕГРН', int(round(tot * 10000)),
-                 round(tot, 4), round(100 * tot / egrn_ha, 2), ''))
+        m2 = areas.m2(p)
+        rows.append((name, p.get('название', ''), m2, round(m2 / 10000.0, 4),
+                     round(100.0 * m2 / egrn_m2, 2), len(p['outer'])))
+    tot = sum(areas.m2(p) for _, p in _layers(parts))
+    rows.append(('Итого', 'площадь ЗУ по сведениям ЕГРН' if tot == egrn_m2
+                 else 'сумма частей (вне частей %.4f га)' % ((egrn_m2 - tot) / 10000.0),
+                 tot, round(tot / 10000.0, 4), round(100.0 * tot / egrn_m2, 2), ''))
     with open(path, 'w', encoding='cp1251', errors='replace', newline='') as f:
         csv.writer(f, delimiter=';').writerows(rows)
     return path
@@ -169,7 +269,8 @@ def geojson(path, rings, parts, zone, wgs=False):
         for h in normalize(p.get('inner', [])):
             polys[0].append(conv(h) + [conv(h)[0]])
         feats.append({'type': 'Feature',
-                      'properties': {'слой': name, 'площадь_га': round(p['areaHa'], 4),
+                      'properties': {'слой': name, 'площадь_м2': areas.m2(p),
+                                     'площадь_га': round(areas.ha(p), 4),
                                      'название': p.get('название', '')},
                       'geometry': {'type': 'MultiPolygon', 'coordinates': polys}})
     fc = {'type': 'FeatureCollection', 'features': feats}
@@ -178,12 +279,16 @@ def geojson(path, rings, parts, zone, wgs=False):
     json.dump(fc, open(path, 'w', encoding='utf-8'), ensure_ascii=False)
     return path
 
-def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None):
+def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None,
+                image=None, meta=None, neighbors=None):
     """Обменные форматы комплекта. prefix — «<КН>_<вид работ>» для имён файлов."""
     pre = prefix or kn.replace(':', '-')
     P = lambda name: os.path.join(out_dir, '%s_%s' % (pre, name))
     made = {}
     made['dxf'] = dxf(P('Границы_частей.dxf'), rings, parts, tol_m)
+    if image and meta and os.path.exists(image):
+        made['dxf_растр'] = dxf_raster(P('Границы_частей_с_растром.dxf'), rings, parts,
+                                       image, meta, kn=kn, neighbors=neighbors, tol_m=tol_m)
     made['mif'] = mif(P('Границы_частей.mif'), rings, parts, zone, tol_m)
     cat, npts = catalog(P('Каталог_координат.csv'), parts, zone, tol_m)
     made['каталог'] = cat; made['точек'] = npts

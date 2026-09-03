@@ -9,6 +9,7 @@
 import numpy as np
 from PIL import Image
 
+from .. import areas
 from ..sheet import Sheet, fmt_ha
 
 Image.MAX_IMAGE_PIXELS = None
@@ -114,7 +115,7 @@ def build(path, kn, rings, parts, egrn_ha, meta, backdrops, fragment=None):
     tx, ty = s.IN1 - s.mm(3) - COLW, GY0
     s.d.text((tx, ty), 'Что проверять', font=s.F(4.2, True), fill='black')
     ty += s.mm(8.5)
-    rows = [(COL[k], NAME.get(k, 'ЧЗУ/%s') % k, fmt_ha(parts[k]['areaHa']) + ' га', HINT.get(k, ''))
+    rows = [(COL[k], NAME.get(k, 'ЧЗУ/%s') % k, fmt_ha(areas.ha(parts[k])) + ' га', HINT.get(k, ''))
             for k in keys]
     rows.append((ZUG, 'Граница ЗУ по сведениям ЕГРН', fmt_ha(egrn_ha) + ' га',
                  'контрольная: площадь по координатам\nсовпала с ЕГРН.'))
@@ -128,7 +129,7 @@ def build(path, kn, rings, parts, egrn_ha, meta, backdrops, fragment=None):
     ty += s.mm(1)
     s.d.line([tx, ty, tx + COLW - s.mm(4), ty], fill='black', width=s.W(0.5))
     ty += s.mm(4)
-    tot = sum(parts[k]['areaHa'] for k in keys if k in ('1', '2'))
+    tot = sum(areas.ha(parts[k]) for k in keys if k in ('1', '2'))
     s.d.text((tx, ty), 'Итого под вовлечение в оборот', font=s.F(3.0, True), fill='black')
     s.d.text((tx + COLW - s.mm(4), ty), fmt_ha(tot) + ' га', font=s.F(3.0, True),
              fill=(160, 0, 0), anchor='ra')

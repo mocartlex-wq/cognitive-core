@@ -19,6 +19,7 @@ from agroscan.rings import rasterize
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KPT = os.path.join(ROOT, 'data', 'kpt', '58_24_0341802_2025-08-23_kpt11.xml')
 VYP = os.path.join(ROOT, 'data', 'kpt', 'vypiska74.xml')
+KPT29 = os.path.join(ROOT, 'data', 'kpt', '58_17_0130701_2026-07-15_kpt11.xml')
 
 def test_kpt_parses_and_area_matches():
     P, Z, sk = kpt.parse(KPT)
@@ -83,6 +84,34 @@ def test_forests_are_separate_from_zouit():
     assert [z['код'] for z in kpt.zouit(zones)] == ['6']
     fr = kpt.forests(zones)
     assert len(fr) == 1 and fr[0]['реестровый_номер'] == '58:00-15.12', fr
+
+def test_address_and_landmark_come_from_kpt():
+    """Адрес и ориентир берутся из КПТ, а не с рук.
+
+    В конфиге :29 был вписан чужой район (Лопатинский вместо
+    Малосердобинского), поэтому адрес теперь читается из выгрузки.
+    """
+    P, _, _ = kpt.parse(KPT29)
+    r = kpt.find(P, '58:17:0130701:29')
+    a = kpt.address_of(r)
+    assert a == 'Пензенская область, Малосердобинский район, Старославкинский сельсовет', a
+    # readable_address здесь короче ФИАС-блока — берётся сборка
+    assert r['адрес'] == 'обл. Пензенская, р-н Малосердобинский', r['адрес']
+    lm = kpt.landmark_of(r)
+    assert lm.startswith('с. Новое Славкино'), lm
+    assert '4,9 км' in lm and 'юго-восток' in lm, lm
+
+def test_address_keeps_descriptive_form():
+    """Описательный адрес выписки длиннее ФИАС и отдаётся как есть."""
+    P, _, _ = kpt.parse(VYP)
+    a = kpt.address_of(P[0])
+    assert a.startswith('Местоположение установлено'), a
+    assert 'с.Верхозим' in a, a
+    assert kpt.landmark_of(P[0]) == ''          # rel_position в выписке нет
+
+    P, _, _ = kpt.parse(KPT)
+    r = kpt.find(P, '58:24:0341802:1173')
+    assert kpt.address_of(r) == 'Пензенская область, Пензенский район, Мичуринский сельсовет'
 
 
 if __name__ == '__main__':

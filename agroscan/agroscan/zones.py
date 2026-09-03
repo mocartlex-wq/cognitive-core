@@ -133,15 +133,66 @@ def despeckle(zones, parcel, order, thin=3.0, rounds=3):
             break
     return resolve(zones, parcel, order), moved / 1e4
 
-def to_rings(g, minha=0.0002):
+def clean_ring(ring, eps=1e-6):
+    """Убрать вершины, которых в геометрии нет: совпадающие и лежащие на прямой.
+
+    На :29 каталог координат выходил на 15 точек вместо 12 по КПТ: две
+    вершины совпадали (строка с длиной 0,00 м и углом 180°00\'00"), ещё две
+    лежали на прямой — след buffer(0.5) в fill_remainder и вершины от
+    пересечения полигонов. В межевом документе таких точек быть не должно.
+
+    Снимаются только вершины, удаление которых не меняет геометрию (допуск
+    микрон). Обобщать контур здесь нельзя: Дуглас–Пёкер с допуском 5 мм
+    убирал вдвое больше точек, но резал соседние части по-разному, и между
+    ними появлялись наложения 0,15 м² и зазоры 1,5 м² — при нулевом допуске
+    проверок это брак. Генерализация — отдельная и осознанная операция
+    (export.simplify по настройке export.simplify_m).
+    """
+    a = [[float(x), float(y)] for x, y in ring]
+    out = []
+    for q in a:
+        if not out or abs(q[0] - out[-1][0]) > eps or abs(q[1] - out[-1][1]) > eps:
+            out.append(q)
+    while len(out) > 3 and abs(out[0][0] - out[-1][0]) <= eps and abs(out[0][1] - out[-1][1]) <= eps:
+        out.pop()
+    changed = True
+    while changed and len(out) > 3:
+        changed = False
+        i = 0
+        while i < len(out) and len(out) > 3:
+            p, c, q = out[i - 1], out[i], out[(i + 1) % len(out)]
+            dx, dy = q[0] - p[0], q[1] - p[1]
+            ln = (dx * dx + dy * dy) ** 0.5
+            if ln > 1e-12:
+                d = abs(dx * (p[1] - c[1]) - (p[0] - c[0]) * dy) / ln
+                t = ((c[0] - p[0]) * dx + (c[1] - p[1]) * dy) / (ln * ln)
+            else:
+                d, t = ((c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2) ** 0.5, 0.0
+            # только точка НА отрезке: вершина острого выступа тоже даёт
+            # нулевое отклонение, но выкидывать её нельзя
+            if d <= eps and -1e-9 <= t <= 1 + 1e-9:
+                out.pop(i); changed = True
+                continue
+            i += 1
+    return out
+
+def extra_points(rings, eps=1e-6):
+    """Сколько вершин в кольцах лишние (для проверки qa)."""
+    return sum(len(r) - len(clean_ring(r, eps)) for r in rings)
+
+def to_rings(g, minha=0.0002, clean=True):
     """Полигон → (внешние кольца, вырезы, площадь га) для записи и отрисовки."""
     if g.is_empty:
         return [], [], 0.0
     ps = [p for p in (g.geoms if isinstance(g, MultiPolygon) else [g]) if p.area / 1e4 >= minha]
-    outer = [[list(map(float, c)) for c in p.exterior.coords[:-1]] for p in ps]
-    inner = [[list(map(float, c)) for c in r.coords[:-1]] for p in ps for r in p.interiors
+    keep = (lambda r: clean_ring(r)) if clean else (lambda r: [[float(x), float(y)] for x, y in r])
+    outer = [keep(p.exterior.coords[:-1]) for p in ps]
+    inner = [keep(r.coords[:-1]) for p in ps for r in p.interiors
              if Polygon(r).area / 1e4 >= minha]
-    return outer, inner, sum(p.area for p in ps) / 1e4
+    # площадь считаем по тем же кольцам, что уйдут в каталог координат:
+    # иначе ведомость расходится с координатами, которыми она задана
+    ha = lambda rs: sum(Polygon(r).area for r in rs if len(r) >= 3) / 1e4
+    return outer, inner, ha(outer) - ha(inner)
 
 def drop_small_zouit(zin, mpp, min_ha=0.25):
     """Отсечь язычки ЗОУИТ мельче min_ha: границей ЗУ от охранной зоны

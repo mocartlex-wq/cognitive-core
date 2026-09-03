@@ -7,7 +7,8 @@
 """
 from PIL import Image
 
-from ..sheet import Sheet, fmt_ha, fmt_m2
+from .. import areas
+from ..sheet import Sheet, fmt_ha, fmt_int, fmt_m2
 
 class Note:
     """Многостраничный текстовый лист с автоматическим переносом."""
@@ -104,7 +105,7 @@ def attachments_line(attachments=()):
             % ('; '.join(have) if have else 'схема расположения частей ЗУ'))
 
 def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зона 2',
-          attachments=(), soil_image=None):
+          attachments=(), soil_image=None, landmark=''):
     n = Note()
     s = n.s
     s.d.text((s.PW / 2, n.y), 'Пояснительная записка', font=s.F(4.6, True), fill='black', anchor='ma')
@@ -116,10 +117,13 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
     n.y += s.mm(4.4)
 
     n.section('Объект')
-    n.text('Кадастровый номер:  %s\nМестоположение:  %s\n'
+    # ориентир и расстояние до него берутся из КПТ (rel_position), а не
+    # из стороннего справочника: в выгрузке они уже есть
+    n.text('Кадастровый номер:  %s\nМестоположение:  %s\n%s'
            'Категория:  земли сельскохозяйственного назначения\n'
            'Площадь по сведениям ЕГРН:  %s м² (%s га)\nСистема координат:  %s'
-           % (kn, place or '—', fmt_m2(egrn_ha), fmt_ha(egrn_ha), zone_name))
+           % (kn, place or '—', 'Ориентир:  %s\n' % landmark if landmark else '',
+              fmt_m2(egrn_ha), fmt_ha(egrn_ha), zone_name))
     n.y += s.mm(3)
 
     n.section('Ведомость частей')
@@ -133,9 +137,11 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
         s.d.multiline_text(((cols[i] + cols[i + 1]) / 2, n.y + s.mm(1.0)), t, font=s.F(2.5, True),
                            fill='black', anchor='ma', align='center', spacing=s.mm(0.8))
     n.y += HH
-    total = 0.0
+    # печатаем сведённые с ЕГРН целые метры, а га считаем из них же:
+    # иначе в одной строке 21 912 м² и 2,19 га от разных чисел
+    total = 0
     for k in keys:
-        a = parts[k]['areaHa']; total += a
+        m2 = areas.m2(parts[k]); a = areas.ha(parts[k]); total += m2
         hh = s.mm(9.0)
         n.need(15)
         s.d.rectangle([cols[0], n.y, cols[4], n.y + hh], outline='black', width=s.W(0.35))
@@ -145,7 +151,7 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
                  fill='black', anchor='ma')
         s.d.multiline_text((cols[1] + s.mm(2), n.y + s.mm(1.8)), parts[k].get('название', ''),
                            font=s.F(2.45), fill=(35, 35, 35), spacing=s.mm(1.1))
-        s.d.text(((cols[2] + cols[3]) / 2, n.y + s.mm(2.9)), fmt_m2(a), font=s.F(2.6),
+        s.d.text(((cols[2] + cols[3]) / 2, n.y + s.mm(2.9)), fmt_int(m2), font=s.F(2.6),
                  fill='black', anchor='ma')
         s.d.text(((cols[3] + cols[4]) / 2, n.y + s.mm(2.9)), fmt_ha(a), font=s.F(2.6),
                  fill='black', anchor='ma')
@@ -154,16 +160,22 @@ def build(path, kn, parts, egrn_ha, result, place='', zone_name='МСК-58, зо
     s.d.rectangle([cols[0], n.y, cols[4], n.y + hh], outline='black', width=s.W(0.55))
     for c in cols[2:4]:
         s.d.line([c, n.y, c, n.y + hh], fill='black', width=s.W(0.35))
+    # на :74 части покрывают участок не целиком, и подпись «площадь по ЕГРН»
+    # там была неправдой: сравниваем с ЕГРН и подписываем по факту
+    egrn_m2 = int(round(egrn_ha * 10000))
     s.d.text((cols[1] + s.mm(2), n.y + s.mm(1.5)),
-             'Итого — площадь земельного участка по сведениям ЕГРН', font=s.F(2.6, True), fill='black')
-    s.d.text(((cols[2] + cols[3]) / 2, n.y + s.mm(1.5)), fmt_m2(total), font=s.F(2.6, True),
+             'Итого — площадь земельного участка по сведениям ЕГРН' if total == egrn_m2
+             else 'Итого по частям (вне частей %s м²)' % fmt_int(egrn_m2 - total),
+             font=s.F(2.6, True), fill='black')
+    s.d.text(((cols[2] + cols[3]) / 2, n.y + s.mm(1.5)), fmt_int(total), font=s.F(2.6, True),
              fill='black', anchor='ma')
-    s.d.text(((cols[3] + cols[4]) / 2, n.y + s.mm(1.5)), fmt_ha(total), font=s.F(2.6, True),
+    s.d.text(((cols[3] + cols[4]) / 2, n.y + s.mm(1.5)), fmt_ha(total / 10000.0), font=s.F(2.6, True),
              fill='black', anchor='ma')
     n.y += hh + s.mm(3)
     # части без площади в комплект не попадают — упоминать «0,00 га (ЧЗУ/2)»
     # в записке нечестно: такой части нет
-    a1 = parts.get('1', {}).get('areaHa', 0); a2 = parts.get('2', {}).get('areaHa', 0)
+    a1 = areas.ha(parts['1']) if '1' in parts else 0
+    a2 = areas.ha(parts['2']) if '2' in parts else 0
     involved = 'ЧЗУ/1 + ЧЗУ/2' if a1 and a2 else ('ЧЗУ/1' if a1 else 'ЧЗУ/2')
     line = ['Под вовлечение в сельскохозяйственный оборот: %s = %s га.'
             % (involved, fmt_ha(a1 + a2))]
