@@ -10,6 +10,7 @@ USAGE = """agroscan — анализ зарастания и подготовк�
   python -m agroscan batch <шаблон|папка> [--log журнал.json]
   python -m agroscan prepare <КПТ.xml> <кадастровый:номер> [--place "..."] [--no-cover-all]
   python -m agroscan new <кадастровый:номер> [--zone msk58-2]
+  python -m agroscan tool <конфиг.yaml> [--out файл.html]
   python -m agroscan cache [--clear]
 """
 
@@ -19,7 +20,7 @@ def main(argv):
     cmd = argv[1]; args = argv[2:]
     flag = lambda f: f in args
     opt = lambda f, d=None: args[args.index(f) + 1] if f in args and args.index(f) + 1 < len(args) else d
-    NAMED = ('--log', '--zone', '--place')
+    NAMED = ('--log', '--zone', '--place', '--out')
     pos = [a for a in args if not a.startswith('--')
            and (args.index(a) == 0 or args[args.index(a) - 1] not in NAMED)]
 
@@ -51,6 +52,12 @@ def main(argv):
             print('уже есть: %s' % path); return 1
         open(path, 'w', encoding='utf-8').write(TEMPLATE % {'kn': kn, 'zone': zone, 'tag': tag})
         print('создан %s — заполните egrn_ha и пути к данным' % path)
+    elif cmd == 'tool':
+        from .markup_tool import build as build_tool
+        p, n, info = build_tool(pos[0], out_path=opt('--out'))
+        print('\nинструмент разметки: %s' % p)
+        for k, v in info.items():
+            print('   %-12s %s' % (k, v))
     elif cmd == 'cache':
         from . import cache
         if flag('--clear'):
