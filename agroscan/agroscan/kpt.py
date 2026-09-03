@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 # sk_id вида «58.2» — местная СК зона 2; реестр зон живёт в geo.MSK_ZONES
 SK_RE = re.compile(r'^(\d+)\.(\d+)$')
 ZOUIT_CODE = '6'          # зона с особыми условиями использования территории
+FOREST_CODE = '15'        # лесничество: сюда мероприятия по вводу в оборот не идут
 
 def zone_of(sk_id, kn=None, rings=None, prefix='msk'):
     """«58.2» → «msk58-2».
@@ -146,4 +147,13 @@ def neighbours(parcels, bbox, kn=None, margin=0.0):
 def zouit(zones, codes=(ZOUIT_CODE,)):
     """Только зоны с особыми условиями: территориальные зоны и лесничества
     ограничивают другое и в площадь «мероприятия не проводятся» не входят."""
+    return [z for z in zones if z['код'] in codes]
+
+def forests(zones, codes=(FOREST_CODE,)):
+    """Лесничества и лесопарки из КПТ.
+
+    Это не ЗОУИТ: земли лесного фонда — чужая категория, и координаты
+    частей ЗУ не должны на них накладываться. Отдаём отдельным слоем,
+    чтобы можно было и вычесть, и показать на карте.
+    """
     return [z for z in zones if z['код'] in codes]

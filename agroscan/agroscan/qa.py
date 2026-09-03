@@ -9,8 +9,13 @@ import itertools
 from shapely.geometry import MultiPolygon
 from shapely.ops import unary_union
 
-def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01, cover_all=True):
-    """zones — {ключ: полигон}; egrn_ha — площадь по сведениям ЕГРН."""
+def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01, cover_all=True,
+          forest=None, forest_ha=0.0):
+    """zones — {ключ: полигон}; egrn_ha — площадь по сведениям ЕГРН.
+
+    forest — полигон лесничеств из КПТ, если они попали на участок:
+    координаты частей не должны на него накладываться.
+    """
     res = []
     def add(name, ok, got, tol, note=''):
         res.append({'проверка': name, 'пройдена': bool(ok),
@@ -18,9 +23,12 @@ def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01, cover_all=True):
 
     total = sum(g.area for g in zones.values()) / 1e4
     if cover_all:
-        d = abs(total - egrn_ha) / egrn_ha * 100 if egrn_ha else 0
+        # лесничество вычтено из рабочей площади, поэтому сходимость
+        # проверяем с ним: части + лесничество = площадь ЕГРН
+        d = abs(total + forest_ha - egrn_ha) / egrn_ha * 100 if egrn_ha else 0
         add('сумма частей = площадь ЕГРН', d <= area_tol_pct, d, '%.2f %%' % area_tol_pct,
-            'сумма %.4f га при ЕГРН %.4f га' % (total, egrn_ha))
+            'сумма %.4f га%s при ЕГРН %.4f га'
+            % (total, ' + лесничество %.4f га' % forest_ha if forest_ha else '', egrn_ha))
     else:
         # части покрывают участок не целиком (действующая пашня вне ЧЗУ) —
         # проверяем только, что они не больше участка
@@ -36,6 +44,11 @@ def check(zones, parcel, egrn_ha, thin=3.0, area_tol_pct=0.01, cover_all=True):
 
     out = max((g.difference(parcel).area for g in zones.values()), default=0.0)
     add('части внутри границы ЕГРН', out <= 0.01, out, '0 м²')
+
+    if forest is not None:
+        over = sum(g.intersection(forest).area for g in zones.values())
+        add('части не накладываются на лесничества', over <= 0.01, over, '0 м²',
+            'лесничество на участке %.4f га' % forest_ha)
 
     slivers = []
     for k, g in zones.items():

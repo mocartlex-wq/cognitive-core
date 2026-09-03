@@ -57,6 +57,36 @@ def test_catches_sliver():
     q = qa_mod.check(Z, parcel, EGRN)
     assert not q['пройдено'] and 'нет частей уже 3 м' in q['провалено']
 
+# ── лесничества: чужая категория земель под ногами ──────────────────────
+def _box(x0, y0, w, h):
+    return Polygon([(x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h)])
+
+def test_forest_is_excluded_and_checked():
+    """Лесничество вычтено из рабочей площади, части в него не заходят."""
+    parcel = _box(0, 0, 100, 100)                 # 1 га
+    forest = _box(0, 0, 100, 10)                  # полоса 0,1 га вдоль края
+    Z = {'1': parcel.difference(forest)}          # часть построена без лесничества
+    q = qa_mod.check(Z, parcel.difference(forest), 1.0, forest=forest, forest_ha=0.1)
+    assert q['пройдено'], q['провалено']
+
+def test_forest_area_must_be_counted():
+    """Если вычтенную площадь не учесть, сходимость с ЕГРН обязана упасть."""
+    parcel = _box(0, 0, 100, 100)
+    forest = _box(0, 0, 100, 10)
+    Z = {'1': parcel.difference(forest)}
+    q = qa_mod.check(Z, parcel.difference(forest), 1.0, forest=forest, forest_ha=0.0)
+    assert not q['пройдено'] and 'сумма частей = площадь ЕГРН' in q['провалено']
+
+def test_catches_part_inside_forest():
+    """Часть, залезшая в лесничество, обязана валить проверку."""
+    parcel = _box(0, 0, 100, 100)
+    forest = _box(0, 0, 100, 10)
+    Z = {'1': parcel}                             # часть построена без вычитания
+    q = qa_mod.check(Z, parcel, 1.0, forest=forest, forest_ha=0.1)
+    assert not q['пройдено'], q
+    assert 'части не накладываются на лесничества' in q['провалено'], q['провалено']
+
+
 if __name__ == '__main__':
     ok = 0
     for name, fn in sorted(globals().items()):

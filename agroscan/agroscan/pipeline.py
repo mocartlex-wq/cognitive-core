@@ -246,6 +246,37 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
          ' | ' + json.dumps(b_info, ensure_ascii=False) if b_info else ''))
 
     # ── части ЗУ ───────────────────────────────────────────────────────
+    # Лесничество — чужая категория земель: части ЧЗУ туда не заходят.
+    # Убираем его из рабочей маски до классификации, а площадь показываем
+    # отдельной строкой — «просто обрезать по границе ЕГРН» мало, когда
+    # граница лесничества проходит вплотную.
+    fpath = cfg_mod.path_of(cfg, 'forest') if cfg.get('forest') else None
+    forest = (np.load(fpath).astype(bool) if fpath and os.path.exists(fpath)
+              else np.zeros(mask.shape, bool))
+    forest &= mask
+    forest_ha = float(forest.sum()) * mpp * mpp / 1e4
+    forest_list = []
+    fjson = os.path.join(os.path.dirname(fpath), 'forest.json') if fpath else None
+    if fjson and os.path.exists(fjson):
+        forest_list = json.load(open(fjson, encoding='utf-8')).get('лесничества', [])
+    forest_poly = None
+    forest_raster_ha = forest_ha
+    if forest.any():
+        mask = mask & ~forest
+        o, i = vectorize(forest, grid, 1.0, 0.02)[:2]
+        forest_poly = z.to_poly(o, i)
+        before = parcel.area
+        parcel = parcel.difference(forest_poly)
+        # для сходимости площадей важна не растровая оценка, а то, сколько
+        # реально ушло из полигона участка: у соприкасающихся границ это
+        # пара квадратных метров, и двойной учёт валил проверку
+        forest_ha = (before - parcel.area) / 1e4
+        _say(t0, 'лесничество: исключено %.4f га, работаем по %.4f га'
+             % (forest_ha, parcel.area / 1e4))
+    elif forest_list:
+        _say(t0, 'лесничество: %s — наложения на участок нет'
+             % ', '.join(f['наименование'][:40] for f in forest_list[:2]))
+
     zn = np.load(cfg_mod.path_of(cfg, 'zouit')) if cfg.get('zouit') else np.zeros_like(mask)
     zin = z.drop_small_zouit(zn & mask, mpp, cfg['zones']['zouit_min_ha'])
     zn = zin | (zn & ~mask)
@@ -277,10 +308,20 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
              % (rest, ', '.join('ЧЗУ/%s %.2f' % (k, v) for k, v in moved.items() if v > 0)))
     Z, cleaned = z.despeckle(Z, parcel, order, thin) if len(Z) > 1 else (Z, 0.0)
     _say(t0, 'чистка нитей %.3f га' % cleaned)
+    # часть без площади — это не часть: на :29 нет ни залежи, ни лесополос,
+    # и пустые ЧЗУ/2, ЧЗУ/4 попадали в ведомость и роняли проверку
+    empty = [k for k, g in Z.items() if g.area <= 1.0]
+    if empty:
+        Z = {k: g for k, g in Z.items() if k not in empty}
+        _say(t0, 'части без площади исключены: %s' % ', '.join('ЧЗУ/%s' % k for k in empty))
 
     # ── проверки и запись ──────────────────────────────────────────────
-    qa = qa_mod.check(Z, parcel, cfg['egrn_ha'], thin, cover_all=cfg.get('cover_all', True))
+    qa = qa_mod.check(Z, parcel, cfg['egrn_ha'], thin, cover_all=cfg.get('cover_all', True),
+                      forest=forest_poly, forest_ha=forest_ha)
     res = {}
+    for f in os.listdir(out):                    # следы прошлого прогона
+        if f.startswith('chzu') and f.endswith('.json') and f[4:-5] not in Z:
+            os.remove(os.path.join(out, f))
     for k in sorted(Z):
         o, i, a = z.to_rings(Z[k])
         res[k] = {'outer': o, 'inner': i, 'areaHa': a, 'название': cfg['parts'].get(k, '')}
@@ -289,7 +330,10 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
               'части': {k: round(v['areaHa'], 4) for k, v in res.items()},
               'сумма': round(sum(v['areaHa'] for v in res.values()), 4),
               'классы': {str(c): round(a, 4) for c, a in ar.items()},
-              'лесополосы': b_info, 'сцены_sentinel': used, 'qa': qa}
+              'лесополосы': b_info, 'сцены_sentinel': used, 'qa': qa,
+              'лесничество': {'наложение_га': round(forest_raster_ha, 4),
+                              'исключено_га': round(forest_ha, 4),
+                              'список': forest_list}}
     _dump_report = lambda: json.dump(report, open(os.path.join(out, 'result.json'), 'w'),
                                      ensure_ascii=False, indent=1)
     _dump_report()

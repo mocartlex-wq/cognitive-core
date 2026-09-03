@@ -38,6 +38,7 @@ rings: ../data/%(tag)s/rings.json
 meta:  ../data/%(tag)s/bgmeta.json
 image: ../data/%(tag)s/bg_summer.jpg
 zouit: ../data/%(tag)s/zouit.npy
+forest: ../data/%(tag)s/forest.npy      # лесничества из КПТ — части туда не заходят
 neighbors: ../data/%(tag)s/neighbors.json
 %(markup)s
 
@@ -125,6 +126,23 @@ def run(kpt_path, kn, root=None, margin_m=130, mpp=0.60, zoom=17, place='',
     for w in wide:
         say('   исключена: %s' % w['наименование'][:70])
 
+    # Лесничества: чужая категория земель. Считаем наложение на участок и
+    # кладём слой рядом с ЗОУИТ — координаты частей туда заходить не должны.
+    fr = np.zeros_like(mask)
+    fr_list = []
+    for z in kpt.forests(zones):
+        m = rasterize(z['кольца'], grid) & mask
+        fr_list.append({'номер': z['реестровый_номер'],
+                        'наименование': z['наименование'] or z['тип'],
+                        'га': round(m.sum() * cell, 4)})
+        fr |= m
+    np.save(os.path.join(ddir, 'forest.npy'), fr)
+    json.dump({'лесничества': fr_list, 'наложение_га': round(fr.sum() * cell, 4)},
+              open(os.path.join(ddir, 'forest.json'), 'w'), ensure_ascii=False, indent=1)
+    if fr_list:
+        say('лесничества в КПТ: %d, наложение на участок %.4f га'
+            % (len(fr_list), fr.sum() * cell))
+
     cfg_path = os.path.join(root, 'parcels', tag + '.yaml')
     os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
     parts = ''.join('  "%s": "%s"\n' % (k, v) for k, v in PARTS.items()
@@ -142,4 +160,5 @@ def run(kpt_path, kn, root=None, margin_m=130, mpp=0.60, zoom=17, place='',
     say('конфиг: %s' % cfg_path)
     return {'конфиг': cfg_path, 'данные': ddir, 'зона': zone, 'площадь_га': ha,
             'смежников': len(nb), 'зоуит_га': round(zn.sum() * cell, 3),
-            'зон_учтено': len(kept), 'зон_исключено': len(wide)}
+            'зон_учтено': len(kept), 'зон_исключено': len(wide),
+            'лесничеств': len(fr_list), 'лесничество_га': round(fr.sum() * cell, 4)}
