@@ -445,6 +445,13 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                                     rel, cfg['egrn_ha'], meta, cfg_mod.path_of(cfg, 'image'))
                     json.dump({'stats': rel['stats'], 'формы': rel['формы'], 'тайлы': tiles},
                               open(os.path.join(out, 'relief.json'), 'w'), ensure_ascii=False, indent=1)
+                    # массивы рельефа кладём рядом: инструмент разметки берёт их
+                    # подложками, а считать их второй раз незачем (сетка 10 м —
+                    # файлы в десятки килобайт)
+                    for name in ('z', 'slope', 'tpi', 'acc'):
+                        np.save(os.path.join(out, 'relief_%s.npy' % name), rel[name])
+                    json.dump({'grid_m': rel['grid_m']},
+                              open(os.path.join(out, 'relief_grid.json'), 'w'))
                     _say(t0, 'рельеф: уклон медиана %.1f°, форм %d, оврагов %d, к исключению %.2f га'
                          % (rel['stats']['уклон_медиана'], rel['stats']['форм_найдено'],
                             rel['stats']['оврагов'], rel['stats']['исключается_га']))

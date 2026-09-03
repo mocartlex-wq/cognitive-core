@@ -37,10 +37,31 @@ def _b64_jpeg(img, max_px=1600, quality=82):
     buf = BytesIO(); img.convert('RGB').save(buf, 'JPEG', quality=quality, optimize=True)
     return base64.b64encode(buf.getvalue()).decode()
 
-def _ramp(a, lo, hi, gamma=1.0):
-    """Массив → серое изображение с обрезкой по диапазону."""
+# Палитры для производных слоёв: серая шкала годится для полога, но высоты
+# и уклон по ней читаются плохо — форма рельефа теряется в полутонах.
+CMAPS = {
+    'hyps': ((0.00, (60, 110, 70)), (0.35, (160, 165, 95)), (0.65, (170, 130, 80)),
+             (0.85, (150, 110, 95)), (1.00, (240, 240, 240))),
+    'slope': ((0.00, (70, 130, 80)), (0.35, (215, 205, 90)), (0.65, (215, 140, 60)),
+              (1.00, (190, 60, 50))),
+    'hollow': ((0.00, (150, 110, 70)), (0.45, (245, 245, 240)), (0.60, (170, 200, 225)),
+               (1.00, (30, 90, 170))),
+}
+
+def _ramp(a, lo, hi, gamma=1.0, cmap=None):
+    """Массив → изображение с обрезкой по диапазону; cmap — имя палитры."""
     v = np.clip((np.nan_to_num(a, nan=lo) - lo) / max(hi - lo, 1e-6), 0, 1) ** gamma
-    return Image.fromarray((v * 255).astype(np.uint8))
+    stops = CMAPS.get(cmap)
+    if not stops:
+        return Image.fromarray((v * 255).astype(np.uint8))
+    rgb = np.zeros(v.shape + (3,), np.float32)
+    for (p0, c0), (p1, c1) in zip(stops, stops[1:]):
+        m = (v >= p0) & (v <= p1)
+        if not m.any():
+            continue
+        t = ((v[m] - p0) / max(p1 - p0, 1e-6))[:, None]
+        rgb[m] = np.array(c0, np.float32) * (1 - t) + np.array(c1, np.float32) * t
+    return Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8))
 
 def tiles_from(backdrops, rasters=None, max_px=1600):
     """{ключ: {data, caption}} — подложки для переключателя.
@@ -53,10 +74,12 @@ def tiles_from(backdrops, rasters=None, max_px=1600):
         if not os.path.exists(path):
             continue
         out['bd%d' % i] = {'data': _b64_jpeg(Image.open(path), max_px), 'caption': caption}
-    for key, arr, caption, lo, hi in (rasters or []):
+    for item in (rasters or []):
+        key, arr, caption, lo, hi = item[:5]
+        cmap = item[5] if len(item) > 5 else None
         if arr is None:
             continue
-        out[key] = {'data': _b64_jpeg(_ramp(arr, lo, hi), max_px), 'caption': caption}
+        out[key] = {'data': _b64_jpeg(_ramp(arr, lo, hi, cmap=cmap), max_px), 'caption': caption}
     return out
 
 def build(path, kn, rings, tiles, zouit=(), chzu=None, candidates=(), saved=None,

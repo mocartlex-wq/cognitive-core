@@ -17,10 +17,12 @@ h1{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
 .sec{padding:12px 18px;border-bottom:1px solid var(--line)}
 .lab{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
      margin:0 0 8px;font-weight:600}
-.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
-.seg button{flex:1;background:var(--panel-2);color:var(--muted);border:0;padding:8px 4px;
-     font:500 11.5px var(--font);cursor:pointer;transition:.13s}
-.seg button+button{border-left:1px solid var(--line)}
+.seg{display:flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:7px;
+     overflow:hidden}
+/* подложек стало восемь: без переноса подписи сжимались до нечитаемых */
+.seg button{flex:1 1 30%;min-width:30%;background:var(--panel-2);color:var(--muted);border:0;
+     padding:8px 4px;font:500 11.5px var(--font);cursor:pointer;transition:.13s;
+     border-top:1px solid var(--line);border-left:1px solid var(--line)}
 .seg button[aria-pressed="true"]{background:var(--accent);color:#150a04}
 #mEdit[aria-pressed="true"]{background:#49a6d6;color:#04131a}
 #mHole[aria-pressed="true"]{background:#ff5c7a;color:#1a0710}

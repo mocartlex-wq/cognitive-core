@@ -14,6 +14,7 @@ import os
 import time
 
 import numpy as np
+from PIL import Image
 
 from . import config as cfg_mod
 from . import naming, tool
@@ -52,25 +53,53 @@ def build(cfg_path, out_path=None, step=2, verbose=True):
                          if os.path.exists(os.path.join(out_dir, name)) else None)
     chm, ndvi, mask = load('chm.npy'), load('ndvi.npy'), load('mask.npy')
 
-    # слои полога и NDVI считаются на прореженной сетке (шаг 2), а подложки
-    # полноразмерные. Инструмент рисует тайл в его собственных пикселях, и
-    # половина разрешения давала картинку на четверть поля — растягиваем до кадра.
+    # слои считаются на прореженных сетках (полог — шаг 2, рельеф — 10 м),
+    # а инструмент рисует тайл в его собственных пикселях: без растяжения
+    # до кадра слой занимал часть поля и не совпадал с границей участка.
+    # Множитель у рельефа нецелый, поэтому не np.repeat, а честный resize.
     def full(a):
         if a is None:
             return None
-        k = max(1, int(round(meta['H'] / a.shape[0])))
-        b = np.repeat(np.repeat(a, k, 0), k, 1)[:meta['H'], :meta['W']]
-        if b.shape != (meta['H'], meta['W']):
-            out = np.full((meta['H'], meta['W']), np.nan, b.dtype)
-            out[:b.shape[0], :b.shape[1]] = b
-            b = out
-        return b
+        im = Image.fromarray(np.nan_to_num(a, nan=float(np.nanmin(a))).astype(np.float32),
+                             mode='F')
+        return np.asarray(im.resize((meta['W'], meta['H']), Image.BILINEAR))
 
     rasters = []
     if chm is not None:
         rasters.append(('chm', full(chm), 'Высота полога, м', 0, 18))
     if ndvi is not None:
         rasters.append(('ndvi', full(ndvi), 'NDVI', 0.2, 0.9))
+
+    # высотные слои: по снимку овраг не обвести, борта видно только на
+    # рельефе. Массивы уже посчитаны конвейером (relief.analyze) и лежат
+    # рядом — здесь их только растягиваем и красим.
+    z, slope, tpi = load('relief_z.npy'), load('relief_slope.npy'), load('relief_tpi.npy')
+    ru = lambda v, f='%.1f': (f % v).replace('.', ',')
+    if z is not None:
+        pct = lambda a, q: float(np.nanpercentile(a, q))
+        z0, z1 = pct(z, 2), pct(z, 98)
+        # шкала пишется в подписи: без чисел слой красивый, но не аналитический
+        rasters.append(('dem', full(z), 'Высота, %s–%s м' % (ru(z0, '%.0f'), ru(z1, '%.0f')),
+                        z0, z1, 'hyps'))
+        from .sheets.relief import _hillshade
+        grid_m = 10.0
+        gp = os.path.join(out_dir, 'relief_grid.json')
+        if os.path.exists(gp):
+            grid_m = json.load(open(gp)).get('grid_m', 10.0)
+        sh = _hillshade(z, grid_m)
+        # диапазон берём по самому кадру: на пологом участке освещённость
+        # держится в узком коридоре, и фиксированная шкала даёт серую кашу
+        rasters.append(('shade', full(sh), 'Отмывка рельефа',
+                        float(np.nanpercentile(sh, 2)), float(np.nanpercentile(sh, 98))))
+    if slope is not None:
+        s_hi = max(8.0, float(np.nanpercentile(slope, 95)))
+        rasters.append(('slope', full(slope), 'Уклон, 0–%s°' % ru(s_hi, '%.0f'), 0, s_hi, 'slope'))
+    if tpi is not None:
+        # знак перевёрнут: ложбины синие, гребни коричневые. Размах берём по
+        # самому участку — фиксированные ±1,5 м на равнине заливали всё синим
+        r = float(np.clip(np.nanpercentile(np.abs(tpi), 90), 0.5, 3.0))
+        rasters.append(('tpi', full(-tpi), 'Ложбины и водотоки, ±%s м' % ru(r), -r, r, 'hollow'))
+
     tiles = tool.tiles_from([(os.path.join(ddir, f), cap) for f, cap in BACKDROPS], rasters)
 
     # кандидаты автопоиска: на :29 их ноль — слой просто пустой, и это

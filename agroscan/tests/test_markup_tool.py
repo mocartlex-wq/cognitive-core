@@ -17,6 +17,7 @@ from agroscan import markup_tool, tool
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CFG = os.path.join(ROOT, 'parcels', '58-17-0130701-29.yaml')
 KN = '58:17:0130701:29'
+OUT = os.path.join(ROOT, 'out', KN.replace(':', '-'))
 
 def _build(tmp):
     return markup_tool.build(CFG, out_path=os.path.join(tmp, 'tool.html'), verbose=False)
@@ -71,6 +72,44 @@ def test_saved_markup_is_loaded_back():
         objs, ts = markup_tool._saved_markup(mk)
         assert len(objs) == 1 and ts > 0
         assert markup_tool._saved_markup(os.path.join(tmp, 'нет.json')) == (None, 0)
+
+def test_elevation_layers_appear_and_are_optional():
+    """Высотные подложки: есть, когда посчитан рельеф, и не мешают, когда нет.
+
+    По снимку овраг не обвести — борта видно только на рельефе, поэтому в
+    переключателе появляются высота, уклон, отмывка и ложбины. Если DEM
+    участок не покрыл, инструмент должен собраться без них.
+    """
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path, _, info = _build(tmp)
+        html = open(path, encoding='utf-8').read()
+        i = html.index('TILES=') + len('TILES=')
+        tiles, _ = json.JSONDecoder().raw_decode(html[i:])
+        assert {'dem', 'slope', 'shade', 'tpi'} <= set(tiles), sorted(tiles)
+        assert info['подложек'] >= 8, info
+        # в подписи стоит шкала — слой должен читаться числом, а не на глаз
+        assert 'м' in tiles['dem']['caption'] and '°' in tiles['slope']['caption']
+
+    # обратный случай: файлов рельефа нет
+    saved = {}
+    try:
+        for name in ('relief_z.npy', 'relief_slope.npy', 'relief_tpi.npy'):
+            src = os.path.join(OUT, name)
+            if os.path.exists(src):
+                saved[src] = src + '.hidden'
+                shutil.move(src, saved[src])
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _, info = _build(tmp)
+            html = open(path, encoding='utf-8').read()
+            i = html.index('TILES=') + len('TILES=')
+            tiles, _ = json.JSONDecoder().raw_decode(html[i:])
+            assert not ({'dem', 'slope', 'shade', 'tpi'} & set(tiles)), sorted(tiles)
+            assert info['подложек'] >= 2, info      # снимки на месте
+    finally:
+        for src, hid in saved.items():
+            shutil.move(hid, src)
 
 
 if __name__ == '__main__':
