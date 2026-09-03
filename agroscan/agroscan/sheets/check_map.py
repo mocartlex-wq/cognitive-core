@@ -49,27 +49,37 @@ def build(path, kn, rings, parts, egrn_ha, meta, backdrops, fragment=None):
     tile_w = int((GW - s.mm(6) * (n - 1)) / n)
     tile_h = min(int(GH * 0.72), tile_w)
 
-    def draw_on(img, S, Sh, thin=1.0):
+    # Толщина линий задаётся в миллиметрах листа, но рисуем мы по исходной
+    # картинке, которую потом масштабируют в плитку. На мелком участке
+    # (909 px кадра против 3500 px плитки) линия раздувалась в пять раз и
+    # съедала сам контур — поэтому переводим мм в пиксели картинки.
+    def px_of_mm(mm_w, img_w, tile_px, floor=1):
+        k = tile_px / max(img_w, 1)
+        return max(floor, int(round(s.W(mm_w) / max(k, 1e-6))))
+
+    def draw_on(img, S, Sh, thin=1.0, tile_px=None):
         from PIL import ImageDraw
         od = ImageDraw.Draw(img)
         pr = lambda e, nn: ((e - meta['e0']) / (meta['e1'] - meta['e0']) * S,
                             (meta['n1'] - nn) / (meta['n1'] - meta['n0']) * Sh)
         # граница ЕГРН первой и толще: ЧЗУ/1 почти совпадает с ней по контуру
         # и, нарисованная сверху, полностью прятала синюю линию
+        tp = tile_px or S
         for r in rings:
             od.line([pr(*p) for p in r] + [pr(*r[0])], fill=ZUG,
-                    width=max(2, int(s.W(1.5) * thin)))
+                    width=px_of_mm(0.80 * thin, S, tp, 2))
         for k in keys:
             for key, mult in (('outer', 1.0), ('inner', 0.8)):
                 for r in parts[k].get(key, []):
                     od.line([pr(*p) for p in r] + [pr(*r[0])], fill=COL.get(k, (255, 255, 255)),
-                            width=max(1, int(s.W(0.6 * mult) * thin)))
+                            width=px_of_mm(0.28 * mult * thin, S, tp, 1))
         return img
 
     x = GX0
     for path_img, cap, sub in backdrops:
         im = Image.open(path_img).convert('RGB').resize((meta['W'], meta['H']))
-        im = draw_on(im, meta['W'], meta['H'], thin=1.0).resize((tile_w, tile_h), Image.LANCZOS)
+        im = draw_on(im, meta['W'], meta['H'], thin=1.0,
+                     tile_px=tile_w).resize((tile_w, tile_h), Image.LANCZOS)
         s.page.paste(im, (x, GY0 + s.mm(9)))
         s.d.rectangle([x, GY0 + s.mm(9), x + tile_w, GY0 + s.mm(9) + tile_h],
                       outline=(60, 60, 60), width=s.W(0.3))
@@ -85,7 +95,10 @@ def build(path, kn, rings, parts, egrn_ha, meta, backdrops, fragment=None):
         fx = GX0
         for path_img, cap, _ in backdrops:
             im = Image.open(path_img).convert('RGB').resize((meta['W'], meta['H']))
-            im = draw_on(im, meta['W'], meta['H'], thin=max(0.25, fsize / (meta['W'] * meta['mpp'])))
+            # во фрагменте кадр обрезан: в плитку попадает только окно fsize,
+            # поэтому масштаб считаем по нему, а не по всей картинке
+            im = draw_on(im, meta['W'], meta['H'],
+                         tile_px=fh * (meta['W'] * meta['mpp']) / max(fsize, 1e-6))
             px = lambda e, nn: (int((e - meta['e0']) / (meta['e1'] - meta['e0']) * meta['W']),
                                 int((meta['n1'] - nn) / (meta['n1'] - meta['n0']) * meta['H']))
             x0, y1 = px(fe - fsize / 2, fn - fsize / 2)

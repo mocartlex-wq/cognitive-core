@@ -56,15 +56,18 @@ def build(path, kn, rings, res, egrn_ha, meta, image_path=None,
     x = GX0
     if image_path:
         im = Image.open(image_path).convert('RGB')
-        s.page.paste(overlay(im).resize((tw, th), Image.LANCZOS), (x, GY0 + s.mm(6)))
+        s.page.paste(overlay(im).resize((tw, th), Image.LANCZOS), (x, GY0 + s.mm(8.4)))
         s.d.text((x, GY0), 'Космоснимок', font=s.F(3.0, True), fill='black')
         s.d.text((x, GY0 + s.mm(3.8)), 'кроны закрывают рельеф — по снимку он не читается',
                  font=s.F(2.3), fill=(90, 90, 90))
-        s.d.rectangle([x, GY0 + s.mm(6), x + tw, GY0 + s.mm(6) + th], outline=(60, 60, 60), width=s.W(0.3))
+        s.d.rectangle([x, GY0 + s.mm(8.4), x + tw, GY0 + s.mm(8.4) + th],
+                      outline=(60, 60, 60), width=s.W(0.3))
         x += tw + s.mm(5)
     rel = overlay(_relief_image(res, (tw, th)))
-    s.page.paste(rel, (x, GY0 + s.mm(6)))
-    s.d.rectangle([x, GY0 + s.mm(6), x + tw, GY0 + s.mm(6) + th], outline=(60, 60, 60), width=s.W(0.3))
+    # 8,4 мм — две строки подписи: при 6 мм вторая строка наезжала на картинку
+    s.page.paste(rel, (x, GY0 + s.mm(8.4)))
+    s.d.rectangle([x, GY0 + s.mm(8.4), x + tw, GY0 + s.mm(8.4) + th],
+                  outline=(60, 60, 60), width=s.W(0.3))
     s.d.text((x, GY0), 'Рельеф: отмывка и линии стока', font=s.F(3.0, True), fill='black')
     s.d.text((x, GY0 + s.mm(3.8)), 'перепад %.1f м · синим — линии стока с водосбором от 3 га' % st['перепад_м'],
              font=s.F(2.3), fill=(90, 90, 90))
@@ -130,7 +133,7 @@ def build(path, kn, rings, res, egrn_ha, meta, image_path=None,
     import numpy as _np
     z = res['z'][res['msk']]
     lo, hi = float(_np.percentile(res['z'], 2)), float(_np.percentile(res['z'], 98))
-    by = GY0 + s.mm(6) + th + s.mm(9)
+    by = GY0 + s.mm(8.4) + th + s.mm(9)
     bx0, bx1 = GX0, GX0 + GW - s.mm(5)
     bh = s.mm(5)
     for i in range(int(bx1 - bx0)):

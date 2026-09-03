@@ -95,8 +95,8 @@ def build(path, kn, rings, meta, series, ts, egrn_ha, extra=None, years_shown=No
     x = GX0
     for y in years_shown:
         im = _ndvi_image(series[y], rings, meta, (tw, th))
-        s.page.paste(im, (x, GY0 + s.mm(7)))
-        s.d.rectangle([x, GY0 + s.mm(7), x + tw, GY0 + s.mm(7) + th], outline=(60, 60, 60),
+        s.page.paste(im, (x, GY0 + s.mm(9.2)))
+        s.d.rectangle([x, GY0 + s.mm(9.2), x + tw, GY0 + s.mm(9.2) + th], outline=(60, 60, 60),
                       width=s.W(0.3))
         s.d.text((x, GY0), 'NDVI %d' % y, font=s.F(3.2, True), fill='black')
         r = rows[y]
@@ -106,7 +106,9 @@ def build(path, kn, rings, meta, series, ts, egrn_ha, extra=None, years_shown=No
         x += tw + s.mm(4)
 
     # график
-    cy = GY0 + s.mm(7) + th + s.mm(14)
+    # 9,2 мм — две строки подписи над кадром: при 7 мм вторая строка
+    # («пар … · полог … га») наезжала на картинку
+    cy = GY0 + s.mm(9.2) + th + s.mm(14)
     ch = int(s.PH - s.margin - s.mm(20) - cy)
     s.d.text((GX0, cy - s.mm(6)), 'Доля площади участка, %', font=s.F(2.8, True), fill='black')
     for lab, col, dx in (('сомкнутый полог (NDVI > 0,70)', (20, 130, 60), 46),

@@ -19,11 +19,32 @@ from skimage.morphology import skeletonize
 
 from .rings import disk
 
-def detect(chm, mask, mpp, h_min=8.0, elong=3.0, min_ha=0.10, close_m=8.0, open_m=3.0):
+def width_m(sub, mpp):
+    """Типичная ширина области: площадь, делённая на длину её осевой линии.
+
+    Вытянутость по осям эллипса ломается на разветвлённых полосах: на
+    58:17:0130701:29 Y-образная фигура давала вытянутость 1,5 и
+    отбрасывалась. Расстояние до края тоже не годится — у квадрата
+    100 × 100 м оно даёт «30 м», как у полосы. Площадь на длину скелета
+    для полосы шириной w и длиной L даёт ровно w, а компактную куртину
+    честно показывает широкой.
+    """
+    n = int(sub.sum())
+    if not n:
+        return 0.0
+    sk = skeletonize(sub).sum()
+    if sk < 1:
+        return float(np.sqrt(n) * mpp)
+    return float(n * mpp * mpp / (sk * mpp))
+
+def detect(chm, mask, mpp, h_min=8.0, elong=3.0, min_ha=0.10, close_m=8.0, open_m=3.0,
+           w_max=40.0):
     """Кандидаты в защитные лесные полосы.
 
     h_min  — высота взрослого насаждения (ниже — самосев на залежи);
-    elong  — вытянутость (большая ось к малой): полоса линейна, куртина нет.
+    elong  — вытянутость (большая ось к малой): полоса линейна, куртина нет;
+    w_max  — предельная медианная ширина: разветвлённая полоса вытянутость
+             не набирает, но остаётся узкой.
     """
     m = (np.nan_to_num(chm) >= h_min) & mask
     m = ndimage.binary_closing(m, disk(max(1, int(close_m / mpp))))
@@ -36,12 +57,15 @@ def detect(chm, mask, mpp, h_min=8.0, elong=3.0, min_ha=0.10, close_m=8.0, open_
             continue
         minor = max(r.axis_minor_length, 1e-6)
         e = r.axis_major_length / minor
-        if e < elong:
+        w = width_m(lb == r.label, mpp)
+        by = 'вытянутость' if e >= elong else ('ширина' if w <= w_max else None)
+        if by is None:
             continue
         out |= (lb == r.label)
         kept.append({'га': round(r.area * cell, 3), 'вытянутость': round(e, 1),
                      'длина_м': round(r.axis_major_length * mpp),
-                     'ширина_м': round(minor * mpp, 1)})
+                     'ширина_м': round(minor * mpp, 1),
+                     'ширина_по_скелету_м': round(w, 1), 'признак': by})
     return out, kept
 
 def compare(auto, manual, mpp, near_m=60.0):

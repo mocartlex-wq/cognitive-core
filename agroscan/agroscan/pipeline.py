@@ -228,6 +228,15 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                                    cfg['belts']['min_ha'])
         b_auto = up(a).astype(bool)
         b_info['найдено_полос'] = len(kept)
+        b_info['кандидаты'] = kept[:8]
+        b_info['авто_га'] = round(b_auto.sum() * mpp * mpp / 1e4, 3)
+        # высота полога — главный признак посадки: без неё «полос не найдено»
+        # ничего не объясняет специалисту
+        hv = np.nan_to_num(chm)[gd.submask(mask)]
+        if hv.size:
+            b_info['полог_медиана_м'] = round(float(np.median(hv)), 1)
+            b_info['полог_p90_м'] = round(float(np.percentile(hv, 90)), 1)
+            b_info['полог_выше_8м_доля'] = round(float((hv >= 8).mean()), 3)
     b_man = np.zeros_like(mask)
     mp_path = cfg_mod.path_of(cfg, 'markup')
     if mp_path and os.path.exists(mp_path):
@@ -454,6 +463,21 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                                  meta, ser, ts, cfg['egrn_ha'], extra, scope=scope)
                     json.dump(ts, open(os.path.join(out, 'timeseries.json'), 'w'),
                               ensure_ascii=False, indent=1)
+                    # Полоса или самосев: у посаженной полосы древостой стоит
+                    # и на ранних снимках, у самосева на его месте была пашня.
+                    early = {int(y): v for y, v in ts.get('ряд', {}).items() if int(y) <= 1990}
+                    if early:
+                        y0 = min(early)
+                        report.setdefault('лесополосы', {})['ретроспектива'] = {
+                            'ранний_год': y0,
+                            'пар_га': early[y0].get('пар_га'),
+                            'полог_га': early[y0].get('полог_га'),
+                            'вывод': ('самосев на выбывшей пашне'
+                                      if (early[y0].get('пар_доля') or 0) > 0.5
+                                      else 'древостой стоял уже на ранних снимках')}
+                        _say(t0, 'ретроспектива %d г.: пар %.2f га, полог %.2f га — %s'
+                             % (y0, early[y0].get('пар_га') or 0, early[y0].get('полог_га') or 0,
+                                report['лесополосы']['ретроспектива']['вывод']))
                     _say(t0, 'динамика (%s): сцен %d, год выбытия %s, возраст %s лет'
                          % (scope, len(ser), ts['год_выбытия'],
                             ts.get('возраст_зарастания_лет', '—')))
