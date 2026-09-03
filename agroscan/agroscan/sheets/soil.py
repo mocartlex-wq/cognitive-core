@@ -36,6 +36,103 @@ def _table(s, x0, y0, title, rows, width):
     s.d.line([x0, y - s.mm(0.6), x0 + width, y - s.mm(0.6)], fill='black', width=s.W(0.55))
     return y + s.mm(3.0)
 
+
+def _wrap(s, text, font, width, limit=2):
+    """Разбить строку по ширине колонки: мельчить шрифт до нечитаемого нельзя."""
+    words, lines, cur = text.split(), [], ''
+    for w in words:
+        t = (cur + ' ' + w).strip()
+        if cur and s.d.textlength(t, font=font) > width:
+            lines.append(cur); cur = w
+            if len(lines) == limit:
+                break
+        else:
+            cur = t
+    if cur and len(lines) < limit:
+        lines.append(cur)
+    return lines
+
+def _sources(s, x0, y, width, wrb, soil_map, rows, points):
+    """Таблица «карта против модели»: что говорит каждый источник и в чём спор.
+
+    Владелец просил показывать оба источника разом: данные у них рознятся,
+    и выбирать за специалиста, какому верить, здесь неправильно.
+    """
+    from ..sources.soil import texture_class
+    fr = soil_map or {}
+    w = wrb or {}
+    prob = dict((k, v) for k, v in (w.get('вероятности') or []))
+    top = list(rows.values())[0] if rows else {}
+    tex = texture_class(top.get('clay', 0), top.get('silt', 0), top.get('sand', 0)) \
+        if top else '—'
+    nxt = [tuple(q) for q in (w.get('вероятности') or []) if q[0] != w.get('wrb')][:2]
+    grain = ('%s: глина %.0f %%, пыль %.0f %%, песок %.0f %%'
+             % (tex, top['clay'], top['silt'], top['sand'])) if top else '—'
+    lines = [
+        ('Тип почвы',
+         '%s%s' % (fr.get('название', '—'),
+                   ' (%s, код %s)' % (fr.get('индекс'), fr.get('код'))
+                   if fr.get('индекс') else ''),
+         '%s%s%s' % (w.get('wrb', '—'),
+                     ' — %d %%' % prob[w['wrb']] if prob.get(w.get('wrb')) else '',
+                     '; ' + w['русское_соответствие'] if w.get('русское_соответствие') else '')),
+        ('Гранулометрия',
+         '%s — почвообразующая порода' % (fr.get('порода') or '—').lower(),
+         '%s — слой 0–5 см' % grain),
+        ('Что рядом',
+         ', '.join(fr.get('сопутствующие') or ['—']).lower(),
+         ', '.join('%s %d %%' % q for q in nxt) or '—'),
+        ('Что описывает',
+         'массив: контур %s, %s км², масштаб 1:2 500 000'
+         % (fr.get('id', '—'), ('%.0f' % fr['площадь_км2']) if fr.get('площадь_км2') else '—'),
+         'ячейка 250 м, среднее по %d точкам в границах ЗУ' % points),
+    ]
+    s.d.text((x0, y), 'Тип почвы: два источника рядом', font=s.F(3.4, True), fill='black')
+    y += s.mm(5.6)
+    LW = s.mm(26)
+    cw = (width - LW) / 2 - s.mm(2)
+    c1, c2 = x0 + LW, x0 + LW + cw + s.mm(4)
+    s.d.line([x0, y - s.mm(0.8), x0 + width, y - s.mm(0.8)], fill='black', width=s.W(0.5))
+    for xx, t in ((c1, 'Почвенная карта РСФСР (Фридланд, 1988)'),
+                  (c2, 'SoilGrids v2.0 (ISRIC)')):
+        s.d.text((xx, y), t, font=s.F(2.45, True), fill=(60, 60, 60))
+    y += s.mm(4.2)
+    s.d.line([x0, y - s.mm(0.8), x0 + width, y - s.mm(0.8)], fill='black', width=s.W(0.3))
+    f = s.F(2.4)
+    for name, a, b in lines:
+        la, lb = _wrap(s, a, f, cw), _wrap(s, b, f, cw)
+        s.d.text((x0, y), name, font=s.F(2.4), fill=(90, 90, 90))
+        for xx, ll in ((c1, la), (c2, lb)):
+            yy = y
+            for t in ll:
+                s.d.text((xx, yy), t, font=f, fill='black')
+                yy += s.mm(3.2)
+        y += s.mm(3.2) * max(len(la), len(lb)) + s.mm(1.2)
+    s.d.line([x0, y - s.mm(0.6), x0 + width, y - s.mm(0.6)], fill='black', width=s.W(0.5))
+    y += s.mm(1.6)
+
+    # расхождения считаются, а не пишутся заготовкой
+    diff = []
+    key = (fr.get('название') or '').split()[0].lower().replace('ё', 'е')[:7]
+    ru = (w.get('русское_соответствие') or '').lower().replace('ё', 'е')
+    if key and ru:
+        diff.append('ряд почв — источники %s (карта «%s», модель «%s»)'
+                    % ('согласуются' if key in ru else 'расходятся',
+                       (fr.get('название') or '').lower(), w.get('wrb', '—')))
+    pr = (fr.get('порода') or '').lower()
+    if pr and top:
+        same = pr.split()[0][:5] in tex.lower().replace('ё', 'е')
+        diff.append('гранулометрия %s — карта «%s», модель «%s»%s'
+                    % ('совпадает' if same else 'расходится', pr, tex.lower(),
+                       '' if same else
+                       ' (порода против верхнего слоя — величины разной природы)'))
+    txt = ('Сверка источников: ' + '; '.join(diff) + '.') if diff \
+        else 'Сверка источников: сравнивать нечего — один из источников не ответил.'
+    for t in _wrap(s, txt, s.F(2.4), width, limit=3):
+        s.d.text((x0, y), t, font=s.F(2.4), fill=(120, 0, 0))
+        y += s.mm(3.2)
+    return y + s.mm(3.0)
+
 def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
           wrb=None, soil_map=None, map_page=None):
     if not rows:
@@ -46,8 +143,9 @@ def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
              'Почвенная характеристика земельного участка %s' % kn,
              font=s.F(4.0, True), fill='black', anchor='ma')
     s.d.text((s.PW / 2, s.margin + s.mm(8.4)),
-             'SoilGrids v2.0 (ISRIC World Soil Information) · разрешение 250 м · '
-             'усреднение по %d точкам%s' % (points, ' · ' + place if place else ''),
+             'два источника: SoilGrids v2.0 (ISRIC, 250 м, %d точек) и Почвенная карта '
+             'РСФСР 1:2 500 000 (Фридланд, 1988)%s'
+             % (points, ' · ' + place if place else ''),
              font=s.F(2.9, True), fill=(120, 0, 0), anchor='ma')
     s.d.rectangle([s.IN0, s.margin, s.IN1, s.margin + s.title_h], outline='black', width=s.W(0.5))
 
@@ -56,40 +154,11 @@ def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
     y = s.margin + s.title_h + s.mm(6)
 
     # Тип почвы: то, чего в свойствах нет, а агроном спрашивает первым.
-    # Два источника разной природы — модельная классификация и бумажная
-    # карта; расхождение между ними не сглаживаем, а показываем.
+    # Два источника разной природы — бумажная карта и модельная
+    # классификация; показываем их рядом, строка в строку, и отдельной
+    # строкой то, где они расходятся: сглаживать расхождение нельзя.
     if wrb or soil_map:
-        s.d.text((x0, y), 'Тип почвы', font=s.F(3.4, True), fill='black')
-        y += s.mm(6)
-        if wrb:
-            p = dict(wrb.get('вероятности') or []).get(wrb.get('wrb'))
-            s.d.text((x0, y), 'Классификация WRB (SoilGrids):', font=s.F(2.6), fill=(60, 60, 60))
-            s.d.text((x0 + s.mm(52), y), '%s%s' % (wrb['wrb'], ' — %d %%' % p if p else ''),
-                     font=s.F(2.7, True), fill='black')
-            y += s.mm(4.4)
-            if wrb.get('русское_соответствие'):
-                s.d.text((x0 + s.mm(52), y), 'ориентировочно: %s' % wrb['русское_соответствие'],
-                         font=s.F(2.5), fill=(90, 90, 90))
-                y += s.mm(4.2)
-            # из кэша вероятности приходят списками, из сети — кортежами:
-            # без tuple() форматирование списка валит весь лист
-            other = [tuple(x) for x in (wrb.get('вероятности') or []) if x[0] != wrb['wrb']][:3]
-            if other:
-                s.d.text((x0 + s.mm(52), y), 'далее: ' + ', '.join('%s %d %%' % x for x in other),
-                         font=s.F(2.4), fill=(120, 120, 120))
-                y += s.mm(4.6)
-        if soil_map and soil_map.get('название'):
-            s.d.text((x0, y), 'Почвенная карта РСФСР:', font=s.F(2.6), fill=(60, 60, 60))
-            s.d.text((x0 + s.mm(52), y), '%s (индекс %s)'
-                     % (soil_map['название'], soil_map.get('индекс', '—')),
-                     font=s.F(2.7, True), fill='black')
-            y += s.mm(4.4)
-            s.d.text((x0 + s.mm(52), y),
-                     'масштаб 1:2 500 000 — контур измеряется километрами '
-                     'и характеризует массив, а не участок',
-                     font=s.F(2.4), fill=(120, 120, 120))
-            y += s.mm(4.6)
-        y += s.mm(3)
+        y = _sources(s, x0, y, TW, wrb, soil_map, rows, points)
 
     y = _table(s, x0, y, 'Профиль по горизонтам · площадь участка %s га'
                % ('%.2f' % egrn_ha).replace('.', ','), rows, TW)
@@ -131,7 +200,10 @@ def build(path, kn, rows, conclusions, egrn_ha, place='', points=0,
 
     s.d.text((x0, y), 'Гумус и плотность по глубине', font=s.F(3.2, True), fill='black')
     y += s.mm(7)
-    gh = s.mm(34); gw = TW - s.mm(34)
+    # высота диаграммы — по тому, что осталось до сноски внизу: с таблицей
+    # сопоставления источников фиксированные 34 мм наезжали на неё
+    gh = max(s.mm(20), min(s.mm(34), int(s.PH - s.margin - s.mm(15) - y)))
+    gw = TW - s.mm(34)
     gx = x0 + s.mm(24)
     hmax = max(max(v['humus'] for v in rows.values()), 4.0)
     s.d.rectangle([gx, y, gx + gw, y + gh], outline=(160, 160, 160), width=s.W(0.25))

@@ -40,13 +40,17 @@ def _get(url, timeout=40):
     r = subprocess.run(cmd, capture_output=True)
     return r.stdout if r.returncode == 0 and len(r.stdout) > 400 else None
 
-def fetch(bbox, loc, layer='summer', zoom=17, mpp=0.60, rounds=4, workers=8, verbose=True):
+def fetch(bbox, loc, layer='summer', zoom=17, mpp=0.60, rounds=4, workers=8, verbose=True,
+          tpl=None):
     """bbox — (e0, e1, n0, n1) в местной СК; loc — geo.Local.
+
+    tpl — шаблон тайлов вместо готового слоя: так же качаются архивные
+    срезы Wayback и тайлы Google, а перепроецирование в МСК одно на всех.
 
     Возвращает (изображение, meta) — meta годится прямо в bgmeta.json.
     """
     e0, e1, n0, n1 = bbox
-    tpl = LAYERS[layer]
+    tpl = tpl or LAYERS[layer]
     corners = loc.to_wgs([(e0, n1), (e1, n1), (e1, n0), (e0, n0)])
     lons = [c[0] for c in corners]; lats = [c[1] for c in corners]
     x0f, y1f = _deg2tile(min(lons) - .0008, min(lats) - .0008, zoom)

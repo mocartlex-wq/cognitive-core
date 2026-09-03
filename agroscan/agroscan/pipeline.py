@@ -403,7 +403,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
     # ── приложения: обоснование принятых решений ───────────────────────
     if appendices and cfg.get('appendices', True):
         want = cfg.get('appendices', True)
-        want = ('relief', 'dynamics', 'ir', 'soil') if want in (True, None) else tuple(want)
+        want = ('relief', 'dynamics', 'ir', 'soil', 'archive') if want in (True, None) \
+            else tuple(want)
         from .sheets import relief as sh_relief, dynamics as sh_dyn, ir as sh_ir
 
         if 'relief' in want:
@@ -628,6 +629,61 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
                             ' | WRB ' + wrb['wrb'] if wrb else ' | WRB не ответил'))
             except Exception as e:
                 _skip(t0, 'почвы', e)
+
+        if 'archive' in want:
+            try:
+                from .sources import wayback, google as google_src
+                from .sheets import archive as sh_arch
+                from .geo import Local
+                loc = Local(cfg['zone'])
+                # кадр тот же, что у рабочей подложки: тогда контур ложится
+                # на архивные снимки без пересчёта, а панели сравнимы напрямую
+                mbbox = (meta['e0'], meta['e1'], meta['n0'], meta['n1'])
+                pw = loc.to_wgs([((meta['e0'] + meta['e1']) / 2,
+                                  (meta['n0'] + meta['n1']) / 2)])[0]
+                vers = wayback.versions(pw[0], pw[1], verbose=True)
+                adir = os.path.join(os.path.dirname(cfg_mod.path_of(cfg, 'image')), 'archive')
+                os.makedirs(adir, exist_ok=True)
+                frames = []
+                for date, tpl in vers:
+                    fp = os.path.join(adir, '%s.jpg' % date)
+                    if not os.path.exists(fp) or no_cache:
+                        im, _ = wayback.snapshot(mbbox, loc, tpl, zoom=meta.get('zoom', 17),
+                                                 mpp=meta['mpp'], verbose=False)
+                        im.save(fp, quality=90)
+                    frames.append((date, fp, 'ESRI Wayback · %s'
+                                   % sh_arch._season(date)))
+                # снимок Google встаёт последним: он текущий и снят в другой день
+                g_img, _, g_err = google_src.fetch(mbbox, loc, zoom=meta.get('zoom', 17),
+                                                  mpp=meta['mpp'])
+                if g_img is not None:
+                    fp = os.path.join(adir, 'google.jpg')
+                    g_img.save(fp, quality=90)
+                    frames.append(('Google, текущий', fp, 'Google Maps Platform'))
+                report['архив_снимков'] = {'срезов': len(vers), 'даты': [d for d, _ in vers],
+                                           'google': g_err or 'подключён'}
+                if frames:
+                    note = ('Контур зелёным — граница ЗУ по сведениям ЕГРН. Все панели '
+                            'в одном кадре, поэтому сравнимы напрямую.\n'
+                            'Архив ESRI Wayback: срезов в архиве много, но съёмка этого '
+                            'участка обновлялась %d раз — показаны только они.\n'
+                            'Зимние и ранневесенние срезы полезны отдельно: без листвы '
+                            'видна структура посадок и отдельные стволы.\n'
+                            'Историческая съёмка Google (шкала времени в Google Планете) '
+                            'наружу не отдаётся ни одним интерфейсом — %s.'
+                            % (len(vers),
+                               'текущий снимок Google добавлен последней панелью'
+                               if g_img is not None else 'снимок Google не добавлен: ' + g_err))
+                    sh_arch.build(os.path.join(out, naming.fname(cfg, 'Приложение_архив.pdf')),
+                                  cfg['kn'], rings, frames, meta, cfg['egrn_ha'], note=note)
+                    _say(t0, 'архив снимков: панелей %d (%s…%s)%s'
+                         % (len(frames), vers[0][0] if vers else '—',
+                            vers[-1][0] if vers else '—',
+                            '' if g_img is not None else '; Google: ' + g_err))
+                else:
+                    _say(t0, 'архив снимков: срезов не нашлось, лист пропущен')
+            except Exception as e:
+                _skip(t0, 'архив снимков', e)
 
         if 'ir' in want and bands:
             try:
