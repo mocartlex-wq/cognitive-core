@@ -13,10 +13,12 @@ import os
 TITLES = {'kn': 'Кадастровый номер', 'legend': 'Условные обозначения',
           'stamp': 'Утверждаю', 'coord0': 'Координаты: север',
           'coord1': 'Координаты: юг', 'coord2': 'Координаты: запад',
-          'coord3': 'Координаты: восток'}
+          'coord3': 'Координаты: восток',
+          'place': 'Ближайший нас. пункт'}
 SIZE_MM = {'kn': (44, 7), 'legend': (103, 40), 'stamp': (62, 30),
-           'coord0': (26, 12), 'coord1': (26, 12), 'coord2': (26, 12), 'coord3': (26, 12)}
-ANCHOR_CENTER = ('kn', 'coord0', 'coord1', 'coord2', 'coord3')
+           'coord0': (26, 12), 'coord1': (26, 12), 'coord2': (26, 12), 'coord3': (26, 12),
+           'place': (40, 10)}
+ANCHOR_CENTER = ('kn', 'coord0', 'coord1', 'coord2', 'coord3', 'place')
 
 def build(path_html, png_name, sheet_mm, layout, kn=''):
     """Собрать страницу редактора рядом с картинкой листа."""

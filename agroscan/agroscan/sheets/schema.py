@@ -68,7 +68,133 @@ def extreme_points(ring):
     return idx
 
 
-def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, layout=None):
+def _place_arrow(s, P, rings, zone, place, layout, used):
+    """Стрелка от участка в сторону ближайшего села с названием и расстоянием.
+
+    Направление считается по местным координатам самого пункта, а не по
+    азимуту на глаз: сближение меридианов в МСК небольшое, но врать на листе,
+    который сверяют с картой, нельзя.
+
+    В КПТ направление записано от ориентира к участку, здесь — наоборот,
+    поэтому румб подписан явно словами «от участка».
+    """
+    from ..sources.places import name_of, rhumb
+    E = [q[0] for r in rings for q in r]; N = [q[1] for r in rings for q in r]
+    ce, cn = (max(E) + min(E)) / 2, (max(N) + min(N)) / 2
+    te, tn = Local(zone).from_wgs([(place['lon'], place['lat'])])[0]
+    dx, dy = te - ce, tn - cn
+    ln = math.hypot(dx, dy)
+    if ln < 1e-6:
+        return
+    dx, dy = dx / ln, dy / ln
+    x0, y0 = P(ce, cn)
+    # старт — за границей участка, конец — не доходя рамки карты
+    r0 = max(math.hypot(P(q[0], q[1])[0] - x0, P(q[0], q[1])[1] - y0)
+             for r in rings for q in r) + s.mm(4)
+    px, py = dx, -dy                       # на листе север вверх
+    lim = s.mm(9)
+    t_edge = min((s.MW - lim - x0) / px if px > 1e-6 else 1e9,
+                 (lim - x0) / px if px < -1e-6 else 1e9,
+                 (s.MH - lim - y0) / py if py > 1e-6 else 1e9,
+                 (lim - y0) / py if py < -1e-6 else 1e9)
+    # стрелка не должна уходить под легенду и штамп: на 1173 она целиком
+    # оказалась под таблицей условных обозначений и на листе её не было
+    step = s.mm(2)
+    t_max, t = r0, r0
+    while t <= t_edge:
+        xx, yy = x0 + px * t, y0 + py * t
+        if any(b[0] <= xx <= b[2] and b[1] <= yy <= b[3] for b in s.blocks):
+            break
+        t_max = t; t += step
+    t1 = min(max(t_max, r0 + s.mm(5)), t_edge)
+    if t1 - r0 < s.mm(5):                  # места снаружи нет — начинаем от центра
+        r0 = max(s.mm(2), t1 - s.mm(22))
+    ax, ay = x0 + px * r0, y0 + py * r0
+    bx, by = x0 + px * t1, y0 + py * t1
+    s.md.line([(ax, ay), (bx, by)], fill=(60, 60, 60), width=s.W(0.35))
+    a = math.atan2(py, px); h = s.mm(2.6)
+    s.md.polygon([(bx, by),
+                  (bx - h * math.cos(a - 0.38), by - h * math.sin(a - 0.38)),
+                  (bx - h * math.cos(a + 0.38), by - h * math.sin(a + 0.38))],
+                 fill=(60, 60, 60))
+    cap = '%s — %s км' % (name_of(place), ('%.1f' % place['км']).replace('.', ','))
+    sub = 'от участка на %s (азимут %d°)' % (rhumb(place['азимут']), place['азимут'])
+    f_cap, f_sub = s.F(2.6, True), s.F(2.2)
+    w = max(s.md.textlength(cap, font=f_cap), s.md.textlength(sub, font=f_sub)) / 2 + s.mm(1.6)
+    h = s.mm(5.6)
+    box = lambda cx, cy: (cx - w, cy - h / 2, cx + w, cy + h / 2)
+
+    tx = ty = None
+    if layout.get('place'):
+        tx, ty = s.mm(layout['place'][0]) - s.MX0, s.mm(layout['place'][1]) - s.MY0
+    else:
+        # подпись ищет свободное место вдоль стрелки: у компаса, легенды и
+        # штампа свои зоны, и на 58:17:0130701:29 подпись садилась прямо на компас
+        for t in (t1 + s.mm(7), t1 + s.mm(3), t1 - s.mm(6), t1 - s.mm(14), t1 - s.mm(22)):
+            for side in (0, 1, -1, 2, -2):
+                cx = x0 + px * t - py * side * s.mm(6)
+                cy = y0 + py * t + px * side * s.mm(6)
+                cx = min(max(cx, w + s.mm(2)), s.MW - w - s.mm(2))
+                cy = min(max(cy, s.mm(5)), s.MH - s.mm(6))
+                if s.free(*box(cx, cy)):
+                    tx, ty = cx, cy
+                    break
+            if tx is not None:
+                break
+        if tx is None:
+            # вдоль стрелки места нет (на 1173 она упирается в легенду) —
+            # ищем ближайшее свободное место на всём поле карты
+            best = None
+            gx = int(w + s.mm(2)); gy = s.mm(5)
+            while gx < s.MW - w - s.mm(2):
+                gy = s.mm(5)
+                while gy < s.MH - s.mm(6):
+                    if s.free(*box(gx, gy)):
+                        d = math.hypot(gx - bx, gy - by)
+                        if best is None or d < best[0]:
+                            best = (d, gx, gy)
+                    gy += s.mm(5)
+                gx += s.mm(5)
+            if best:
+                tx, ty = best[1], best[2]
+            else:                          # свободного места нет вовсе
+                tx = min(max(bx + px * s.mm(7), w + s.mm(2)), s.MW - w - s.mm(2))
+                ty = min(max(by + py * s.mm(4), s.mm(5)), s.MH - s.mm(6))
+    used['place'] = [round((tx + s.MX0) / s.MM, 2), round((ty + s.MY0) / s.MM, 2)]
+    # выноска нужна, только если подпись встала далеко от наконечника
+    far = math.hypot(tx - bx, ty - by)
+    if far > s.mm(8):
+        s.md.line([(bx, by), (tx, ty)], fill=(150, 150, 150), width=s.W(0.2))
+    # короткая стрелка у самой подписи — когда длинный луч не виден рядом
+    # с ней (на 1173 он вовсе уходит под легенду) и направление читалось бы
+    # только словами
+    for sign in ((1, -1) if far > s.mm(12) or t1 - r0 < s.mm(6) else ()):
+        off = w + s.mm(2)
+        if sign > 0:                       # стрелка за подписью, по ходу направления
+            ax0, ay0 = tx + px * off, ty + py * off
+            ax1, ay1 = ax0 + px * s.mm(9), ay0 + py * s.mm(9)
+        else:                              # или перед ней, но смотрит туда же
+            ax1, ay1 = tx - px * off, ty - py * off
+            ax0, ay0 = ax1 - px * s.mm(9), ay1 - py * s.mm(9)
+        lo = (min(ax0, ax1), min(ay0, ay1), max(ax0, ax1), max(ay0, ay1))
+        if lo[0] > s.mm(1) and lo[1] > s.mm(1) and lo[2] < s.MW - s.mm(1) \
+                and lo[3] < s.MH - s.mm(1) \
+                and not any(b[0] <= lo[2] and lo[0] <= b[2] and b[1] <= lo[3] and lo[1] <= b[3]
+                            for b in s.blocks):
+            s.md.line([(ax0, ay0), (ax1, ay1)], fill=(60, 60, 60), width=s.W(0.35))
+            aa = math.atan2(ay1 - ay0, ax1 - ax0); hh = s.mm(2.4)
+            s.md.polygon([(ax1, ay1),
+                          (ax1 - hh * math.cos(aa - 0.38), ay1 - hh * math.sin(aa - 0.38)),
+                          (ax1 - hh * math.cos(aa + 0.38), ay1 - hh * math.sin(aa + 0.38))],
+                         fill=(60, 60, 60))
+            break
+    for t, f, dyy in ((cap, f_cap, -s.mm(1.5)), (sub, f_sub, s.mm(1.9))):
+        s.md.text((tx, ty + dyy), t, font=f, fill=(30, 30, 30), anchor='mm',
+                  stroke_width=s.W(0.6), stroke_fill='white')
+    s.reserve(box(tx, ty))
+
+def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, layout=None,
+          place=None):
     """parts — {ключ: {'outer','inner','areaHa','название'}} в порядке отрисовки.
 
     layout — сохранённые правообладателем позиции подвижных подписей в
@@ -92,6 +218,7 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
     SW, SH = s.mm(62), s.mm(30)
     s.block(s.MW - TW, s.MH - TBL, s.MW, s.MH)
     s.block(0, s.MH - SH, SW, s.MH)
+    # угол компаса: со строкой о населённом пункте он шире и выше
     s.block(0, 0, s.mm(25), s.mm(27))
 
     # смежные участки — красная сеть; подписи только тем, что крупнее 0,9 га
@@ -143,6 +270,11 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
                 continue
             s.label(*P(*_anchor(r)), 'ЧЗУ/%s' % k, f_ch)
 
+    # ближайший населённый пункт: стрелка и подпись ставятся до координат,
+    # чтобы подписи точек обходили их, а не наоборот
+    if place:
+        _place_arrow(s, P, rings, zone, place, layout, used)
+
     # географические координаты характерных точек
     loc = Local(zone); f_geo = s.F(2.5); out = rings[0]
     idx = extreme_points(out)
@@ -185,7 +317,6 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
         'земельного участка, покрытых древесной и кустарниковой растительностью, '
         'на которых планируется проведение культуртехнических мероприятий'], size=3.0)
     _compass(s, s.MX0 + s.mm(11), s.MY0 + s.mm(13))
-
     # таблица условных обозначений
     tx0 = s.IN1 - s.mm(2) - TW; ty0 = s.PH - s.margin - s.mm(2) - TBL
     if layout.get('legend'):

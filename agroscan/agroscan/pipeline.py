@@ -373,8 +373,26 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         from . import layout_tool
         lay_path = cfg_mod.path_of(cfg, 'layout') if cfg.get('layout') else None
         schema_pdf = os.path.join(out, naming.fname(cfg, 'Схема_ЧЗУ.pdf'))
+        # ближайший населённый пункт: на схеме нужны название и направление,
+        # а КПТ даёт ориентир далеко не всегда (из трёх участков — у одного)
+        near = None
+        try:
+            from .sources import places as places_src
+            from .geo import Local as _Local
+            pc = _Local(cfg['zone']).to_wgs([((meta['e0'] + meta['e1']) / 2,
+                                              (meta['n0'] + meta['n1']) / 2)])[0]
+            pl = places_src.nearest(pc[0], pc[1], no_cache=no_cache, verbose=True)
+            near = pl[0] if pl else None
+            report['ближайший_нп'] = {'ближайшие': pl[:3]}
+            _say(t0, 'ближайший населённый пункт: %s (азимут %d°)%s'
+                 % (places_src.line(near), near['азимут'],
+                    ', следующий — ' + places_src.line(pl[1]) if len(pl) > 1 else '')
+                 if near else 'населённые пункты: источник не ответил, подписи не будет')
+        except Exception as e:
+            _skip(t0, 'ближайший населённый пункт', e)
         _, den, lay = sh_schema.build(schema_pdf, cfg['kn'], rings, res, cfg['egrn_ha'],
-                                      cfg['zone'], nb, layout=layout_tool.load(lay_path))
+                                      cfg['zone'], nb, layout=layout_tool.load(lay_path),
+                                      place=near)
         _say(t0, 'схема ЧЗУ собрана, масштаб 1:%d%s'
              % (den, ' (раскладка правообладателя)' if lay_path
                 and os.path.exists(lay_path) else ''))
