@@ -107,18 +107,13 @@ def _place_arrow(s, P, rings, zone, place, layout, used):
             break
         t_max = t; t += step
     t1 = min(max(t_max, r0 + s.mm(5)), t_edge)
-    if t1 - r0 < s.mm(5):                  # места снаружи нет — начинаем от центра
+    ray_hidden = t_max - r0 < s.mm(6)      # луч упёрся в легенду или в рамку
+    if ray_hidden:                         # места снаружи нет — начинаем от центра
         r0 = max(s.mm(2), t1 - s.mm(22))
     ax, ay = x0 + px * r0, y0 + py * r0
     bx, by = x0 + px * t1, y0 + py * t1
-    s.md.line([(ax, ay), (bx, by)], fill=(60, 60, 60), width=s.W(0.35))
-    a = math.atan2(py, px); h = s.mm(2.6)
-    s.md.polygon([(bx, by),
-                  (bx - h * math.cos(a - 0.38), by - h * math.sin(a - 0.38)),
-                  (bx - h * math.cos(a + 0.38), by - h * math.sin(a + 0.38))],
-                 fill=(60, 60, 60))
     cap = '%s — %s км' % (name_of(place), ('%.1f' % place['км']).replace('.', ','))
-    sub = 'от участка на %s (азимут %d°)' % (rhumb(place['азимут']), place['азимут'])
+    sub = 'от участка на %s' % rhumb(place['азимут'])
     f_cap, f_sub = s.F(2.6, True), s.F(2.2)
     w = max(s.md.textlength(cap, font=f_cap), s.md.textlength(sub, font=f_sub)) / 2 + s.mm(1.6)
     h = s.mm(5.6)
@@ -161,14 +156,31 @@ def _place_arrow(s, P, rings, zone, place, layout, used):
                 tx = min(max(bx + px * s.mm(7), w + s.mm(2)), s.MW - w - s.mm(2))
                 ty = min(max(by + py * s.mm(4), s.mm(5)), s.MH - s.mm(6))
     used['place'] = [round((tx + s.MX0) / s.MM, 2), round((ty + s.MY0) / s.MM, 2)]
+    # луч рисуется после того, как подпись встала: наконечник не должен
+    # въезжать в текст, поэтому укорачиваем его до края рамки подписи
+    if not ray_hidden:
+        lb = box(tx, ty)
+        t_stop = t1
+        while t_stop > r0 + s.mm(5):
+            xx, yy = x0 + px * t_stop, y0 + py * t_stop
+            if not (lb[0] - s.mm(2) <= xx <= lb[2] + s.mm(2)
+                    and lb[1] - s.mm(2) <= yy <= lb[3] + s.mm(2)):
+                break
+            t_stop -= s.mm(1)
+        bx, by = x0 + px * t_stop, y0 + py * t_stop
+        s.md.line([(ax, ay), (bx, by)], fill=(60, 60, 60), width=s.W(0.35))
+        a = math.atan2(py, px); h = s.mm(2.6)
+        s.md.polygon([(bx, by),
+                      (bx - h * math.cos(a - 0.38), by - h * math.sin(a - 0.38)),
+                      (bx - h * math.cos(a + 0.38), by - h * math.sin(a + 0.38))],
+                     fill=(60, 60, 60))
     # выноска нужна, только если подпись встала далеко от наконечника
     far = math.hypot(tx - bx, ty - by)
     if far > s.mm(8):
         s.md.line([(bx, by), (tx, ty)], fill=(150, 150, 150), width=s.W(0.2))
-    # короткая стрелка у самой подписи — когда длинный луч не виден рядом
-    # с ней (на 1173 он вовсе уходит под легенду) и направление читалось бы
-    # только словами
-    for sign in ((1, -1) if far > s.mm(12) or t1 - r0 < s.mm(6) else ()):
+    # стрелка на листе ровно одна: длинный луч, когда он виден, иначе
+    # короткая у подписи. Две стрелки в одну сторону читаются как ошибка
+    for sign in ((1, -1) if ray_hidden else ()):
         off = w + s.mm(2)
         if sign > 0:                       # стрелка за подписью, по ходу направления
             ax0, ay0 = tx + px * off, ty + py * off
@@ -214,7 +226,29 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
     E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
     span = max(max(E) - min(E), max(N) - min(N))
     P = s.map_field(rings, pad_m=max(60.0, min(260.0, span * 0.35)), shift_mm=28)
-    TW, TBL = s.mm(103), s.mm(12 + 14 * (len(keys) + 3))
+    # Таблица условных обозначений занимала 103 × 68 мм — четверть листа при
+    # одной части. Высота строки считается по числу строк описания, а не
+    # берётся с запасом: та же таблица выходит вдвое меньше по площади.
+    TW = s.mm(74)
+    # описания переносятся по фактической ширине колонки: в узкой таблице
+    # заготовленные переносы вылезали в колонку «Площадь»
+    DESC_W = TW - s.mm(19 + 16 + 3)
+    def _wrap(t, font):
+        out, cur = [], ''
+        for w in t.replace('\n', ' ').split():
+            probe = (cur + ' ' + w).strip()
+            if cur and s.d.textlength(probe, font=font) > DESC_W:
+                out.append(cur); cur = w
+            else:
+                cur = probe
+        if cur:
+            out.append(cur)
+        return '\n'.join(out)
+    LEG_TEXT = [_wrap(LEGEND.get(k, parts[k].get('название', '')), s.F(2.0)) for k in keys] + \
+               [_wrap('Контур и кадастровый номер земельного участка '
+                      'согласно сведений ЕГРН', s.F(2.0))]
+    ROW_H = [max(8.6, 2.7 * (t.count('\n') + 1) + 3.0) for t in LEG_TEXT]
+    TBL = s.mm(8.5 + sum(ROW_H))
     SW, SH = s.mm(62), s.mm(30)
     s.block(s.MW - TW, s.MH - TBL, s.MW, s.MH)
     s.block(0, s.MH - SH, SW, s.MH)
@@ -289,7 +323,7 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
                          [(ox, oy), (1.1, .6), (1.1, -.6), (-1.1, .6),
                           (-1.1, -.6), (0, -1.4), (0, 1.4)]):
             a, b = x + cx_ * s.mm(13), y + cy_ * s.mm(8)
-            if s.free(a - s.mm(13), b - s.mm(4.5), a + s.mm(13), b + s.mm(7.0)):
+            if s.free(a - s.mm(13), b - s.mm(4.5), a + s.mm(13), b + s.mm(4.5)):
                 tx, ty = a, b; break
         if tx is None:
             tx = min(max(x + ox * s.mm(13), s.mm(12)), s.MW - s.mm(12))
@@ -301,11 +335,6 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
         s.md.line([(tx - s.mm(9), ty), (tx + s.mm(9), ty)], fill='white', width=s.W(0.8))
         s.md.line([(tx - s.mm(9), ty), (tx + s.mm(9), ty)], fill='black', width=s.W(0.26))
         s.md.text((tx, ty + s.mm(1.9)), '%.7f' % lon, font=f_geo, fill='black', anchor='mm',
-                  stroke_width=s.W(0.6), stroke_fill='white')
-        # кадастровые координаты той же точки: в документе работают с МСК,
-        # а не с широтой и долготой (X — север, Y — восток)
-        s.md.text((tx, ty + s.mm(5.0)), ('X %.2f  Y %.2f' % (n, e)).replace('.', ','),
-                  font=s.F(2.1), fill=(70, 70, 70), anchor='mm',
                   stroke_width=s.W(0.6), stroke_fill='white')
         s.md.ellipse([x - s.mm(.5), y - s.mm(.5), x + s.mm(.5), y + s.mm(.5)], fill='black')
 
@@ -323,44 +352,44 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
         tx0, ty0 = s.mm(layout['legend'][0]), s.mm(layout['legend'][1])
     used['legend'] = [round(tx0 / s.MM, 2), round(ty0 / s.MM, 2)]
     s.d.rectangle([tx0, ty0, tx0 + TW, ty0 + TBL], fill='white', outline='black', width=s.W(0.55))
-    s.d.text((tx0 + TW / 2, ty0 + s.mm(1.1)), 'Условные обозначения:', font=s.F(3.0),
+    s.d.text((tx0 + TW / 2, ty0 + s.mm(0.8)), 'Условные обозначения:', font=s.F(2.6),
              fill='black', anchor='ma')
-    hdr = ty0 + s.mm(6.0); c1 = tx0 + s.mm(25); c2 = tx0 + TW - s.mm(19)
+    hdr = ty0 + s.mm(4.6); c1 = tx0 + s.mm(19); c2 = tx0 + TW - s.mm(16)
     s.d.line([tx0, hdr, tx0 + TW, hdr], fill='black', width=s.W(0.4))
-    for xx, t in ((tx0 + s.mm(13.5), 'Графика'), ((c1 + c2) / 2, 'Описание'),
+    for xx, t in ((tx0 + s.mm(9.5), 'Графика'), ((c1 + c2) / 2, 'Описание'),
                   ((c2 + tx0 + TW) / 2, 'Площадь')):
-        s.d.text((xx, hdr + s.mm(1.1)), t, font=s.F(2.7), fill='black', anchor='ma')
-    s.d.line([tx0, hdr + s.mm(6), tx0 + TW, hdr + s.mm(6)], fill='black', width=s.W(0.4))
+        s.d.text((xx, hdr + s.mm(0.8)), t, font=s.F(2.3), fill='black', anchor='ma')
+    s.d.line([tx0, hdr + s.mm(3.9), tx0 + TW, hdr + s.mm(3.9)], fill='black', width=s.W(0.4))
     for cx_ in (c1, c2):
         s.d.line([cx_, hdr, cx_, ty0 + TBL], fill='black', width=s.W(0.3))
-    f_c = s.F(2.25)
+    f_c = s.F(2.0)
     # площадь берём сведённую с ЕГРН: на :29 по координатам выходило
     # 21 911,61 м², и в легенде рядом стояли 21 912 и 21 911 у одного контура
-    rows = [(k, LEGEND.get(k, parts[k].get('название', '')), areas.m2(parts[k]))
-            for k in sorted(keys, key=lambda q: -parts[q]['areaHa'])]
-    rows.append((None, 'Контур и кадастровый номер земельного участка\nсогласно сведений ЕГРН',
-                 int(round(egrn_ha * 10000))))
-    y = hdr + s.mm(6)
-    hgt = (ty0 + TBL - y) / len(rows)
-    for k, desc, m2 in rows:
+    order = sorted(keys, key=lambda q: -parts[q]['areaHa'])
+    txt = dict(zip(list(keys) + [None], LEG_TEXT))
+    rows = [(k, txt[k], areas.m2(parts[k])) for k in order]
+    rows.append((None, txt[None], int(round(egrn_ha * 10000))))
+    y = hdr + s.mm(3.9)
+    heights = [s.mm(h) for h in ROW_H]
+    for (k, desc, m2), hgt in zip(rows, heights):
         gy = y + hgt / 2
-        gx0, gx1 = tx0 + s.mm(4), c1 - s.mm(4)
+        gx0, gx1 = tx0 + s.mm(2.4), c1 - s.mm(2.4)
         if k is None:
-            s.d.rectangle([gx0, gy - s.mm(3), gx1, gy + s.mm(3)], fill='white',
+            s.d.rectangle([gx0, gy - s.mm(2.6), gx1, gy + s.mm(2.6)], fill='white',
                           outline=ZUG, width=s.W(0.6))
             # номер подгоняется по ширине образца: 58:28:0500401:74 не влезал
-            fs = 2.5
-            while fs > 1.6 and s.d.textlength(kn, font=s.F(fs)) > (gx1 - gx0) - s.mm(2):
+            fs = 2.2
+            while fs > 1.4 and s.d.textlength(kn, font=s.F(fs)) > (gx1 - gx0) - s.mm(1.4):
                 fs -= 0.1
             s.d.text(((gx0 + gx1) / 2, gy), kn, font=s.F(fs), fill='black', anchor='mm')
         else:
             col = PART_COLOR.get(k, (0, 0, 0))
-            s.d.rectangle([gx0, gy - s.mm(3), gx1, gy + s.mm(3)], outline=col, width=s.W(0.55))
+            s.d.rectangle([gx0, gy - s.mm(2.6), gx1, gy + s.mm(2.6)], outline=col, width=s.W(0.55))
             if k in PART_HATCH:
                 # штриховка образца рисуется в отдельный кусок и вставляется:
                 # иначе диагонали вылезают за рамку образца
                 from PIL import Image as _I, ImageDraw as _D
-                w_, h_ = int(gx1 - gx0) - 2, s.mm(6) - 2
+                w_, h_ = int(gx1 - gx0) - 2, s.mm(5.2) - 2
                 sw = _I.new('RGB', (w_, h_), 'white'); sd = _D.Draw(sw)
                 st = s.W(2.2)
                 for c in range(-h_, w_ + h_, st):
@@ -370,12 +399,12 @@ def build(path, kn, rings, parts, egrn_ha, zone, neighbors=None, title=None, lay
                         sd.line([(c, 0), (c + h_, h_)], fill=col, width=s.W(0.22))
                     else:
                         sd.line([(c, 0), (c, h_)], fill=col, width=s.W(0.22))
-                s.page.paste(sw, (int(gx0) + 1, int(gy - s.mm(3)) + 1))
-                s.d.rectangle([gx0, gy - s.mm(3), gx1, gy + s.mm(3)], outline=col, width=s.W(0.55))
-            s.d.text(((gx0 + gx1) / 2, gy), 'ЧЗУ/%s' % k, font=s.F(2.6), fill='black', anchor='mm',
+                s.page.paste(sw, (int(gx0) + 1, int(gy - s.mm(2.6)) + 1))
+                s.d.rectangle([gx0, gy - s.mm(2.6), gx1, gy + s.mm(2.6)], outline=col, width=s.W(0.55))
+            s.d.text(((gx0 + gx1) / 2, gy), 'ЧЗУ/%s' % k, font=s.F(2.3), fill='black', anchor='mm',
                      stroke_width=s.W(0.5), stroke_fill='white')
-        s.d.multiline_text((c1 + s.mm(2.0), gy), desc, font=f_c, fill='black', anchor='lm',
-                           spacing=s.mm(0.9))
+        s.d.multiline_text((c1 + s.mm(1.6), gy), desc, font=f_c, fill='black', anchor='lm',
+                           spacing=s.mm(0.7))
         s.d.multiline_text(((c2 + tx0 + TW) / 2, gy),
                            '(%s м²)\n(%s га)' % (fmt_int(m2), fmt_ha(m2 / 10000.0)),
                            font=f_c, fill='black', anchor='mm', align='center', spacing=s.mm(0.9))

@@ -76,6 +76,67 @@ def test_normalize_keeps_real_vertex():
     closed = ring + [ring[0]]
     assert len(export.normalize([closed])[0]) == len(ring)
 
+def test_schema_sheet_has_layout_and_viewport():
+    """Схема в DXF: лист A4, видовой экран в круглом масштабе, слои чертежа.
+
+    Владелец открывает файл в AutoCAD и печатает лист, поэтому проверяется
+    не только геометрия, но и сам документ: рамка, легенда, штамп и окно
+    карты с масштабом из ряда круглых знаменателей.
+    """
+    import tempfile
+    from ezdxf import recover
+    from agroscan.export_cad import SCALES, schema_dxf
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = json.load(open(os.path.join(DATA, 'bgmeta.json')))
+        rings = json.load(open(os.path.join(DATA, 'rings.json')))
+        parts = {'1': json.load(open(os.path.join(OUT, 'chzu1.json')))}
+        path, den = schema_dxf(os.path.join(tmp, 'схема.dxf'), '58:17:0130701:29', rings, parts,
+                               2.1911, 'msk58-2', meta=meta,
+                               image=os.path.join(DATA, 'bg_summer.jpg'),
+                               place={'название': 'Новое Славкино', 'тип': 'village',
+                                      'lon': 45.1416, 'lat': 52.544, 'км': 4.75, 'азимут': 300})
+        assert den in SCALES, den
+        doc, aud = recover.readfile(path)
+        assert not aud.errors, aud.errors
+        lay = doc.layouts.get('Схема ЧЗУ')
+        vp = [v for v in lay.query('VIEWPORT') if v.dxf.id != 1][0]
+        # высота окна = высота видового экрана на бумаге × знаменатель
+        assert abs(vp.dxf.view_height - vp.dxf.height * den / 1000.0) < 0.5, vp.dxf.view_height
+        E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
+        assert abs(vp.dxf.view_center_point.x - (max(E) + min(E)) / 2) < 1, vp.dxf.view_center_point
+        assert abs(vp.dxf.view_center_point.y - (max(N) + min(N)) / 2) < 1, vp.dxf.view_center_point
+        names = {l.dxf.name for l in doc.layers}
+        assert {'Ramka', 'Legenda', 'Shtamp', 'Kompas', 'Podlozhka'} <= names, names
+        # таблицы закрывают карту маской, иначе сквозь строки видно снимок
+        assert len(lay.query('WIPEOUT')) >= 3, len(lay.query('WIPEOUT'))
+        assert doc.modelspace().query('IMAGE'), 'подложка не вставлена'
+
+def test_schema_without_raster_still_builds():
+    """Обратный случай: снимка нет — чертёж всё равно собирается."""
+    import tempfile
+    from ezdxf import recover
+    from agroscan.export_cad import schema_dxf
+    with tempfile.TemporaryDirectory() as tmp:
+        rings = json.load(open(os.path.join(DATA, 'rings.json')))
+        parts = {'1': json.load(open(os.path.join(OUT, 'chzu1.json')))}
+        path, den = schema_dxf(os.path.join(tmp, 'без_растра.dxf'), '58:17:0130701:29', rings,
+                               parts, 2.1911, 'msk58-2', meta=None, image=None)
+        doc, aud = recover.readfile(path)
+        assert not aud.errors and not doc.modelspace().query('IMAGE')
+        assert doc.layouts.get('Схема ЧЗУ') is not None and den > 0
+
+def test_scale_is_round_and_fits():
+    """Масштаб круглый и участок в окно влезает."""
+    from agroscan.export_cad import SCALES, scale_for
+    rings = json.load(open(os.path.join(DATA, 'rings.json')))
+    den = scale_for(rings, 279, 179)
+    assert den in SCALES
+    E = [p[0] for r in rings for p in r]; N = [p[1] for r in rings for p in r]
+    assert (max(E) - min(E)) / (den / 1000.0) <= 279 and (max(N) - min(N)) / (den / 1000.0) <= 179
+    # вдвое меньший знаменатель участок бы уже не вместил
+    prev = SCALES[max(0, SCALES.index(den) - 1)]
+    assert prev == den or max(max(E) - min(E), max(N) - min(N)) / (prev / 1000.0) > 179 * 0.9
+
 
 if __name__ == '__main__':
     n = 0

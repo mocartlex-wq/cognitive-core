@@ -736,10 +736,14 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         made = export.all_formats(out, cfg['kn'], rings, res, cfg['egrn_ha'], cfg['zone'],
                                   cfg.get('export', {}).get('simplify_m', 0.0),
                                   prefix=naming.prefix(cfg),
-                                  image=cfg_mod.path_of(cfg, 'image'), meta=meta, neighbors=nb_ex)
-        _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON%s'
+                                  image=cfg_mod.path_of(cfg, 'image'), meta=meta,
+                                  neighbors=nb_ex,
+                                  place=((report.get('ближайший_нп') or {}).get('ближайшие')
+                                         or [None])[0])
+        _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON%s%s'
              % (made['точек'], ', DXF с растром' if made.get('dxf_растр') else
-                ' (DXF с растром пропущен: нет ezdxf)'))
+                ' (DXF с растром пропущен: нет ezdxf)',
+                ', схема в DXF 1:%d' % made['масштаб_схемы'] if made.get('dxf_схема') else ''))
     print()
     for k in sorted(res):
         print('  ЧЗУ/%s %-58s %7.2f га  контуров %2d' %

@@ -99,6 +99,22 @@ def world_file(path, meta):
                           % (sx, -sy, meta['e0'] + sx / 2, meta['n1'] - sy / 2))
     return path
 
+def put_image(dxf_path, image_path, meta):
+    """Положить снимок и файл привязки рядом с чертежом. Возвращает имя файла.
+
+    AutoCAD ищет растр по имени рядом с DXF, поэтому копия обязательна;
+    схема и выгрузка границ пользуются одной и той же функцией, чтобы
+    привязка у них не разъехалась.
+    """
+    import shutil
+    base = os.path.splitext(dxf_path)[0]
+    name = os.path.basename(base) + os.path.splitext(image_path)[1]
+    dst = os.path.join(os.path.dirname(dxf_path), name)
+    if os.path.abspath(image_path) != os.path.abspath(dst):
+        shutil.copyfile(image_path, dst)
+    world_file(os.path.splitext(dst)[0] + '.jgw', meta)
+    return name
+
 def dxf_raster(path, rings, parts, image_path, meta, kn='', neighbors=None, tol_m=0.0):
     """DXF R2000: контуры частей поверх привязанного снимка.
 
@@ -111,13 +127,7 @@ def dxf_raster(path, rings, parts, image_path, meta, kn='', neighbors=None, tol_
         import ezdxf
     except ImportError:
         return None
-    import shutil
-    base = os.path.splitext(path)[0]
-    img_name = os.path.basename(base) + os.path.splitext(image_path)[1]
-    img_dst = os.path.join(os.path.dirname(path), img_name)
-    if os.path.abspath(image_path) != os.path.abspath(img_dst):
-        shutil.copyfile(image_path, img_dst)
-    world_file(os.path.splitext(img_dst)[0] + '.jgw', meta)
+    img_name = put_image(path, image_path, meta)
 
     doc = ezdxf.new('R2000', setup=True)
     doc.header['$INSUNITS'] = 6                     # метры
@@ -280,7 +290,7 @@ def geojson(path, rings, parts, zone, wgs=False):
     return path
 
 def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None,
-                image=None, meta=None, neighbors=None):
+                image=None, meta=None, neighbors=None, place=None):
     """Обменные форматы комплекта. prefix — «<КН>_<вид работ>» для имён файлов."""
     pre = prefix or kn.replace(':', '-')
     P = lambda name: os.path.join(out_dir, '%s_%s' % (pre, name))
@@ -289,6 +299,12 @@ def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None
     if image and meta and os.path.exists(image):
         made['dxf_растр'] = dxf_raster(P('Границы_частей_с_растром.dxf'), rings, parts,
                                        image, meta, kn=kn, neighbors=neighbors, tol_m=tol_m)
+    # схема как чертёж: рамка, заголовок, легенда, штамп и видовой экран
+    from .export_cad import schema_dxf
+    sch, den = schema_dxf(P('Схема_ЧЗУ.dxf'), kn, rings, parts, egrn_ha, zone, meta=meta,
+                          image=image, neighbors=neighbors, place=place, tol_m=tol_m)
+    if sch:
+        made['dxf_схема'] = sch; made['масштаб_схемы'] = den
     made['mif'] = mif(P('Границы_частей.mif'), rings, parts, zone, tol_m)
     cat, npts = catalog(P('Каталог_координат.csv'), parts, zone, tol_m)
     made['каталог'] = cat; made['точек'] = npts
