@@ -20,7 +20,7 @@ EGRN = 141.6154
 def test_1173():
     cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'parcels', '58-24-0341802-1173.yaml')
-    res, qa = run(cfg)
+    res, qa = run(cfg)          # намеренно в out/: полный прогон обновляет комплект
     assert qa['пройдено'], 'проверки не пройдены: %s' % qa['провалено']
     s = sum(v['areaHa'] for v in res.values())
     assert abs(s - EGRN) / EGRN * 100 <= 0.01, 'сумма частей %.4f вместо %.4f' % (s, EGRN)

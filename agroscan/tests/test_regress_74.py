@@ -8,6 +8,7 @@
 """
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agroscan.pipeline import run
@@ -19,7 +20,8 @@ EGRN = 132.4146
 def test_74():
     cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'parcels', '58-28-0500401-74.yaml')
-    res, qa = run(cfg, sheets=False, formats=False)
+    with tempfile.TemporaryDirectory() as tmp:
+        res, qa = run(cfg, out_dir=tmp, sheets=False, formats=False)
     assert qa['пройдено'], 'проверки не пройдены: %s' % qa['провалено']
     assert set(res) == {'1', '2'}, 'лишние части: %s' % sorted(res)
     s = sum(v['areaHa'] for v in res.values())
