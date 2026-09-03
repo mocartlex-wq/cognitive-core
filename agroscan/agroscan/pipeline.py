@@ -743,7 +743,8 @@ def run(cfg_path, out_dir=None, step_dzz=2, sheets=True, formats=True, no_cache=
         _say(t0, 'обменные форматы: DXF, MIF/MID, каталог (%d точек), ведомость, GeoJSON%s%s'
              % (made['точек'], ', DXF с растром' if made.get('dxf_растр') else
                 ' (DXF с растром пропущен: нет ezdxf)',
-                ', схема в DXF 1:%d' % made['масштаб_схемы'] if made.get('dxf_схема') else ''))
+                ', схема в DXF 1:%d + архив для AutoCAD' % made['масштаб_схемы']
+                if made.get('dxf_схема') else ''))
     print()
     for k in sorted(res):
         print('  ЧЗУ/%s %-58s %7.2f га  контуров %2d' %

@@ -88,6 +88,10 @@ def _model(msp, doc, kn, rings, parts, zone, meta, image_name, neighbors, place,
         msp.add_image(idef, insert=(meta['e0'], meta['n0']),
                       size_in_units=(meta['e1'] - meta['e0'], meta['n1'] - meta['n0']),
                       dxfattribs={'layer': 'Podlozhka'})
+        # IMAGEFRAME=0: рамку растра не печатаем. Показать её «на экране, но
+        # не на печати» (значение 2) нельзя — ezdxf приводит поле к 0/1,
+        # поэтому потерянную подложку ловит не рамка, а архив: чертёж,
+        # снимок и привязка едут вместе (export.cad_pack)
         doc.set_raster_variables(frame=0, quality=1, units='m')
 
     poly = lambda r, layer, w: msp.add_lwpolyline(

@@ -137,6 +137,29 @@ def test_scale_is_round_and_fits():
     prev = SCALES[max(0, SCALES.index(den) - 1)]
     assert prev == den or max(max(E) - min(E), max(N) - min(N)) / (prev / 1000.0) > 179 * 0.9
 
+def test_cad_pack_keeps_files_together():
+    """Архив для AutoCAD: чертёж, растр и привязка едут вместе.
+
+    Растр в DXF — внешняя ссылка по имени: стоит файлам разъехаться или
+    переименоваться, и AutoCAD открывает лист с пустым полем вместо карты.
+    """
+    import tempfile, zipfile
+    from agroscan.export import cad_pack
+    with tempfile.TemporaryDirectory() as tmp:
+        dxf = os.path.join(tmp, 'X_Схема_ЧЗУ.dxf')
+        open(dxf, 'w').write('0\nEOF\n')
+        open(os.path.join(tmp, 'X_Схема_ЧЗУ.jpg'), 'wb').write(b'jpg')
+        open(os.path.join(tmp, 'X_Схема_ЧЗУ.jgw'), 'w').write('1\n0\n0\n-1\n0\n0\n')
+        open(os.path.join(tmp, 'X_Схема_ЧЗУ.png'), 'wb').write(b'png')   # картинка листа
+        z = cad_pack(os.path.join(tmp, 'pack.zip'), [dxf], den=2000)
+        names = zipfile.ZipFile(z).namelist()
+        assert 'X_Схема_ЧЗУ.dxf' in names and 'X_Схема_ЧЗУ.jpg' in names
+        assert 'X_Схема_ЧЗУ.jgw' in names and 'Как_открыть.txt' in names
+        assert 'X_Схема_ЧЗУ.png' not in names, names      # это лист редактора, не растр
+        txt = zipfile.ZipFile(z).read('Как_открыть.txt').decode('utf-8')
+        assert '1:2000' in txt and 'X_Схема_ЧЗУ.jpg' in txt
+        assert cad_pack(os.path.join(tmp, 'empty.zip'), [None]) is None
+
 
 if __name__ == '__main__':
     n = 0

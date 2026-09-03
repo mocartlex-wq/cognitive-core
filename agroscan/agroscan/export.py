@@ -289,6 +289,56 @@ def geojson(path, rings, parts, zone, wgs=False):
     json.dump(fc, open(path, 'w', encoding='utf-8'), ensure_ascii=False)
     return path
 
+HOWTO = """Как открыть чертёж в AutoCAD
+
+1. Распакуйте архив целиком в одну папку и не переименовывайте файлы:
+   растр в DXF — внешняя ссылка по имени, и после переименования
+   AutoCAD откроет чертёж без подложки.
+2. Откройте %(schema)s → вкладка «Схема ЧЗУ» внизу. Это лист А4,
+   печать в масштабе 1:%(den)d.
+3. Вкладка «Модель» — местность в координатах МСК (метры).
+4. Слои: Podlozhka — снимок, Granica_ZU — граница по ЕГРН,
+   CHZU_1…4 — части, Smezhnye — соседние участки, Podpisi — подписи,
+   Ramka / Zagolovok / Legenda / Shtamp / Kompas — оформление листа.
+5. Если карты в листе нет (пустое поле): AutoCAD не нашёл файл снимка —
+   он подключён внешней ссылкой по имени. Команда ВНССЫЛКИ (_XREF) →
+   строка с изображением → «Найти» и указать %(image)s из этой папки.
+   Проверить путь можно и так: _IMAGE → список подключённых растров.
+6. %(borders)s — те же контуры без рамки и легенды, для вставки
+   в свой шаблон.
+
+Файл привязки .jgw нужен, если растр подгружается вручную командой
+ИЗОБРВСТАВИТЬ (_IMAGEATTACH).
+"""
+
+def cad_pack(path, drawings, den=0):
+    """Сложить чертежи вместе с их растрами и привязкой в один архив."""
+    import zipfile
+    items = []
+    for d in drawings:
+        if not d or not os.path.exists(d):
+            continue
+        items.append(d)
+        base = os.path.splitext(d)[0]
+        # только растр чертежа и его привязка: одноимённый .png — это
+        # картинка листа для редактора раскладки, в CAD-архиве она лишняя
+        for ext in ('.jpg', '.jpeg', '.jgw'):
+            if os.path.exists(base + ext):
+                items.append(base + ext)
+    if not items:
+        return None
+    schema = next((os.path.basename(x) for x in items if x.endswith('Схема_ЧЗУ.dxf')), '')
+    borders = next((os.path.basename(x) for x in items if 'Границы_частей' in x
+                    and x.endswith('.dxf')), 'Границы_частей_с_растром.dxf')
+    image = next((os.path.basename(x) for x in items if x.endswith('.jpg')), '')
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        for f in items:
+            z.write(f, os.path.basename(f))
+        z.writestr('Как_открыть.txt',
+                   (HOWTO % {'schema': schema, 'den': den, 'image': image,
+                             'borders': borders}).encode('utf-8'))
+    return path
+
 def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None,
                 image=None, meta=None, neighbors=None, place=None):
     """Обменные форматы комплекта. prefix — «<КН>_<вид работ>» для имён файлов."""
@@ -305,6 +355,10 @@ def all_formats(out_dir, kn, rings, parts, egrn_ha, zone, tol_m=0.0, prefix=None
                           image=image, neighbors=neighbors, place=place, tol_m=tol_m)
     if sch:
         made['dxf_схема'] = sch; made['масштаб_схемы'] = den
+    # один архив на весь CAD-комплект: растр в DXF — внешняя ссылка, и стоит
+    # файлам разъехаться, как AutoCAD открывает чертёж без подложки
+    made['cad_архив'] = cad_pack(P('AutoCAD.zip'), [made.get('dxf_схема'), made.get('dxf_растр')],
+                                 den=den)
     made['mif'] = mif(P('Границы_частей.mif'), rings, parts, zone, tol_m)
     cat, npts = catalog(P('Каталог_координат.csv'), parts, zone, tol_m)
     made['каталог'] = cat; made['точек'] = npts
