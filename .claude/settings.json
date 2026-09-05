@@ -18,6 +18,13 @@
             "args": [
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/filter_test_output.py"
             ]
+          },
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/protect_secrets.py"
+            ]
           }
         ]
       },
