@@ -83,18 +83,27 @@ TOOLS: list[dict[str, Any]] = [
         "name": "cognitive_recall",
         "description": (
             "Найти релевантные знания по запросу через KNN-поиск (L3 + tools). "
-            "Возвращает frame с patterns / mistakes / rules / tools."
+            "Возвращает frame с patterns / mistakes / rules / tools. "
+            "domain НЕОБЯЗАТЕЛЕН: без него поиск идёт по доменам знаний "
+            "(work_journal, infra_lessons, skills, setup_log, deploy) — там "
+            "выводы, а не переписка. Указывайте домен, только если точно знаете "
+            "его имя: промах по домену даёт пустой ответ, неотличимый от "
+            "пустой памяти."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
-                "domain": {"type": "string"},
+                "domain": {"type": "string", "description": "Необязательно. Пусто или отсутствует — поиск по доменам знаний."},
                 "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
                 "include_tools": {"type": "boolean", "default": True},
                 "grouped": {"type": "boolean", "default": True},
             },
-            "required": ["query", "domain"],
+            # domain убран из required 05.09: бездоменный поиск существовал
+            # в API с самого начала и был НЕДОСТИЖИМ через MCP, то есть для всех
+            # агентов его не было. Соседний агент угадывал домен из 54 и получал
+            # пустоту; domain="" вешал вызов на 300 с.
+            "required": ["query"],
         },
     },
     {
@@ -959,8 +968,11 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         return await _call_self(request, "POST", "/events", json_body=body, timeout_s=6.0)
 
     if name == "cognitive_recall":
+        # Пустая строка — это «домен не указан», а не домен с пустым именем.
+        # Раньше она уходила в поиск как есть и не находила ничего никогда.
+        domain = (a.get("domain") or "").strip() or None
         body = {
-            "domain": a.get("domain"),
+            "domain": domain,
             "context": a.get("query"),
             "top_k": min(max(int(a.get("top_k", 5)), 1), 20),
             "include_tools": bool(a.get("include_tools", True)),
