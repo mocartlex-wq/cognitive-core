@@ -81,3 +81,8 @@ backups/
 # Local edit backups created by sed -i and similar (e.g. .bak.20260508-065910)
 *.bak
 *.bak.[0-9]*
+
+# Слепок образа nginx-brotli: бинарник, в git ему не место — но и удаляться
+# он не должен. Без этой строки `git clean -fd` при самолечении авто-деплоя
+# сносит весь каталог nginx/brotli/ вместе со страховкой (проверено 05.09).
+nginx/brotli/*.tar.gz
