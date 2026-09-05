@@ -1,0 +1,13 @@
+[Unit]
+Description=Cognitive Core: перенос метрик соседнего контура (раз в минуту)
+
+[Timer]
+# Раз в минуту: сосед пишет раз в пять, но задержка переноса складывается с
+# его периодом, а порог тревоги — 15 минут. Минутный тик оставляет запас.
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=cogcore-textfile-relay.service
+
+[Install]
+WantedBy=timers.target

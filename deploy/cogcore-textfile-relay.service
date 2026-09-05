@@ -1,0 +1,14 @@
+[Unit]
+# Переносит метрики соседнего контура в textfile-каталог node_exporter.
+# Подробности и обоснование — в deploy/cogcore-textfile-relay.sh.
+Description=Cognitive Core: перенос метрик соседнего контура в node_exporter
+Documentation=file:///opt/cognitive-core/deploy/cogcore-textfile-relay.sh
+
+[Service]
+Type=oneshot
+User=salex
+ExecStart=/usr/local/bin/cogcore-textfile-relay.sh
+# Прогон занимает миллисекунды; если завис — значит источник на зависшей
+# файловой системе, и ждать его дольше минуты бессмысленно: следующий тик
+# всё равно придёт.
+TimeoutStartSec=30

@@ -141,3 +141,33 @@ groups:
     annotations:
       summary: "CRM monitor heartbeat metric has never appeared"
       description: "Either the monitor does not write the textfile, or the path is wrong."
+
+- name: crm-monitor-findings
+  # Findings reported BY the neighbouring monitor. Every expression here is
+  # conjoined with heartbeat freshness on purpose.
+  #
+  # These are gauges in a text file. If the monitor dies, the file stays on
+  # disk with its last values and node_exporter keeps serving crm_brotli_ok 1
+  # forever. A bare `== 0` rule would then never fire — not because all is
+  # well, but because it is reading a frozen snapshot. The reading outlives
+  # the one who took it.
+  #
+  # So: "bad" and "unknown" must not look the same. Staleness itself is
+  # reported separately by CRMMonitorSilent.
+  rules:
+  - alert: CRMBrotliLost
+    expr: crm_brotli_ok == 0 and time() - crm_monitor_heartbeat_seconds < 900
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "brotli image missing on the CRM circuit"
+      description: "Recovery: /home/salex/backups/nginx-brotli/, see nginx/brotli/RESTORE note."
+
+  - alert: CRMDeployPending
+    expr: crm_deploy_pending == 1 and time() - crm_monitor_heartbeat_seconds < 900
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: "CRM deploy debt outstanding for 30 minutes"
