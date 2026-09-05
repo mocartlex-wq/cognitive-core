@@ -37,8 +37,34 @@ LOCK_MAX_TTL = 24 * 3600
 JOURNAL_DOMAIN = "work_journal"
 
 
+# Агенты, про которых уже сказано, что они координируются в одиночку.
+# Ограничен, чтобы не расти без предела на большом числе ключей.
+_warned_isolated: set[str] = set()
+
+# Префикс запасного пространства имён. Ключи координации живут под
+# coord:*:{owner}:*, поэтому владелец — это и есть граница видимости.
+AGENT_SCOPE_PREFIX = "agent:"
+
+
+def is_shared_scope(owner: str) -> bool:
+    """Видят ли участники локи друг друга.
+
+    False означает, что агент координируется сам с собой: лок берётся, отдаёт
+    200 и не виден никому другому. Отличить это от рабочей координации по
+    ответу было нельзя — отсюда поле scope в ответах.
+    """
+    return not owner.startswith(AGENT_SCOPE_PREFIX)
+
+
 async def _owner_of(request: Request) -> str:
-    """owner_user_id вызывающего агента — префикс изоляции для всех ключей."""
+    """owner_user_id вызывающего агента — префикс изоляции для всех ключей.
+
+    Ключ, которого нет в agent_keys (legacy-ключ из переменной окружения или
+    просто незарегистрированный), даёт запасное пространство имён на самого
+    агента. Это не ошибка вызова, поэтому 200 остаётся, — но для локов это
+    смена смысла: две сессии возьмут один ресурс и не увидят друг друга.
+    Поэтому пишем предупреждение и отдаём scope в ответе.
+    """
     agent_id = getattr(request.state, "agent_id", None) or "unknown"
     try:
         pool = await get_pool()
@@ -51,7 +77,13 @@ async def _owner_of(request: Request) -> str:
                 return row["o"]
     except Exception as e:
         logger.info("coord: owner lookup failed agent=%s err=%s", agent_id, e)
-    return f"agent:{agent_id}"
+    if agent_id not in _warned_isolated:
+        if len(_warned_isolated) < 500:
+            _warned_isolated.add(agent_id)
+        logger.warning(
+            "coord: агент %s не найден в agent_keys — координация в отдельном "
+            "пространстве имён, его локи не видны другим сессиям", agent_id)
+    return f"{AGENT_SCOPE_PREFIX}{agent_id}"
 
 
 # ─────────────────────────── 4. Локи на ресурсы ───────────────────────────
@@ -75,6 +107,7 @@ async def acquire_lock(body: LockInput, request: Request):
     """
     await verify_api_key(request)
     owner = await _owner_of(request)
+    scope = "owner" if is_shared_scope(owner) else "agent"
     key = f"coord:lock:{owner}:{body.resource}"
     payload = json.dumps({
         "holder": body.holder,
@@ -95,7 +128,7 @@ async def acquire_lock(body: LockInput, request: Request):
         if held.get("holder") == body.holder:  # свой же лок — продлеваем
             await r.set(key, payload, ex=body.ttl_seconds)
             return {"ok": True, "resource": body.resource, "renewed": True,
-                    "ttl_seconds": body.ttl_seconds}
+                    "ttl_seconds": body.ttl_seconds, "scope": scope}
         raise HTTPException(status_code=409, detail={
             "error": "resource_locked",
             "resource": body.resource,
@@ -103,8 +136,10 @@ async def acquire_lock(body: LockInput, request: Request):
             "note": held.get("note"),
             "expires_in_seconds": ttl,
         })
+    # scope говорит, ЧТО именно вы взяли: "owner" — лок, видимый другим
+    # сессиям владельца; "agent" — лок, видимый только вам, то есть не лок.
     return {"ok": True, "resource": body.resource, "holder": body.holder,
-            "ttl_seconds": body.ttl_seconds}
+            "ttl_seconds": body.ttl_seconds, "scope": scope}
 
 
 @router.delete("/lock")
@@ -144,7 +179,10 @@ async def list_locks(request: Request):
         except Exception:
             held = {}
         out.append({"resource": key[len(prefix):], "expires_in_seconds": ttl, **held})
-    return {"count": len(out), "locks": out}
+    # Пустой список сам по себе неоднозначен: «никто ничего не держит» и
+    # «я смотрю не туда, где держат» выглядят одинаково. scope различает.
+    return {"count": len(out), "locks": out,
+            "scope": "owner" if is_shared_scope(owner) else "agent"}
 
 
 # ─────────────────────────── 2. Квитанции ───────────────────────────
