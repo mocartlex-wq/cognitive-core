@@ -249,6 +249,11 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
                     Только для recovery когда другие снапшоты испорчены.
     """
     await verify_api_key(request)
+    # Восстановленные записи обязаны получить владельца: без него они не видны
+    # ни одному owner-scoped recall (2026-08-11: 159/269 знаний без владельца).
+    # Берём владельца из снапшота, если он там есть, иначе — вызывающего.
+    from app.security.owner import resolve_owner_user_id
+    caller_owner = await resolve_owner_user_id(request)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -300,15 +305,19 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
                     await conn.execute(
                         """
                         INSERT INTO l3_master_knowledge
-                            (id, domain, knowledge_type, content, version, effective_from)
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                            (id, domain, knowledge_type, content, version, effective_from,
+                             owner_user_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7::uuid)
                         ON CONFLICT (id) DO UPDATE
                         SET content = EXCLUDED.content, version = EXCLUDED.version,
-                            effective_to = NULL
+                            effective_to = NULL,
+                            owner_user_id = COALESCE(l3_master_knowledge.owner_user_id,
+                                                     EXCLUDED.owner_user_id)
                         """,
                         UUID(k["id"]), k["domain"], k.get("knowledge_type", "rule"),
                         json.dumps(k.get("content", {})), k.get("version", 1),
                         _parse_ts(k.get("effective_from")),
+                        k.get("owner_user_id") or caller_owner,
                     )
 
                 for t in data.get("tools", []):
@@ -316,19 +325,22 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
                         """
                         INSERT INTO l3_tools_registry
                             (id, domain, tool_name, tool_type, description, config_schema,
-                             usage_patterns, version, effective_from)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                             usage_patterns, version, effective_from, owner_user_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid)
                         ON CONFLICT (id) DO UPDATE
                         SET description = EXCLUDED.description,
                             config_schema = EXCLUDED.config_schema,
                             usage_patterns = EXCLUDED.usage_patterns,
-                            effective_to = NULL
+                            effective_to = NULL,
+                            owner_user_id = COALESCE(l3_tools_registry.owner_user_id,
+                                                     EXCLUDED.owner_user_id)
                         """,
                         UUID(t["id"]), t["domain"], t.get("tool_name", ""),
                         t.get("tool_type", "service"), t.get("description", ""),
                         json.dumps(t.get("config_schema", {})),
                         json.dumps(t.get("usage_patterns", {})),
                         t.get("version", 1), _parse_ts(t.get("effective_from")),
+                        t.get("owner_user_id") or caller_owner,
                     )
 
                 # Помечаем как verified если integrity прошёл
