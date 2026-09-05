@@ -1,0 +1,143 @@
+groups:
+- name: cogcore-host
+  interval: 60s
+  rules:
+  - alert: DiskSpaceHigh
+    expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 80
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "Root disk >80% used"
+      description: "Root partition has {{ $value | humanize }}% used (threshold 80%)"
+
+  - alert: DiskSpaceCritical
+    expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 90
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Root disk >90% used — services at risk"
+      description: "Root partition {{ $value | humanize }}% used"
+
+  - alert: ColdStorageHigh
+    expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/mnt/cold-storage"} / node_filesystem_size_bytes{mountpoint="/mnt/cold-storage"}) > 80
+    for: 30m
+    labels: {severity: warning}
+    annotations:
+      summary: "cold-storage HDD >80% used"
+
+  - alert: MemoryHigh
+    expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "RAM available <10%"
+      description: "Used {{ $value | humanize }}% of RAM"
+
+  - alert: HighLoadAverage
+    expr: node_load5 > 8
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "Load average >8 sustained"
+
+- name: cogcore-services
+  interval: 60s
+  rules:
+  - alert: PrometheusTargetDown
+    expr: up == 0
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "Prometheus target {{ $labels.job }} ({{ $labels.instance }}) DOWN"
+
+  - alert: PostgresDown
+    expr: pg_up == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Postgres exporter reports DOWN"
+
+  - alert: RedisDown
+    expr: redis_up == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Redis exporter reports DOWN"
+
+  - alert: ContainerHighRestartRate
+    expr: rate(container_start_time_seconds[15m]) > 0
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "Container {{ $labels.name }} restarting frequently"
+
+- name: crm-cloud
+  interval: 60s
+  rules:
+  - alert: CRMCloudS3Down
+    expr: probe_success{instance=~".*9101.*"} == 0 or up{job="crm-cloud-s3"} == 0
+    for: 5m
+    labels: {severity: critical, team: crm-cloud}
+    annotations:
+      summary: "CRM-cloud S3 (9101) DOWN — clients cannot upload"
+      description: "Service на порту 9101 недоступен >5 мин. Проверь crm-cloud-minio / crm-cloud-garage."
+  - alert: CRMCloudMetaDiskHigh
+    expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint=~".*crm-cloud-meta.*"} / node_filesystem_size_bytes{mountpoint=~".*crm-cloud-meta.*"}) > 80
+    for: 15m
+    labels: {severity: warning, team: crm-cloud}
+    annotations:
+      summary: "CRM-cloud meta partition >80% used"
+      description: "Метаданные MinIO/Garage близки к заполнению — нужен cleanup или увеличение."
+  - alert: CRMCloudDataDiskHigh
+    expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint=~".*crm-cloud-data.*"} / node_filesystem_size_bytes{mountpoint=~".*crm-cloud-data.*"}) > 85
+    for: 30m
+    labels: {severity: warning, team: crm-cloud}
+    annotations:
+      summary: "CRM-cloud data partition >85% used"
+      description: "Объект-стор близок к заполнению — clients скоро не смогут writeить."
+
+- name: external-availability
+  # Watched from OUTSIDE the app by blackbox-exporter (added 2026-09-05).
+  # A self-check cannot record its own death: a backend that is down writes
+  # nothing. NOTE the honest limit: the prober runs on THIS host, so it sees
+  # application outages, not host outages.
+  rules:
+  - alert: EndpointDown
+    expr: probe_success == 0
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "{{ $labels.instance }} unreachable for 2 minutes"
+      description: "External probe failed. The service cannot suppress this alert."
+
+  - alert: EndpointSlow
+    expr: probe_duration_seconds > 5
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "{{ $labels.instance }} answers slower than 5s for 10 minutes"
+
+- name: watchdog-liveness
+  # A watchdog that goes silent identically for "all good" and "I died" is not
+  # a watchdog. The CRM monitor reports its own heartbeat through the
+  # node-exporter textfile collector; this rule notices when it stops.
+  rules:
+  - alert: CRMMonitorSilent
+    expr: time() - crm_monitor_heartbeat_seconds > 900
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "CRM monitor has not reported for 15 minutes"
+      description: "Its own checks (BROTLI_LOST, DEPLOY_PENDING) prove nothing while it is silent."
+
+  - alert: CRMMonitorNeverSeen
+    expr: absent(crm_monitor_heartbeat_seconds)
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: "CRM monitor heartbeat metric has never appeared"
+      description: "Either the monitor does not write the textfile, or the path is wrong."
