@@ -26,6 +26,32 @@ from app.db.postgres import get_pool
 from app.security.middleware import require_user
 
 logger = logging.getLogger(__name__)
+def standin_view(participant: dict) -> dict:
+    """Что на самом деле означают два переключателя заместителя.
+
+    Их два, они в разных таблицах, и до 17.08 ни один экран не показывал оба
+    сразу. 16.08 из-за этого сняли `agent_states.standin_enabled`, а
+    `room_participants.auto_respond` остался — и часть реплик агента
+    продолжил писать DeepSeek.
+
+    Приоритет здесь не косметический, он повторяет решение демона: при
+    включённом полном заместителе `auto_respond` не читается вовсе
+    (`cognitive-agent-runtime.py:1852`). Покажи мы «room», когда включён
+    глобальный, — оператор снял бы комнатный тумблер и решил, что дело
+    сделано, а демон продолжил бы отвечать. Ровно эта последовательность
+    и произошла.
+
+    Вынесено отдельной функцией, чтобы проверялось поведение, а не текст
+    запроса: тест, повторяющий логику у себя, проверяет свою копию.
+    """
+    global_on = bool(participant.get("standin_enabled"))
+    room_on = bool(participant.get("auto_respond"))
+    return {
+        "answers_when_offline": global_on or room_on,
+        "standin_scope": "global" if global_on else ("room" if room_on else None),
+    }
+
+
 router = APIRouter(prefix="/user", tags=["user"])
 
 
@@ -318,7 +344,13 @@ async def get_my_room_detail(room_id: str, request: Request):
                 """
                 SELECT p.agent_id, COALESCE(p.role, 'member') AS role,
                        p.joined_at, p.last_seen_at, s.agent_label,
-                       COALESCE(p.auto_respond, false) AS auto_respond
+                       COALESCE(p.auto_respond, false) AS auto_respond,
+                       -- Второй переключатель заместителя. Он живёт в другой
+                       -- таблице и до сих пор не показывался рядом с первым:
+                       -- ни один экран и ни одна ручка не отдавали оба сразу.
+                       -- 16.08 из-за этого сняли очевидный, а комнатный
+                       -- остался, и часть реплик писал DeepSeek.
+                       COALESCE(s.standin_enabled, false) AS standin_enabled
                   FROM room_participants p
                   LEFT JOIN agent_states s ON s.agent_id = p.agent_id
                  WHERE p.room_id = $1::uuid
@@ -335,6 +367,7 @@ async def get_my_room_detail(room_id: str, request: Request):
                 # display_name: красивое имя (agent_label) если задано, иначе agent_id.
                 # Чинит рассогласование «профиль: Растр, комната: dsdsd».
                 d["display_name"] = d.get("agent_label") or d.get("agent_id")
+                d.update(standin_view(d))
                 participants.append(d)
         except Exception as e:
             logger.info("room_detail participants_skip room=%s err=%s", room_id, e)
@@ -350,7 +383,13 @@ async def get_my_room_detail(room_id: str, request: Request):
             mrows = await conn.fetch(
                 """
                 SELECT m.id::text AS id, m.from_agent, m.text, m.created_at,
-                       s.agent_label
+                       s.agent_label,
+                       -- Происхождение реплики. Владельческая страница читает
+                       -- сообщения ЭТИМ запросом, а не через rooms-сервис —
+                       -- поля надо добавлять в обоих местах, иначе пометка
+                       -- пишется, отдаётся сервисом и не доезжает до экрана,
+                       -- на который смотрит человек.
+                       m.metadata
                   FROM room_messages m
                   LEFT JOIN agent_states s ON s.agent_id = m.from_agent
                  WHERE m.room_id = $1::uuid
@@ -367,6 +406,15 @@ async def get_my_room_detail(room_id: str, request: Request):
                 # (фронт сам форматирует «Вы (email)»), для агентов — красивое имя.
                 fa = d.get("from_agent") or ""
                 d["display_name"] = d.get("agent_label") or fa
+                meta = d.pop("metadata", None) or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except (ValueError, TypeError):
+                        meta = {}
+                # Пусто = «не помечено», а не «живая сессия».
+                d["origin"] = meta.get("origin")
+                d["origin_model"] = meta.get("model")
                 messages.append(d)
         except Exception as e:
             logger.info("room_detail messages_skip room=%s err=%s", room_id, e)

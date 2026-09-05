@@ -144,6 +144,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_time ON l5_audit_log(event_time);
 CREATE INDEX IF NOT EXISTS idx_audit_agent ON l5_audit_log(agent_id, event_time);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON l5_audit_log(action, event_time);
 
+-- Показы знания: по строке на каждую запись, возвращённую recall.
+-- Зачем построчно, а не счётчиком на записи: счётчик теряет временнýю ось,
+-- а вопрос звучит «предотвратила ли запись повтор ПОСЛЕ того, как начала
+-- показываться». Без даты показа на него не ответить.
+-- Внешнего ключа нет намеренно: показывать могут и знание, и инструмент,
+-- а запись может быть депрецирована позже — история показов должна выжить.
+-- Зеркало миграции 0022.
+CREATE TABLE IF NOT EXISTS l3_recall_hits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    record_id UUID NOT NULL,
+    record_type VARCHAR(16) NOT NULL,
+    session_id UUID,
+    domain VARCHAR(64),
+    rank INT,
+    distance DOUBLE PRECISION,
+    owner_user_id UUID,
+    useful BOOLEAN,
+    shown_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_recall_hits_record ON l3_recall_hits(record_id, shown_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recall_hits_session ON l3_recall_hits(session_id, record_id);
+CREATE INDEX IF NOT EXISTS idx_recall_hits_owner_time ON l3_recall_hits(owner_user_id, shown_at DESC)
+    WHERE owner_user_id IS NOT NULL;
+
 -- Per-agent persistent state (checkpoint для recovery после срыва сессии / окончания токенов)
 CREATE TABLE IF NOT EXISTS agent_states (
     agent_id VARCHAR(64) PRIMARY KEY,

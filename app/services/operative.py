@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -15,6 +16,19 @@ from app.services.embedder import embed_text, get_model_version
 from app.services.ingestor import save_raw_event
 
 log = logging.getLogger(__name__)
+
+# Каким из трёх путей отработал поиск. Нужен наблюдаемости: снаружи «пусто»
+# от RediSearch и «пусто» от python-fallback выглядят одинаково, а лечатся
+# по-разному.
+#
+# ContextVar, а не возвращаемое значение, чтобы не менять форму ответа
+# build_operative — его зовут из четырёх мест.
+#
+# ⚠️ Через asyncio.gather значение НЕ поднимется: задача получает копию
+# контекста. В бездоменном поиске (`_search_default_domains`) домены как раз
+# идут через gather, поэтому там путь помечается отдельно — «multi».
+recall_path: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "recall_path", default="unknown")
 
 SESSION_TTL = 86400  # 24 часа
 
@@ -547,6 +561,7 @@ async def build_operative(
                                 "distance": 0.0,
                             })
                 if results:
+                    recall_path.set("redis")
                     return results
 
     # Попытка 2: ГИБРИД — вектор + полнотекстовый, слияние по обратному рангу.
@@ -577,6 +592,7 @@ async def build_operative(
             pass
         if not include_tools:
             merged = [r for r in merged if r["record_type"] != "tool"]
+        recall_path.set("hybrid")
         return merged[:top_k + (top_k // 2 if include_tools else 0)]
 
     # Попытка 3: Python KNN (последний fallback — для свежесозданных без эмбеддингов)
@@ -691,6 +707,7 @@ async def build_operative(
         item_vec = await embed_text(content_str)
         await _index_l3_vector(r["id"], domain, r["record_type"], content_str, item_vec)
 
+    recall_path.set("python")
     return results
 
 
@@ -779,8 +796,76 @@ async def close_session(session_id: UUID, keep_results: bool = False,
     }
 
 
+_recall_hits_missing_logged = False
+
+
+async def record_recall_hits(results: list[dict], *, session_id: str | None,
+                             domain: str | None, owner_user_id: str | None) -> int:
+    """Пишет по строке на каждую показанную запись. Возвращает число строк.
+
+    Строго best-effort: это горячий путь, и наблюдение не имеет права ронять
+    поиск. Отдельно ловим отсутствие таблицы — миграции на прод катятся руками,
+    значит код обязан работать на базе, где 0022 ещё не применена.
+    """
+    global _recall_hits_missing_logged
+    if not results:
+        return 0
+
+    rows = []
+    for rank, r in enumerate(results):
+        rid = r.get("id")
+        if not rid:
+            continue
+        try:
+            rid = UUID(str(rid))
+        except (ValueError, AttributeError, TypeError):
+            continue        # id не-UUID встречается у синтетики и демо-данных
+        dist = r.get("distance")
+        rows.append((
+            rid,
+            (r.get("record_type") or "knowledge")[:16],
+            UUID(session_id) if session_id else None,
+            (r.get("domain") or domain or "")[:64] or None,
+            rank,
+            float(dist) if isinstance(dist, (int, float)) else None,
+            UUID(owner_user_id) if owner_user_id else None,
+        ))
+    if not rows:
+        return 0
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.executemany(
+                """
+                INSERT INTO l3_recall_hits
+                    (record_id, record_type, session_id, domain, rank,
+                     distance, owner_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                rows,
+            )
+        return len(rows)
+    except Exception as e:
+        if "l3_recall_hits" in str(e) and "not exist" in str(e).lower():
+            if not _recall_hits_missing_logged:
+                log.warning(
+                    "l3_recall_hits нет — миграция 0022 не накачена; "
+                    "показы не пишутся, поиск работает как раньше")
+                _recall_hits_missing_logged = True
+        else:
+            log.warning("record_recall_hits failed: %s", e)
+        return 0
+
+
 async def feedback_record(session_id: UUID, record_id: UUID, record_type: str, useful: bool) -> dict:
-    """Обратная связь по конкретной записи в OP."""
+    """Обратная связь по конкретной записи в OP.
+
+    Раньше оседала только в Redis с TTL 24 часа и не читалась НИКЕМ — то есть
+    создавала видимость обратной связи. Теперь Redis остаётся быстрым слоем и
+    проверкой живости сессии, а сама оценка переносится в `l3_recall_hits`,
+    где переживает сутки и попадает в агрегаты.
+    """
     r = await get_redis()
     session_key = f"session:{session_id}"
     exists = await r.exists(session_key)
@@ -795,7 +880,21 @@ async def feedback_record(session_id: UUID, record_id: UUID, record_type: str, u
     })
     await r.expire(feedback_key, SESSION_TTL)
 
-    return {"status": "recorded", "record_id": str(record_id), "useful": useful}
+    persisted = False
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            res = await conn.execute(
+                "UPDATE l3_recall_hits SET useful = $1 "
+                "WHERE session_id = $2 AND record_id = $3",
+                useful, session_id, record_id,
+            )
+        persisted = res.split()[-1] != "0"
+    except Exception as e:
+        log.warning("feedback persist failed: %s", e)
+
+    return {"status": "recorded", "record_id": str(record_id),
+            "useful": useful, "persisted": persisted}
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

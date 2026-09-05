@@ -110,3 +110,45 @@ def test_self_posts_are_not_mistaken_for_live_agent(daemon, tmp_path):
     history.record_self_post("msg-1")
     assert history.is_self_post("msg-1") is True
     assert history.is_self_post("msg-2") is False
+
+
+def test_every_room_reply_registers_itself(daemon, tmp_path, monkeypatch):
+    """Регистрация своего поста живёт ВНУТРИ post_to_room, а не у вызывающих.
+
+    Регрессия 17.08. `record_self_post` стоял в одной ветке ответа из четырёх:
+    `handle_llm_reply` регистрировал, а `handle_auto_ack`, `handle_managed` и
+    `handle_custom_llm` — нет. По этим трём демон через LIVE_AGENT_WINDOW_SEC
+    читал СОБСТВЕННУЮ реплику как «живая сессия активна» и умолкал: ровно то
+    поведение, которое тест выше объявляет недопустимым, только через другую
+    дверь.
+
+    Поэтому проверяем не «во всех ли ветках есть вызов» — так проверяли бы
+    форму, а её легко потерять снова, — а само свойство функции: отправила
+    сообщение, значит зарегистрировала.
+    """
+    history = daemon.HistoryStore(str(tmp_path / "hist_reg.json"))
+    monkeypatch.setattr(daemon, "resolve_room_key", lambda room_id: "rk_test")
+    monkeypatch.setattr(daemon, "http_post", lambda url, body, headers=None: {"id": "msg-42"})
+
+    mid = daemon.post_to_room("room-1", "agent-x", "текст", history)
+
+    assert mid == "msg-42"
+    assert history.is_self_post("msg-42") is True, (
+        "пост ушёл в комнату, но в историю не попал — через 5 минут демон "
+        "примет его за реплику живой сессии и замолчит"
+    )
+
+
+def test_post_to_room_requires_history_explicitly(daemon):
+    """История — обязательный параметр: забыть его нельзя, можно только снять.
+
+    Пока регистрация была обязанностью вызывающего, её забыли трижды.
+    """
+    import inspect
+
+    sig = inspect.signature(daemon.post_to_room)
+    assert "history" in sig.parameters, "параметр истории исчез из сигнатуры"
+    assert sig.parameters["history"].default is inspect.Parameter.empty, (
+        "у history появилось значение по умолчанию — значит его снова можно "
+        "молча не передать"
+    )

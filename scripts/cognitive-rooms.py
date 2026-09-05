@@ -564,11 +564,27 @@ def _bridge_to_inbox(room_id, from_agent, text):
         sys.stderr.write(f"[rooms] bridge unexpected error: {type(e).__name__}: {e}\n")
 
 
-def post_message(room_id, from_agent, text, msg_type="message", parent_id=None):
+def post_message(room_id, from_agent, text, msg_type="message", parent_id=None,
+                 metadata=None):
+    """Записать реплику в комнату.
+
+    `metadata` — происхождение: кто ФАКТИЧЕСКИ произвёл текст. Колонка
+    существовала с самого начала и не использовалась ни на запись, ни на
+    чтение, а заместитель постил под тем же `from_agent`, что живая сессия,
+    и отличить их было нельзя.
+
+    16.08 это дало реплики с обязательствами, которых живая сессия не давала:
+    «подтяну ветку, прогоню 37 проверок» написал DeepSeek, а адресат принял
+    за слово агента.
+
+    Отсутствие пометки означает «не помечено», а НЕ «живая сессия»:
+    доказательства живости у нас нет, и выдавать одно за другое нельзя.
+    """
+    meta_json = json.dumps(metadata or {}, ensure_ascii=False)
     rows, err = pg(
-        "INSERT INTO room_messages (room_id, from_agent, text, msg_type, parent_id) "
-        "VALUES (%s::uuid, %s, %s, %s, %s) RETURNING id::text;",
-        [room_id, from_agent, text, msg_type, parent_id],
+        "INSERT INTO room_messages (room_id, from_agent, text, msg_type, parent_id, metadata) "
+        "VALUES (%s::uuid, %s, %s, %s, %s, %s::jsonb) RETURNING id::text;",
+        [room_id, from_agent, text, msg_type, parent_id, meta_json],
     )
     if err or not rows:
         return None, err
@@ -598,7 +614,7 @@ def list_messages(room_id, since=None, limit=50):
     if since:
         sql = (
             "SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, "
-            "       m.created_at::text, s.agent_label "
+            "       m.created_at::text, s.agent_label, m.metadata::text "
             "FROM room_messages m "
             "LEFT JOIN agent_states s ON s.agent_id = m.from_agent "
             "WHERE m.room_id = %s::uuid AND m.created_at > %s::timestamptz "
@@ -608,7 +624,7 @@ def list_messages(room_id, since=None, limit=50):
     else:
         sql = (
             "SELECT m.id::text, m.from_agent, m.text, m.msg_type, m.parent_id::text, "
-            "       m.created_at::text, s.agent_label "
+            "       m.created_at::text, s.agent_label, m.metadata::text "
             "FROM room_messages m "
             "LEFT JOIN agent_states s ON s.agent_id = m.from_agent "
             "WHERE m.room_id = %s::uuid "
@@ -618,11 +634,24 @@ def list_messages(room_id, since=None, limit=50):
     rows, _ = pg(sql, params)
     # display_name: красивое имя (agent_label) если задано, иначе сырой agent_id.
     # Чинит рассогласование «профиль показывает Растр, комната — dsdsd».
-    return [
-        {"id": r[0], "from_agent": r[1], "text": r[2], "msg_type": r[3], "parent_id": r[4],
-         "created_at": r[5], "display_name": (r[6] or r[1])}
-        for r in rows if len(r) >= 7
-    ]
+    out = []
+    for r in rows:
+        if len(r) < 8:
+            continue
+        try:
+            meta = json.loads(r[7]) if r[7] else {}
+        except (ValueError, TypeError):
+            meta = {}
+        out.append({
+            "id": r[0], "from_agent": r[1], "text": r[2], "msg_type": r[3],
+            "parent_id": r[4], "created_at": r[5],
+            "display_name": (r[6] or r[1]),
+            # Кто ФАКТИЧЕСКИ произвёл текст. Пусто = не помечено;
+            # это не синоним «живая сессия».
+            "origin": meta.get("origin"),
+            "origin_model": meta.get("model"),
+        })
+    return out
 
 
 # Cap on how long a single /wait request may block, regardless of client ask.
@@ -2374,7 +2403,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     })
                     return
                 parent_id = body.get("parent_id")
-                msg_id, err = post_message(room_id, from_agent, text, parent_id=parent_id)
+                # Происхождение приходит от того, кто пишет: сервер не может
+                # его вывести — заместитель и живая сессия шлют одинаковый
+                # from_agent. Непомеченное так и остаётся непомеченным.
+                meta = body.get("origin_meta") if isinstance(body.get("origin_meta"), dict) else None
+                msg_id, err = post_message(room_id, from_agent, text,
+                                          parent_id=parent_id, metadata=meta)
                 if err:
                     self._send(500, {"error": err})
                 else:

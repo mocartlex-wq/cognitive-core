@@ -63,6 +63,42 @@ audit_events = Counter(
     ["action", "success"],
 )
 
+# Recall. До 17.08 про поиск по памяти не было ни одной метрики: латентность
+# видна была только как generic HTTP, а «сколько раз память ответила пустотой»
+# не считал никто. Между тем пустой ответ — главный симптом: именно так
+# выглядели 59% недостижимых знаний, пока их не нашли вручную.
+#
+# Метка path различает три пути внутри build_operative. Снаружи их «пусто»
+# неотличимо, а лечится по-разному: redis — переиндексация, hybrid — пороги и
+# вектора, python — отсутствие эмбеддингов у свежих записей.
+recall_latency = Histogram(
+    "cognitive_recall_latency_seconds",
+    "Recall search latency",
+    ["path"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+)
+
+recall_results = Histogram(
+    "cognitive_recall_results",
+    "Number of records returned by recall",
+    ["path"],
+    buckets=[0, 1, 2, 3, 5, 8, 13, 21],
+)
+
+recall_empty = Counter(
+    "cognitive_recall_empty_total",
+    "Recall calls that returned nothing",
+    ["path", "scoped"],
+)
+
+
+def track_recall(path: str, duration: float, count: int, owner_scoped: bool) -> None:
+    """Один вызов recall: латентность, объём выдачи, факт пустоты."""
+    recall_latency.labels(path=path).observe(duration)
+    recall_results.labels(path=path).observe(count)
+    if count == 0:
+        recall_empty.labels(path=path, scoped=str(owner_scoped).lower()).inc()
+
 
 def track_http(method: str, endpoint: str, status: int, duration: float):
     http_requests.labels(method=method, endpoint=endpoint, status=str(status)).inc()

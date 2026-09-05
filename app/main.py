@@ -563,12 +563,20 @@ async def health():
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute("SELECT 1")
-            for layer, table in [
-                ("l1", "l1_raw_events"), ("l2", "l2_daily_buffers"),
-                ("l3_knowledge", "l3_master_knowledge"), ("l3_tools", "l3_tools_registry"),
-                ("l4", "l4_snapshots"),
+            # Считаем ЖИВЫЕ записи, а не все строки. У L3 мягкое удаление
+            # (effective_to), и без фильтра счётчик показывал вычищенное как
+            # действующее: на 17.08 инструментов 2959 против 157 настоящих,
+            # знаний 373 против 284. Эта же цифра уходит на главную страницу
+            # и в gauge cognitive_layer_records, то есть врал и мониторинг.
+            # У L1/L2/L4 мягкого удаления нет — там COUNT(*) верен.
+            for layer, table, only_active in [
+                ("l1", "l1_raw_events", False), ("l2", "l2_daily_buffers", False),
+                ("l3_knowledge", "l3_master_knowledge", True),
+                ("l3_tools", "l3_tools_registry", True),
+                ("l4", "l4_snapshots", False),
             ]:
-                count = await conn.fetchval(f"SELECT COUNT(*) FROM {table}")
+                where = " WHERE effective_to IS NULL" if only_active else ""
+                count = await conn.fetchval(f"SELECT COUNT(*) FROM {table}{where}")
                 update_layer_size(layer, "all", count or 0)
                 layers[layer] = count or 0
             db_size = await conn.fetchval("SELECT pg_database_size(current_database())")
