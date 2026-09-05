@@ -104,10 +104,10 @@ def _build_openapi_spec(base_url: str = "https://mcp.me-ai.ru") -> dict:
                 },
                 "RecallRequest": {
                     "type": "object",
-                    "required": ["query", "domain"],
+                    "required": ["query"],
                     "properties": {
                         "query": {"type": "string", "description": "Естественный язык — что ищем"},
-                        "domain": {"type": "string", "description": "Сужение по домену"},
+                        "domain": {"type": "string", "description": "Необязательно. Без него — поиск по доменам знаний."},
                         "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
                         "include_tools": {"type": "boolean", "default": True},
                     },
