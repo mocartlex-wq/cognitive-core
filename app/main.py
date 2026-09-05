@@ -101,9 +101,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_event("warn", "media_cleanup loop failed to start", error=str(e))
 
+    # Слушатель room_event для уведомлений. Событие шлёт триггер
+    # room_msg_notify, который стоит с апреля; сервис комнат не трогаем.
+    # Выключен целиком, если ключи VAPID не заданы.
+    try:
+        from app.api.push import start_room_listener
+        await start_room_listener()
+    except Exception as e:
+        log_event("warn", "push listener failed to start", error=str(e)[:200])
+
     log_event("info", "Cognitive Core ready")
     yield
 
+    try:
+        from app.api.push import stop_room_listener
+        await stop_room_listener()
+    except Exception:
+        pass
     if _outbox_publisher:
         await _outbox_publisher.stop()
     if _scheduler_task:
@@ -366,10 +380,12 @@ app.include_router(mcp_router)
 
 # Новые роутеры (2026-05-17): аккаунты + magic-link авторизация
 from app.api.auth import router as auth_router
+from app.api.push import router as push_router
 from app.api.user import router as user_router
 
 app.include_router(auth_router)
 app.include_router(user_router)
+app.include_router(push_router)
 
 # Frontend error reporter (2026-05-20): /api/errors POST/GET
 from app.api.docs_serve import router as docs_serve_router
@@ -450,6 +466,24 @@ async def room_page():
 async def profile_page():
     """Профиль — мои комнаты, помощники, устройства."""
     return _html("profile.html")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """Service worker с корня, а не из /static/.
+
+    Область действия воркера не может быть шире каталога, из которого он
+    отдан: с /static/sw.js он не покрыл бы ни /chat, ни уведомления. Поэтому
+    отдельный маршрут в корне плюс заголовок Service-Worker-Allowed.
+
+    no-store обязателен: браузер кэширует сам файл воркера, и без запрета
+    обновление приложения не доезжает до тех, у кого он уже установлен.
+    """
+    return FileResponse(
+        os.path.join(SANDBOX_DIR, "sw.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store", "Service-Worker-Allowed": "/"},
+    )
 
 
 @app.get("/chat")

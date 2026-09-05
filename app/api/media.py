@@ -52,6 +52,12 @@ MAX_AUDIO_SIZE_MB = 50    # аудио — обычно небольшие фа�
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus", ".webm"}
+# Без корректного типа браузер получает octet-stream и <audio> молча не играет.
+AUDIO_CONTENT_TYPE = {
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4", ".flac": "audio/flac", ".opus": "audio/ogg",
+    ".webm": "audio/webm",
+}
 # Документы: хранение + скачивание как есть (без анализа/фреймов/Whisper).
 # Composer комнаты шлёт их через upload_b64 kind=auto.
 ALLOWED_DOC_EXT = {
@@ -534,6 +540,25 @@ async def upload_audio(request: Request, file: UploadFile = File(...)):
             raise HTTPException(status_code=500,
                                 detail=f"анализ упал: {type(e).__name__}: {str(e)[:200]}")
 
+        # До этого голосовое существовало только как текст расшифровки: сам
+        # звук жил во временном каталоге и удалялся в finally. Слушать
+        # отправленное было нечем, а расшифровка Whisper — не оригинал: имена,
+        # цифры и интонацию она теряет молча.
+        audio_key = None
+        try:
+            _ensure_bucket()
+            audio_key = f"audio/{media_id}/{safe_name}"
+            get_s3().fput_object(
+                MEDIA_BUCKET, audio_key, tmp_path,
+                content_type=AUDIO_CONTENT_TYPE.get(ext, "application/octet-stream"),
+            )
+        except Exception as e:
+            # Расшифровка уже получена — терять её из-за недоступного хранилища
+            # нельзя. Возвращаем без ссылки, это честнее пятисотки.
+            audio_key = None
+            logger.warning("media.audio: сохранить звук не удалось media_id=%s err=%s",
+                           media_id, type(e).__name__)
+
         result = {
             "media_id": media_id,
             "kind": "audio",
@@ -542,6 +567,9 @@ async def upload_audio(request: Request, file: UploadFile = File(...)):
             "user_id": user.user_id,
             "uploaded_at": datetime.utcnow().isoformat(),
             "size_bytes": bytes_written,
+            "format": ext.lstrip("."),
+            "key": audio_key,
+            "url": f"/api/media/frame/{audio_key}" if audio_key else None,
             "duration_sec": analysis.get("duration_sec"),
             "transcript": analysis.get("transcript"),
             "language": analysis.get("language"),
@@ -592,7 +620,12 @@ async def get_frame(key: str):
         # документы: pdf/txt открываются inline в браузере, остальное — download
         "pdf": "application/pdf", "txt": "text/plain; charset=utf-8",
         "md": "text/plain; charset=utf-8", "csv": "text/csv; charset=utf-8",
-    }.get(ext, "application/octet-stream")
+    }.get(ext)
+    # Звук идёт через эту же раздачу, но карту типов держим ОДНУ: две
+    # независимые копии расходятся молча — приём начинает принимать формат,
+    # который раздача отдаёт как octet-stream, и плеер просто не играет.
+    if ctype is None:
+        ctype = AUDIO_CONTENT_TYPE.get("." + ext, "application/octet-stream")
 
     def _stream():
         try:
@@ -663,7 +696,7 @@ async def get_media_info(media_id: str):
         "width": p.get("width"),
         "height": p.get("height"),
         "format": p.get("format"),
-        "url": p.get("url"),  # для image
+        "url": p.get("url"),  # image, document, audio — единая ссылка на файл
     }
 
 

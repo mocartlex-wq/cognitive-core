@@ -38,3 +38,6 @@ cryptography>=42.0,<46.0
 # Пакет на PyPI — `nats-py`, импорт — `import nats`. Без него log flooded
 # с `module 'nats' has no attribute 'connect'` каждые 100мс. 2026-05-26.
 nats-py==2.9.*
+# Web Push (2026-08-23) — уведомление на телефон при закрытом приложении.
+# Синхронный, ходит в сеть: вызывается только через asyncio.to_thread.
+pywebpush==2.*

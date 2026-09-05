@@ -117,6 +117,11 @@
   .rlast{font-size:13.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
   .rrow.locked{opacity:.5}
   .rarr{flex:0 0 auto;color:var(--mut);font-size:20px}
+  .media-audio{display:block;width:100%;max-width:280px;height:36px;margin:2px 0}
+  .media-tr{font-size:13px;color:var(--mut);margin-top:4px;font-style:italic}
+  .rdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:#0a84ff;align-self:center}
+  .rrow.unread .rname{font-weight:650}
+  .rrow.unread .rlast{color:var(--fg)}
 
   /* ── Профиль ── */
   .pbody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px 14px}
@@ -269,6 +274,12 @@ async function hydrateMedia(span){
       span.innerHTML='<img class="media-img" loading="lazy" alt="'+H(name)+'">';
       const img=span.querySelector('img'); img.src=info.url;
       img.addEventListener('click',()=>window.open(info.url,'_blank','noopener'));
+    } else if(info.kind==='audio' && info.url){
+      // Сам звук, а не только его расшифровка: Whisper молча теряет имена,
+      // цифры и интонацию, и проверить его было нечем.
+      span.innerHTML='<audio class="media-audio" controls preload="none"></audio>'+
+        (info.transcript?'<div class="media-tr">'+H(info.transcript)+'</div>':'');
+      span.querySelector('audio').src=info.url;
     } else if(info.transcript){
       span.textContent='🎤 «'+info.transcript+'»';
     } else {
@@ -322,49 +333,60 @@ async function loadRooms(){
 }
 // Обычные комнаты (без служебной техподдержки).
 function realRooms(){ return rooms.filter(x=> x.id!==supportRoomId && (x.name||'').indexOf('🛟')!==0 && x.name!=='Техподдержка'); }
+// Прочитанность держим на устройстве: серверная потребовала бы таблицы
+// «кто что видел», а ради точки в списке миграция не окупается. Цена честная —
+// метка не переезжает между устройствами.
+function seenKey(id){ return 'cc_seen_'+id; }
+function markSeen(id, iso){ try{ localStorage.setItem(seenKey(id), iso||new Date().toISOString()); }catch(e){} }
+function isUnread(x){
+  const lm=x.last_message; if(!lm || isMe(lm.from_agent)) return false;
+  let seenIso=null; try{ seenIso=localStorage.getItem(seenKey(x.id)); }catch(e){}
+  if(!seenIso) return true;
+  return Date.parse(lm.created_at) > Date.parse(seenIso);
+}
+// Чистка текста для строки списка: медиа-маркеры и скрытая @-адресация
+// в превью выглядят мусором.
+function previewOf(lm){
+  const txt=(lm.text||'')
+    .replace(/\s*@dsdsd\b/gi,'')
+    .replace(/\(media:[a-f0-9-]{6,}\)/g,'📷')
+    .replace(/[📎🎤📷]\s*[^\n]*\.(png|jpe?g|webp|gif|pdf|webm)/gi,'📷 вложение')
+    .replace(/\n+/g,' ').trim();
+  return (isMe(lm.from_agent)?'Вы: ':'')+(txt||'вложение');
+}
 function renderRoomList(){
   const el = document.getElementById('rlist');
   const list = realRooms();
   if(!list.length){ el.innerHTML='<div class="empty">У тебя пока нет своих комнат.</div>'; return; }
-  el.innerHTML = list.map(x=>
-    `<div class="rrow" data-id="${x.id}" data-name="${H(x.name)}">
+  // Превью приходит вместе со списком (last_message). Раньше здесь стояла
+  // догрузка /detail по каждой комнате — N запросов ради одной строки текста,
+  // и ещё N в autoOpen на поиск доступной. Открытие /chat стоило до 2N.
+  el.innerHTML = list.map(x=>{
+    const lm=x.last_message, nw=isUnread(x);
+    return `<div class="rrow${nw?' unread':''}" data-id="${x.id}" data-name="${H(x.name)}">
        <div class="rav" style="background:linear-gradient(135deg,${colorFor(x.name)})">${H(initials(x.name))}</div>
        <div class="rmain">
-         <div class="rtop"><span class="rname">${H(x.name)}</span><span class="rtime"></span></div>
-         <div class="rlast">…</div>
+         <div class="rtop"><span class="rname">${H(x.name)}</span><span class="rtime">${lm?H(fmtShort(lm.created_at)):''}</span></div>
+         <div class="rlast">${lm?H(previewOf(lm)):'Пока пусто'}</div>
        </div>
-       <span class="rarr">›</span>
-     </div>`).join('');
+       <span class="${nw?'rdot':'rarr'}">${nw?'':'›'}</span>
+     </div>`;}).join('');
   el.querySelectorAll('.rrow').forEach(row=>row.addEventListener('click',()=>{
     openRoom(row.getAttribute('data-id'), row.getAttribute('data-name'));
   }));
-  hydrateRoomPreviews(list);
 }
-// Подтягиваем последнее сообщение + время в каждую строку списка; чужие (403) помечаем.
-async function hydrateRoomPreviews(list){
-  for(const x of list){
-    const row=document.querySelector(`.rrow[data-id="${x.id}"]`); if(!row) continue;
-    const lastEl=row.querySelector('.rlast'), timeEl=row.querySelector('.rtime');
-    try{
-      const r=await fetch(`/user/rooms/${x.id}/detail`, J);
-      if(!r.ok){ row.classList.add('locked'); if(lastEl) lastEl.textContent=(r.status===403?'Недоступна':'Ошибка '+r.status); continue; }
-      const d=await r.json(); const ms=d.messages||[]; const last=ms[ms.length-1];
-      if(last){
-        let txt=(last.text||'').replace(/\s*@dsdsd\b/gi,'').replace(/\(media:[a-f0-9-]{6,}\)/g,'📷').replace(/[📎🎤📷]\s*[^\n]*\.(png|jpe?g|webp|gif|pdf|webm)/gi,'📷 вложение').replace(/\n+/g,' ').trim();
-        if(lastEl) lastEl.textContent=(isMe(last.from_agent)?'Вы: ':'')+(txt||'вложение');
-        if(timeEl) timeEl.textContent=fmtShort(last.created_at);
-      } else if(lastEl) lastEl.textContent='Пока пусто';
-    }catch(e){}
-  }
-}
-// Открыть первую ДОСТУПНУЮ комнату (пропускаем те, что дают 403).
+// Открыть первую комнату. Проба запросом больше не нужна: список уже
+// отфильтрован по is_owner, а /detail требует ровно владения — 403 здесь
+// взяться неоткуда.
 async function autoOpen(){
-  for(const it of realRooms()){
-    try{ const r=await fetch(`/user/rooms/${it.id}/detail`, J);
-      if(r.ok){ setRoom(it.id, it.name); roomKey=null; paint(await r.json(), true); startLive(); return; } }catch(e){}
+  const first = realRooms()[0];
+  if(!first){
+    roomId=null;
+    log.innerHTML='<div class="empty">Нет доступных комнат для чтения. Открой свою в «Комнатах».</div>';
+    return;
   }
-  roomId=null;
-  log.innerHTML='<div class="empty">Нет доступных комнат для чтения. Открой свою в «Комнатах».</div>';
+  setRoom(first.id, first.name); roomKey=null;
+  await refresh(true); startLive();
 }
 function setRoom(id,name){
   roomId=id;
@@ -375,6 +397,7 @@ function setRoom(id,name){
 }
 async function openRoom(id,name){
   setRoom(id,name); go('vChat'); seen.clear(); roomKey=null; log.innerHTML='<div class="empty">Загрузка…</div>';
+  markSeen(id);
   await refresh(true); startLive();
 }
 
@@ -411,6 +434,9 @@ function paint(d, reset){
   let added=false; msgs.forEach(m=>{ if(render(m)) added=true; });
   if(!log.children.length) log.innerHTML='<div class="empty">Пока пусто — напиши первым</div>';
   if(added||reset) log.scrollTop=log.scrollHeight;
+  // Прочитано = показано. Ставим здесь, а не в openRoom: пока комната
+  // открыта, приходящие сообщения тоже прочитаны.
+  if(roomId && (added||reset)) markSeen(roomId);
 }
 let typingEl=null, typingTmr=null;
 function showTyping(){
@@ -545,6 +571,8 @@ function buildProfile(u){
        <div class="prow"><div class="pl"><span class="pic">🌙</span>Тёмная тема</div>
          <div class="toggle ${themeOn()?'':'on'}" id="rTheme"></div></div>
        ${installRow}
+       <div class="prow"><div class="pl"><span class="pic">🔔</span>Уведомления</div>
+         <div class="toggle" id="rPush"></div></div>
        <div class="prow"><div class="pl"><span class="pic">🔄</span>Версия</div>
          <span class="pval">${appVer?('v'+H(appVer)):'Cognitive Core'}</span></div>
      </div>
@@ -568,6 +596,11 @@ function buildProfile(u){
     if(isIOS){ alert('На iPhone: нажми «Поделиться» внизу Safari → «На экран „Домой“». Иконка появится как «Память».'); return; }
     alert('Открой этот адрес в Chrome (Android) или Safari (iPhone), затем установи из меню браузера.');
   });
+  // Уведомления. Три отдельных условия отказа, и каждое обязано быть видно:
+  // браузер не умеет, сервер без ключей, пользователь запретил. Без этого
+  // «не приходит» выглядит одинаково во всех трёх случаях.
+  const rp=document.getElementById('rPush');
+  if(rp) initPush(rp);
   // Аккаунт
   document.getElementById('rSwitch').addEventListener('click',async ()=>{
     if(!confirm('Выйти из текущего аккаунта и войти под другим?')) return;
@@ -706,6 +739,62 @@ async function openAddAgent(id, existing){
 
 /* ─── Старт ─── */
 applyTheme();
+/* ─── Уведомления ─── */
+function b64ToU8(b64){
+  // VAPID-ключ приходит в url-safe base64 без выравнивания, а atob хочет
+  // обычный с ним. Без этой правки подписка падает на InvalidCharacterError.
+  const pad='='.repeat((4-b64.length%4)%4);
+  const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function currentSub(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg=await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function initPush(el){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    el.classList.add('off'); el.title='Браузер не поддерживает уведомления'; return;
+  }
+  try{ el.classList.toggle('on', !!(await currentSub())); }catch(e){}
+  el.addEventListener('click',async ()=>{
+    try{
+      const sub=await currentSub();
+      if(sub){
+        await fetch('/push/unsubscribe',{...J,method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(subPayload(sub))});
+        await sub.unsubscribe(); el.classList.remove('on'); return;
+      }
+      const kr=await fetch('/push/vapid-public-key', J);
+      if(kr.status===503){ alert('Уведомления не настроены на сервере: нет ключей VAPID.'); return; }
+      if(!kr.ok){ alert('Не удалось получить ключ: '+kr.status); return; }
+      const perm=await Notification.requestPermission();
+      if(perm!=='granted'){ alert('Уведомления запрещены в настройках браузера.'); return; }
+      const reg=await navigator.serviceWorker.ready;
+      const ns=await reg.pushManager.subscribe({userVisibleOnly:true,
+        applicationServerKey:b64ToU8((await kr.json()).key)});
+      const r=await fetch('/push/subscribe',{...J,method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(subPayload(ns))});
+      if(!r.ok){ alert('Сервер не принял подписку: '+r.status); return; }
+      el.classList.add('on');
+      await fetch('/push/test',{...J,method:'POST'});
+    }catch(e){ alert('Не получилось: '+(e&&e.message||e)); }
+  });
+}
+function subPayload(sub){
+  const j=sub.toJSON();
+  return {endpoint:j.endpoint, p256dh:j.keys.p256dh, auth:j.keys.auth,
+          user_agent:(navigator.userAgent||'').slice(0,300)};
+}
+
+/* ─── Service worker ─── */
+// Регистрируем после загрузки, а не в разборе страницы: установка воркера
+// конкурирует с первыми запросами за соединения, и на телефоне это видно.
+// Ошибку глотаем молча — приложение обязано работать и без воркера.
+window.addEventListener('load',()=>{
+  if(!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(()=>{});
+});
 loadRooms();
 loadProfile();
 // Живая доставка идёт через startLive() (long-poll). Лёгкий страховочный refresh раз в 20с.
