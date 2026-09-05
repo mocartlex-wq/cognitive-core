@@ -1,0 +1,91 @@
+# ОБРАЗЕЦ. Живой файл — /opt/cognitive-core/docker-compose.override.yml, он в
+# .gitignore и существует только на сервере. Это его слепок на 05.09.2026,
+# снятый после того, как выяснилось: половина настройки brotli живёт вне git,
+# и потеря этого файла означает, что nginx не поднимется вовсе.
+#
+# Файл НЕ подхватывается автоматически — он именно образец. Восстанавливать
+# вручную, сверив с текущим состоянием, и вписать owner_user_id вместо
+# заглушки. Секретов здесь нет и быть не должно: GITHUB_PAT подставляется
+# из окружения.
+#
+# Рецепт сборки образа nginx-brotli — nginx/brotli/README.md.
+
+# MCP sidecar removed 2026-05-12: replaced by native /mcp/messages in cognitive_api
+services:
+
+  # nginx external server-blocks (added 2026-05-08 for ai-crm + future per-domain configs)
+  nginx:
+    # 04.09: образ той же версии 1.27.5, собранный официальным сборщиком nginx
+    # с модулем brotli. Обычный nginx:1.27-alpine модуля не содержит вовсе —
+    # директивы brotli в нём просто не существует, и сервер молча отдаёт
+    # несжатое (замер: 1481 КБ вместо 433 КБ на странице процессов).
+    # Откат: вернуть image: nginx:1.27-alpine и поднять сервис заново.
+    image: nginx-brotli:1.27-alpine
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # ACME webroot: nginx.conf уже отдаёт /.well-known/acme-challenge/ из
+      # /var/www/certbot, но каталог не был примонтирован — заготовку бросили
+      # на середине, и три серта год продлевали руками. Без этого тома
+      # certbot --webroot невозможен, а standalone не может занять :80
+      # (его держит docker-proxy под этим же nginx). Инцидент 2026-08-09.
+      - /var/www/certbot:/var/www/certbot:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Backup env override (added 2026-05-08): multi-DB list + retention 7d
+  # Effective once `docker compose up -d backup` recreates container.
+  # Script /scripts/cron-backup.sh (mounted, see prod compose) reads DBS_TO_BACKUP
+  # whitespace-separated. cognitive (DB_USER) is superuser → has CONNECT on ai_crm.
+  backup:
+    environment:
+      DBS_TO_BACKUP: "cognitive_core ai_crm ai_crm_staging"
+      RETENTION_DAYS: "30"
+
+  # Redis durability (2026-05-09 autonomous-impl Round 2): AOF persistence
+  # Без AOF при краше теряем все writes между snapshot интервалами (3600s/300s/60s).
+  # AOF appendfsync=everysec — потеря max 1s данных. Disk overhead ~10-30%.
+  redis:
+    command: >
+      redis-stack-server
+      --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
+      --save 3600 1 300 100 60 10000
+
+  # NATS WebSocket gateway (added 2026-05-09 for wake-on-message Variant 2)
+  # Reads config /etc/nats/nats.conf with websocket section port 8443
+  nats:
+    command: >
+      -c /etc/nats/nats.conf
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+    ports:
+      - "127.0.0.1:8443:8443"
+
+  # Compact-survival hardening (2026-05-13): 4 uvicorn workers + concurrency limit
+  # 1 worker single-threaded async could be wedged by hung DS calls. With 4 workers
+  # if one is busy hung others still serve /health, /agents/inbox, etc.
+  # --limit-concurrency 50 prevents queue buildup under extreme load.
+  api:
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0 --port 8000
+      --workers 4
+      --limit-concurrency 50
+      --timeout-keep-alive 30
+
+    # Deploy-admin (2026-07-06): позволяет cognitive_deploy_promote_branch мержить
+    # ветки в main через GitHub API по HTTPS (работа из любой сети без SSH/Chrome).
+    # owner_user_id агента dsdsd + переиспользуем существующий GITHUB_PAT.
+    environment:
+      COGCORE_DEPLOY_ADMIN_OWNER_IDS: "<owner_user_id владельца>"
+      COGCORE_DEPLOY_GITHUB_TOKEN: "${GITHUB_PAT:-}"
+
+    volumes:
+      - cognitive_fastembed_cache:/tmp/fastembed_cache
+
+volumes:
+  cognitive_fastembed_cache:
+    name: cognitive_fastembed_cache
