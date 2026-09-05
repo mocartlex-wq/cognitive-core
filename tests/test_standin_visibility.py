@@ -16,8 +16,8 @@
 """
 from __future__ import annotations
 
-import re
 import pathlib
+import re
 
 import pytest
 

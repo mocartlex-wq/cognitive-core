@@ -242,7 +242,7 @@ def test_schema_mirrors_the_migration():
     """
     init = (ROOT / "app" / "db" / "postgres.py").read_text(encoding="utf-8")
     mig = (ROOT / "alembic" / "versions"
-           / "20260823_1600_0022_push_subscriptions.py").read_text(encoding="utf-8")
+           / "20260823_1600_0023_push_subscriptions.py").read_text(encoding="utf-8")
     for frag in ("endpoint TEXT PRIMARY KEY", "user_id UUID NOT NULL",
                  "p256dh TEXT NOT NULL", "auth TEXT NOT NULL"):
         assert frag in init, f"нет в init_db: {frag}"
