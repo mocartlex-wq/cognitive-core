@@ -61,7 +61,7 @@ def upgrade() -> None:
           'platform',
           TRUE
         )
-        ON CONFLICT (owner_user_id, rule_id) DO NOTHING
+        ON CONFLICT DO NOTHING
     """)
 
 
