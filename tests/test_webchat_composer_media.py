@@ -118,5 +118,9 @@ class TestScriptParses:
         f = tmp_path / "t.js"
         # new Function, а не node --check: в скрипте страницы есть return верхнего уровня.
         f.write_text("new Function(" + json.dumps(body) + ");", encoding="utf-8")
-        r = subprocess.run(["node", str(f)], capture_output=True, text=True)
+        # encoding явно: на Windows text=True декодирует stdout/stderr кодировкой
+        # консоли (cp1251), и UTF-8 вывод node превращается в мусор — в stderr
+        # упавшего теста вместо сообщения был бы «РЅРµ ...».
+        r = subprocess.run(["node", str(f)], capture_output=True, text=True,
+                           encoding="utf-8")
         assert r.returncode == 0, r.stderr
