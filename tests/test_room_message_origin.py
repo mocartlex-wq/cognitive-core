@@ -68,7 +68,7 @@ def test_every_daemon_branch_names_its_model(daemon):
     assert len(calls) == 4, f"веток ответа в комнату стало {len(calls)}, ожидалось 4"
     # Аргумент model может стоять на следующей строке — берём вызов с продолжением.
     joined = src.replace("\n", " ")
-    for marker in ('model="auto_ack"', 'model="deepseek"', 'model="managed"', "model=model"):
+    for marker in ('model="auto_ack"', 'model="deepseek"', 'model=f"managed:', "model=model"):
         assert marker in joined, f"ветка без {marker}: её реплики будут помечены unknown"
 
 

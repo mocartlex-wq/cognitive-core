@@ -319,6 +319,34 @@ def tool_cognitive_recall(query: str, domain: str = "general") -> str:
     return json.dumps({"results": found[:5]}, ensure_ascii=False)[:2000]
 
 
+def tool_cognitive_remember(domain: str, task: str, result: str = "", lessons: str = "") -> str:
+    """Записать вывод в общую память владельца (L1 → консолидация в L3).
+
+    Одна память на весь флот держится на одном контракте записи: любой мозг
+    (DeepSeek, GPT, Claude через API) пишет через этот же инструмент тем же
+    ключом агента — owner-scoped. Писать стоит РЕЗУЛЬТАТ и ВЫВОД, не переписку:
+    heartbeat, пустые ack и пересказ вопроса — мусор для консолидатора."""
+    key = resolve_agent_key(_CURRENT_AGENT) if _CURRENT_AGENT else None
+    if not key:
+        return f"ERROR: не найден API-ключ агента {_CURRENT_AGENT or '?'} — запись невозможна"
+    domain = (domain or "").strip()
+    if not re.match(r"^[a-z0-9_\-]{2,48}$", domain):
+        return "ERROR: domain — латиница/цифры/подчёркивание, 2-48 символов (например work_journal)"
+    if not (task or "").strip():
+        return "ERROR: task обязателен"
+    payload = {"task": task[:2000], "result": (result or "")[:4000], "lessons": (lessons or "")[:2000]}
+    try:
+        d = http_post(f"{ENDPOINT}/events",
+                      {"source_agent": _CURRENT_AGENT, "domain": domain, "payload": payload},
+                      headers={"X-API-Key": key}, timeout=15)
+        return f"Записано в память: domain={domain}, id={str(d.get('id') or d.get('event_id') or '?')[:8]}"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:200] if e.fp else ""
+        return f"ERROR: память ответила HTTP {e.code}: {body}"
+    except Exception as e:
+        return f"ERROR: запись не удалась: {e}"
+
+
 def tool_uptime_loadavg() -> str:
     """System uptime + load averages."""
     return _run(["uptime"])
@@ -623,6 +651,25 @@ TOOL_REGISTRY = {
                     "domain": {"type": "string", "default": "general"},
                 },
                 "required": ["query"],
+            },
+        },
+    }),
+    "cognitive_remember": (tool_cognitive_remember, {
+        "type": "function",
+        "function": {
+            "name": "cognitive_remember",
+            "description": ("Save a RESULT or LESSON to the owner's shared memory (all agents of the "
+                            "owner read it via cognitive_recall). Use for outcomes and conclusions, "
+                            "never for chatter, acks or restating the question."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "domain": {"type": "string", "description": "project domain, e.g. work_journal, crm, cognitive_core"},
+                    "task": {"type": "string"},
+                    "result": {"type": "string"},
+                    "lessons": {"type": "string"},
+                },
+                "required": ["domain", "task"],
             },
         },
     }),
@@ -979,7 +1026,9 @@ def default_persona(agent_id, label):
         "active": True,
         "triggers": [{"pattern": r"\S", "action": "llm_reply", "priority": 50}],
         "poll_interval_seconds": DEFAULT_POLL_SEC,
-        "allowed_tools": ["cognitive_recall"],
+        # Одна память на весь флот: читать И писать может любой мозг агента
+        # (DeepSeek / GPT / Claude) — тем же ключом, теми же двумя инструментами.
+        "allowed_tools": ["cognitive_recall", "cognitive_remember"],
         "auto_ack_template": f"{name}: на связи (отвечаю вместо Claude — он сейчас офлайн).",
         "llm_settings": {
             "model": "deepseek-chat",
@@ -990,7 +1039,11 @@ def default_persona(agent_id, label):
                 f"комнатах 24/7, ПОКА его основной агент Claude офлайн. Отвечай кратко, "
                 f"по делу, на русском. Если вопрос требует контекста о проектах и делах "
                 f"владельца — ВЫЗОВИ инструмент cognitive_recall и опирайся на найденную "
-                f"память. Не выдумывай факты: если в памяти нет — честно скажи об этом."
+                f"память. Не выдумывай факты: если в памяти нет — честно скажи об этом. "
+                f"Если в разговоре получен РЕЗУЛЬТАТ или ВЫВОД, который пригодится потом "
+                f"(решение, договорённость, найденная причина) — сохрани его через "
+                f"cognitive_remember с доменом проекта. Переписку, приветствия и пересказ "
+                f"вопроса НЕ сохраняй."
             ),
         },
     }
@@ -1288,23 +1341,93 @@ def match_trigger(text, triggers):
     return None
 
 
-def deepseek_reply_with_tools(persona, message):
-    """Phase 2: DeepSeek function calling. Up to 3 tool iterations, then final reply."""
-    api_key = DS_ENV.get("DEEPSEEK_API_KEY")
-    base_url = DS_ENV.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    if not api_key:
-        return None
+ROOM_CONTEXT_MESSAGES = int(os.environ.get("COGCORE_ROOM_CONTEXT_MESSAGES", "12"))
 
-    llm = persona.get("llm_settings", {})
-    sys_prompt = llm.get("system_prompt", "Reply briefly in Russian.")
-    sys_prompt += (
-        "\n\nYou have access to tools for FACTUAL information. "
+
+def room_recent_context(msg, limit=ROOM_CONTEXT_MESSAGES):
+    """Последние сообщения комнаты — контекст для мозга любого канала.
+
+    До 2026-09-05 managed/custom_llm видели ОДНО сообщение без истории и
+    отвечали «с чистого листа»; DeepSeek-персона — тоже. Берём хвост через
+    rooms API тем же ключом комнаты, что и post_to_room. Best-effort: пусто —
+    отвечаем без контекста."""
+    room_id = room_ctx(msg)
+    if not room_id:
+        return ""
+    try:
+        key = resolve_room_key(room_id)
+        if not key:
+            return ""
+        d = http_get(f"{ENDPOINT}/rooms/{room_id}/messages?limit={int(limit)}",
+                     headers={"X-Room-Key": key}, timeout=10)
+        items = d.get("messages") or []
+    except Exception as e:
+        log.debug(f"room_recent_context failed for {room_id}: {e}")
+        return ""
+    cur_id = str(msg.get("id") or "")
+    lines = []
+    for m in items:
+        if str(m.get("id") or "") == cur_id:
+            continue
+        who = m.get("display_name") or m.get("from_agent") or "?"
+        text = (m.get("text") or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        ts = (m.get("created_at") or "")[11:16]
+        lines.append(f"[{ts}] {who}: {text[:400]}")
+    if not lines:
+        return ""
+    return "Последние сообщения комнаты (старые → новые):\n" + "\n".join(lines[-limit:])
+
+
+def _tools_hint():
+    return (
+        "\n\nYou have access to tools for FACTUAL information and for the owner's shared memory. "
         "ALWAYS call relevant tools first if user asks about current state of disk, memory, "
-        "containers, logs, database, git, blackboard, etc. "
+        "containers, logs, database, git, blackboard, etc. Use cognitive_recall for the owner's "
+        "projects/decisions; use cognitive_remember ONLY to save a real result or lesson. "
         "After collecting tool results, synthesize a concise answer in Russian. "
         "Cite tool output verbatim when stating facts. "
         "If no tool fits — reply briefly without inventing data."
     )
+
+
+def _inbound_body(message):
+    """Текст входящего с честной пометкой об обрезке (см. MAX_INBOUND_CHARS)."""
+    raw_text = message.get("text", "") or ""
+    if len(raw_text) > MAX_INBOUND_CHARS:
+        return (
+            raw_text[:MAX_INBOUND_CHARS]
+            + f"\n\n[ВНИМАНИЕ: сообщение обрезано, показано {MAX_INBOUND_CHARS} "
+              f"символов из {len(raw_text)}. Ты видишь НЕ ВСЁ. Не отвечай так, "
+              f"будто прочитал целиком: скажи, что видел только начало, и "
+              f"попроси прислать остаток частями.]"
+        )
+    return raw_text
+
+
+def deepseek_reply_with_tools(persona, message):
+    """DeepSeek-персона: тот же общий цикл, провайдер — DeepSeek из env api."""
+    api_key = DS_ENV.get("DEEPSEEK_API_KEY")
+    base_url = DS_ENV.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    if not api_key:
+        return None
+    llm = persona.get("llm_settings", {})
+    return openai_reply_with_tools(persona, message, base_url=base_url, api_key=api_key,
+                                   model=llm.get("model", "deepseek-chat"), label="deepseek")
+
+
+def openai_reply_with_tools(persona, message, *, base_url, api_key, model, label="llm"):
+    """Единый инструментный цикл для ЛЮБОГО OpenAI-совместимого провайдера
+    (DeepSeek, GPT через ProxyAPI, Mistral, Ollama…): до MAX_TOOL_CALLS_PER_REPLY
+    вызовов инструментов, затем финальный ответ. До 2026-09-05 этот цикл был
+    только у DeepSeek-персоны, а custom_llm отвечал одним ходом без инструментов
+    и без истории комнаты — «одна память на все мозги» не работала."""
+    base_url = (base_url or "").rstrip("/")
+    if base_url.endswith("/chat/completions"):
+        base_url = base_url[: -len("/chat/completions")]
+    llm = persona.get("llm_settings", {})
+    sys_prompt = llm.get("system_prompt", "Reply briefly in Russian.") + _tools_hint()
 
     # Заместитель видел только первые 2000 символов ЛЮБОГО сообщения и отвечал
     # так, будто прочитал всё. 2026-08-15 на этом сорвался разбор конфигурации:
@@ -1312,20 +1435,13 @@ def deepseek_reply_with_tools(persona, message):
     # уверенный ответ по половине. Молчаливое усечение — тот же класс отказа,
     # что и молчаливая деградация: снаружи неотличимо от полного прочтения.
     #
-    # Потолок поднят, а главное — про обрезку теперь СКАЗАНО в самом запросе,
-    # чтобы модель не выдавала частичное понимание за полное.
-    raw_text = message.get("text", "") or ""
-    if len(raw_text) > MAX_INBOUND_CHARS:
-        body = (
-            raw_text[:MAX_INBOUND_CHARS]
-            + f"\n\n[ВНИМАНИЕ: сообщение обрезано, показано {MAX_INBOUND_CHARS} "
-              f"символов из {len(raw_text)}. Ты видишь НЕ ВСЁ. Не отвечай так, "
-              f"будто прочитал целиком: скажи, что видел только начало, и "
-              f"попроси прислать остаток частями.]"
-        )
-    else:
-        body = raw_text
+    # Потолок поднят, а главное — про обрезку теперь СКАЗАНО в самом запросе
+    # (_inbound_body), чтобы модель не выдавала частичное понимание за полное.
+    body = _inbound_body(message)
     user_msg = f"From {message.get('from', '?')}: {body}"
+    ctx = room_recent_context(message)
+    if ctx:
+        user_msg = ctx + "\n\nНовое сообщение, на которое нужно ответить:\n" + user_msg
     msgs = [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_msg},
@@ -1337,7 +1453,7 @@ def deepseek_reply_with_tools(persona, message):
 
     for iteration in range(MAX_TOOL_CALLS_PER_REPLY + 1):
         payload = {
-            "model": llm.get("model", "deepseek-chat"),
+            "model": model,
             "messages": msgs,
             "max_tokens": llm.get("max_tokens", 800),
             "temperature": llm.get("temperature", 0.3),
@@ -1356,11 +1472,11 @@ def deepseek_reply_with_tools(persona, message):
             )
         except urllib.error.HTTPError as e:
             body = e.read().decode()[:300] if e.fp else ""
-            log.error(f"deepseek HTTP {e.code}: {body}")
+            log.error(f"{label} HTTP {e.code}: {body}")
             # Schema error → break to finalize fallback
             break
         except Exception as e:
-            log.error(f"deepseek call failed: {e}")
+            log.error(f"{label} call failed: {e}")
             break
 
         choice = d["choices"][0]
@@ -1435,7 +1551,7 @@ def deepseek_reply_with_tools(persona, message):
         d = http_post(
             f"{base_url}/chat/completions",
             {
-                "model": llm.get("model", "deepseek-chat"),
+                "model": model,
                 "messages": finalize_msgs,
                 "max_tokens": llm.get("max_tokens", 800),
                 "temperature": 0.2,
@@ -1447,6 +1563,125 @@ def deepseek_reply_with_tools(persona, message):
     except Exception as e:
         log.error(f"finalize call failed: {e}")
         return f"(tool data collected but finalize failed: {e})"
+
+
+# === Настоящий Claude через Anthropic Messages API — с теми же инструментами ===
+# Модели Claude 5 (сентябрь 2026): claude-sonnet-5 — рабочая лошадка чата,
+# claude-haiku-4-5 — дешёвый запасной. Прежний дефолт claude-3-5-sonnet-20241022
+# снят с производства — канал managed падал бы на каждом обращении.
+ANTHROPIC_DEFAULT_MODEL = os.environ.get("COGCORE_MANAGED_MODEL", "claude-sonnet-5")
+ANTHROPIC_FALLBACK_MODEL = os.environ.get("COGCORE_MANAGED_FALLBACK_MODEL", "claude-haiku-4-5")
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+
+
+def _anthropic_tools(schema_list):
+    """OpenAI function-schema → Anthropic tool-schema (input_schema)."""
+    out = []
+    for t in schema_list or []:
+        f = t.get("function") or {}
+        if not f.get("name"):
+            continue
+        out.append({
+            "name": f["name"],
+            "description": f.get("description", ""),
+            "input_schema": f.get("parameters") or {"type": "object", "properties": {}},
+        })
+    return out
+
+
+def _anthropic_post(payload, api_key, timeout=60):
+    req = urllib.request.Request(ANTHROPIC_URL, data=json.dumps(payload).encode("utf-8"), method="POST")
+    req.add_header("x-api-key", api_key)
+    req.add_header("anthropic-version", "2023-06-01")
+    req.add_header("content-type", "application/json")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def anthropic_reply_with_tools(persona, message, *, api_key, model=None, label="managed"):
+    """Тот же инструментный цикл, что openai_reply_with_tools, но в формате
+    Anthropic (tool_use / tool_result). Возвращает текст ответа или None."""
+    global _CURRENT_AGENT
+    pid = persona["persona_id"]
+    model = model or ANTHROPIC_DEFAULT_MODEL
+    llm = persona.get("llm_settings", {})
+    sys_prompt = llm.get("system_prompt", "Ты ассистент владельца. Ответь кратко и по делу на русском.") + _tools_hint()
+    user_msg = f"From {message.get('from', '?')}: {_inbound_body(message)}"
+    ctx = room_recent_context(message)
+    if ctx:
+        user_msg = ctx + "\n\nНовое сообщение, на которое нужно ответить:\n" + user_msg
+    tools = _anthropic_tools(get_tools_for_persona(persona))
+    msgs = [{"role": "user", "content": user_msg}]
+    calls = 0
+    results_log = []
+    tried_fallback = False
+    for _ in range(MAX_TOOL_CALLS_PER_REPLY + 1):
+        payload = {
+            "model": model,
+            "max_tokens": llm.get("max_tokens", 1024),
+            "system": sys_prompt,
+            "messages": msgs,
+        }
+        if tools and calls < MAX_TOOL_CALLS_PER_REPLY:
+            payload["tools"] = tools
+        try:
+            d = _anthropic_post(payload, api_key)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()[:300] if e.fp else ""
+            log.error(f"[{pid}] {label} {model} HTTP {e.code}: {body}")
+            # Модель снята / недоступна — один раз пробуем запасную.
+            if e.code in (400, 404) and "model" in body.lower() and not tried_fallback \
+                    and model != ANTHROPIC_FALLBACK_MODEL:
+                tried_fallback = True
+                model = ANTHROPIC_FALLBACK_MODEL
+                log.warning(f"[{pid}] {label}: переключаюсь на запасную модель {model}")
+                continue
+            break
+        except Exception as e:
+            log.error(f"[{pid}] {label} call failed: {e}")
+            break
+        content = d.get("content") or []
+        tool_uses = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
+        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        if d.get("stop_reason") == "tool_use" and tool_uses:
+            msgs.append({"role": "assistant", "content": content})
+            results = []
+            for b in tool_uses:
+                tname, targs = b.get("name"), b.get("input") or {}
+                if calls < MAX_TOOL_CALLS_PER_REPLY:
+                    calls += 1
+                    log.info(f"[{pid}] TOOL_CALL #{calls} {tname}({targs}) via {label}")
+                    _CURRENT_AGENT = pid
+                    try:
+                        result = execute_tool(tname, targs)
+                    finally:
+                        _CURRENT_AGENT = None
+                    results_log.append(f"--- {tname}({targs}) ---\n{result[:1500]}")
+                else:
+                    result = ("Пропущено: исчерпан лимит вызовов инструментов на один ответ. "
+                              "Отвечай по тому, что уже получено.")
+                results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": result[:1500]})
+            msgs.append({"role": "user", "content": results})
+            continue
+        reply = "".join(texts).strip()
+        if reply:
+            return reply
+        break
+    if not results_log:
+        return None
+    # Финализация без инструментов — как в openai-цикле.
+    try:
+        d = _anthropic_post({
+            "model": model, "max_tokens": llm.get("max_tokens", 1024),
+            "system": sys_prompt + "\n\nTool results below. Synthesize a SHORT user-facing answer in Russian.",
+            "messages": [{"role": "user", "content": user_msg + "\n\nTool results collected:\n\n"
+                          + "\n\n".join(results_log)[:5000] + "\n\nNow write the final answer."}],
+        }, api_key)
+        texts = [b.get("text", "") for b in (d.get("content") or []) if isinstance(b, dict)]
+        return "".join(texts).strip() or None
+    except Exception as e:
+        log.error(f"[{pid}] {label} finalize failed: {e}")
+        return None
 
 
 class HistoryStore:
@@ -1629,6 +1864,11 @@ def handle_cloud_routine(persona, msg, history):
     room_id = room_ctx(msg)
     sender = extract_real_sender(msg) or "owner"
     text = msg.get("text", "")
+    # ⚠️ Routines (2026): текст /fire приходит в сессию как НЕДОВЕРЕННЫЙ блок
+    # <routine-fire-payload>. Claude действует по нему, только если сохранённый
+    # промпт рутины явно говорит «выполняй просьбу из routine-fire-payload».
+    # Без этого рутина молча игнорирует сообщение — проверь промпт в
+    # claude.ai/code/routines, демон это исправить не может.
     fired_text = (
         f"Тебе ({pid}) написал {sender} в комнате Cognitive Core (room_id={room_id}). "
         f"Ответь по делу на русском. Нужен контекст про дела владельца — вызови "
@@ -1646,6 +1886,13 @@ def handle_cloud_routine(persona, msg, history):
             d = json.loads(resp.read().decode())
         sid = d.get("claude_code_session_id") or d.get("session_id") or "fired"
         log.info(f"[{pid}] CLOUD_ROUTINE fired -> session={sid} room={room_id}")
+        # Не fire-and-forget: запоминаем, чего ждём. check_routine_timeouts
+        # даст запасной ответ, если облачная сессия так и не написала в комнату.
+        if history is not None and msg.get("id"):
+            history.data.setdefault("routine_pending", {})[str(msg["id"])] = {
+                "fired_at": time.time(), "session": sid,
+                "msg": {k: msg.get(k) for k in ("id", "from", "text", "context")},
+            }
         return sid
     except urllib.error.HTTPError as e:
         b = e.read().decode()[:200] if e.fp else ""
@@ -1654,6 +1901,47 @@ def handle_cloud_routine(persona, msg, history):
     except Exception as e:
         log.error(f"[{pid}] claude_routine fire failed: {e} -> fallback deepseek")
         return None
+
+
+ROUTINE_REPLY_TIMEOUT_SEC = int(os.environ.get("COGCORE_ROUTINE_REPLY_TIMEOUT_SEC", "240"))
+
+
+def check_routine_timeouts(persona, history):
+    """Облачная рутина не ответила за ROUTINE_REPLY_TIMEOUT_SEC → запасной ответ.
+
+    Раньше claude_routine был fire-and-forget: сессия зависла, не увидела payload
+    (см. handle_cloud_routine) или исчерпала дневной лимит — владелец ждал
+    молча. Ответила ли она, проверяем по живому посту агента в комнате после
+    выстрела (live_agent_active отличает свои посты от чужих)."""
+    pending = history.data.get("routine_pending") or {}
+    if not pending:
+        return 0
+    pid = persona["persona_id"]
+    now = time.time()
+    fallbacks = 0
+    for mid, entry in list(pending.items()):
+        age = now - float(entry.get("fired_at") or 0)
+        if age < ROUTINE_REPLY_TIMEOUT_SEC:
+            continue
+        msg = entry.get("msg") or {}
+        room_id = room_ctx(msg)
+        answered = bool(room_id) and live_agent_active(pid, room_id, history, window_sec=int(age) + 60)
+        pending.pop(mid, None)
+        if answered:
+            log.info(f"[{pid}] routine session {entry.get('session')} ответила сама (msg={mid[:8]})")
+            continue
+        log.warning(f"[{pid}] routine session {entry.get('session')} не ответила за {int(age)}s "
+                    f"(msg={mid[:8]}) — запасной ответ через managed/deepseek")
+        # Настоящий Claude по API, если ключ есть, иначе — DeepSeek-персона.
+        sent = None
+        if (persona.get("channel_config") or {}).get("api_key"):
+            sent = handle_managed(persona, msg, history)
+        if sent is None:
+            sent = handle_llm_reply(persona, msg, history)
+        if sent:
+            history.record_reply(sent, parent_id=mid)
+            fallbacks += 1
+    return fallbacks
 
 
 def handle_managed(persona, msg, history):
@@ -1670,48 +1958,22 @@ def handle_managed(persona, msg, history):
     if not api_key:
         log.warning(f"[{pid}] managed: no api_key -> fallback deepseek")
         return None
-    model = cfg.get("model", "claude-3-5-sonnet-20241022")
+    model = cfg.get("model") or ANTHROPIC_DEFAULT_MODEL
+    # 2026-09-05: раньше — один ход, без истории комнаты, БЕЗ инструментов и на
+    # снятой модели. Теперь тот же цикл с cognitive_recall/remember, что у всех.
+    reply = anthropic_reply_with_tools(persona, msg, api_key=api_key, model=model, label="managed")
+    if not reply:
+        log.warning(f"[{pid}] managed: empty reply -> fallback deepseek")
+        return None
     sender = extract_real_sender(msg) or "owner"
-    text = msg.get("text", "")
-    sys_prompt = (persona.get("llm_settings") or {}).get(
-        "system_prompt", "Ты ассистент владельца. Ответь кратко и по делу на русском.")
-    try:
-        body = json.dumps({
-            "model": model,
-            "max_tokens": 1024,
-            "system": sys_prompt,
-            "messages": [{"role": "user", "content": text}],
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages", data=body, method="POST")
-        req.add_header("x-api-key", api_key)
-        req.add_header("anthropic-version", "2023-06-01")
-        req.add_header("content-type", "application/json")
-        with urllib.request.urlopen(req, timeout=40) as resp:
-            d = json.loads(resp.read().decode())
-        parts = d.get("content") or []
-        reply = "".join(
-            p.get("text", "") for p in parts if isinstance(p, dict)).strip()
-        if not reply:
-            log.warning(f"[{pid}] managed: empty reply -> fallback deepseek")
-            return None
-        # No auto-reply marker — the agent answers in its own voice (anti-loop via
-        # @-mention-only bridging + loop_depth).
-        room_id = room_ctx(msg)
-        if room_id:
-            sid = post_to_room(room_id, pid, reply, history, model="managed")
-            log.info(f"[{pid}] MANAGED(room) -> {room_id} ({len(reply)} chars) reply={sid[:8] if sid else '?'}")
-            return sid
-        sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
-        log.info(f"[{pid}] MANAGED(dm) -> {sender} reply={sid[:8] if sid else '?'}")
+    room_id = room_ctx(msg)
+    if room_id:
+        sid = post_to_room(room_id, pid, reply, history, model=f"managed:{model}")
+        log.info(f"[{pid}] MANAGED(room) -> {room_id} ({len(reply)} chars) reply={sid[:8] if sid else '?'}")
         return sid
-    except urllib.error.HTTPError as e:
-        b = e.read().decode()[:200] if e.fp else ""
-        log.error(f"[{pid}] managed Claude API HTTP {e.code} {b} -> fallback deepseek")
-        return None
-    except Exception as e:
-        log.error(f"[{pid}] managed failed: {e} -> fallback deepseek")
-        return None
+    sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
+    log.info(f"[{pid}] MANAGED(dm) -> {sender} reply={sid[:8] if sid else '?'}")
+    return sid
 
 
 def handle_custom_llm(persona, msg, history):
@@ -1723,51 +1985,28 @@ def handle_custom_llm(persona, msg, history):
     pid = persona["persona_id"]
     cfg = persona.get("channel_config") or {}
     base_url = (cfg.get("base_url") or "").rstrip("/")
-    api_key = cfg.get("api_key") or cfg.get("key")
+    api_key = cfg.get("api_key") or cfg.get("key") or ""
     model = cfg.get("model")
     if not base_url or not model:
         log.warning(f"[{pid}] custom_llm: no base_url/model -> fallback deepseek")
         return None
-    url = base_url if base_url.endswith("/chat/completions") else base_url + "/chat/completions"
-    text = msg.get("text", "")
+    # 2026-09-05: раньше — один ход без истории комнаты и без инструментов.
+    # Теперь общий цикл: GPT/DeepSeek/любой OpenAI-совместимый провайдер читает
+    # и пишет ту же owner-scoped память, что и остальные каналы.
+    reply = openai_reply_with_tools(persona, msg, base_url=base_url, api_key=api_key,
+                                    model=model, label=f"custom_llm:{model}")
+    if not reply or reply == "(no reply)":
+        log.warning(f"[{pid}] custom_llm: empty reply -> fallback deepseek")
+        return None
     sender = extract_real_sender(msg) or "owner"
-    sys_prompt = (persona.get("llm_settings") or {}).get(
-        "system_prompt", "Ты ассистент владельца. Ответь кратко и по делу на русском.")
-    try:
-        body = json.dumps({
-            "model": model,
-            "max_tokens": 800,
-            "messages": [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": text},
-            ],
-        }).encode("utf-8")
-        req = urllib.request.Request(url, data=body, method="POST")
-        if api_key:
-            req.add_header("Authorization", f"Bearer {api_key}")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            d = json.loads(resp.read().decode())
-        reply = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
-        if not reply:
-            log.warning(f"[{pid}] custom_llm: empty reply -> fallback deepseek")
-            return None
-        # No auto-reply marker — agent answers in its own voice.
-        room_id = room_ctx(msg)
-        if room_id:
-            sid = post_to_room(room_id, pid, reply, history, model=model)
-            log.info(f"[{pid}] CUSTOM_LLM(room) -> {room_id} model={model} ({len(reply)}ch) reply={sid[:8] if sid else '?'}")
-            return sid
-        sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
-        log.info(f"[{pid}] CUSTOM_LLM(dm) -> {sender} model={model} reply={sid[:8] if sid else '?'}")
+    room_id = room_ctx(msg)
+    if room_id:
+        sid = post_to_room(room_id, pid, reply, history, model=model)
+        log.info(f"[{pid}] CUSTOM_LLM(room) -> {room_id} model={model} ({len(reply)}ch) reply={sid[:8] if sid else '?'}")
         return sid
-    except urllib.error.HTTPError as e:
-        b = e.read().decode()[:200] if e.fp else ""
-        log.error(f"[{pid}] custom_llm HTTP {e.code} {b} -> fallback deepseek")
-        return None
-    except Exception as e:
-        log.error(f"[{pid}] custom_llm failed: {e} -> fallback deepseek")
-        return None
+    sid = send_dm(pid, sender, reply, parent_id=msg.get("id"))
+    log.info(f"[{pid}] CUSTOM_LLM(dm) -> {sender} model={model} reply={sid[:8] if sid else '?'}")
+    return sid
 
 
 def handle_webhook(persona, msg, history):
@@ -1822,6 +2061,10 @@ ACTION_HANDLERS = {
 def process_persona(persona):
     pid = persona["persona_id"]
     history = HistoryStore(pid)
+    try:
+        check_routine_timeouts(persona, history)
+    except Exception as e:
+        log.warning(f"[{pid}] routine timeout check failed: {e}")
     msgs = load_inbox(pid, since_minutes=60)
     new_count = 0
     for msg in msgs:
