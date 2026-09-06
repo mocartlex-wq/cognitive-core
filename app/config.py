@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     retention_unprocessed_days: int = 90
     daily_hours: int = 24
     weekly_days: int = 7
+    # Догоняющее окно для weekly. Куратор считает повторяемость по тем буферам,
+    # что ему дали; при окне в 7 дней домен, роняющий буфер раз в месяц, всегда
+    # выглядит как «один буфер» и в L3 не попадает никогда. Берётся ТОЛЬКО когда
+    # в обычном окне материала меньше, чем нужно на повтор (env WEEKLY_BACKFILL_DAYS).
+    weekly_backfill_days: int = 90
 
     # LLM circuit breaker (per provider+model)
     llm_circuit_threshold: int = 3   # consecutive failures to trip OPEN
