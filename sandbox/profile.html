@@ -11,6 +11,10 @@
 <link rel="stylesheet" href="/static/shared.css?v=20260520j">
 <link rel="stylesheet" href="/static/glass.css?v=20260613">
 <style>
+  /* Выпадающие списки: сам <select> тёмный, но раскрытый список Chrome рисует
+     на светлой системной подложке, а цвет текста наследует белый — владелец
+     06.09 увидел пустые строки с одними иконками. Пунктам задаём явные цвета. */
+  select option{color:#111;background:#fff}
   html, body { background: var(--glass-base-bg) !important; color: var(--glass-text) !important; }
   body { min-height: 100vh; }
 
