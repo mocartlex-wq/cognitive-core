@@ -335,8 +335,15 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
     index_result = await index_domain_vectors(domain)
 
     ok = [r for r in per_owner if r.get("status") == "consolidated"]
+    # Сбои куратора собираем отдельно: они не мешают статусу, но по ним видно,
+    # что домен остался без L3 из-за недоступной LLM, а не по существу.
+    curator_errors = [
+        {"owner": r.get("owner"), "error": r["curator_error"]}
+        for r in per_owner if r.get("curator_error")
+    ]
     return {
         "status": "consolidated" if ok else "no_buffers",
+        "curator_errors": curator_errors,
         "owners": per_owner,
         "new_items": sum(r.get("new_items", 0) for r in ok),
         "deprecated": sum(r.get("deprecated", 0) for r in ok),
@@ -486,6 +493,9 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
         "deprecated": len(synthesis.get("deprecated_l3_ids", [])),
         "tools_added": len(synthesis.get("tools", [])),
         "quality": quality,
+        # Наверх, а не только внутрь quality: сбой куратора должен быть виден
+        # без раскопок, иначе «LLM не ответил» читается как «нечего продвигать».
+        "curator_error": (quality or {}).get("curator_error"),
     }
 
 
