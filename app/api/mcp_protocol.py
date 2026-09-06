@@ -532,6 +532,12 @@ class JsonRpcRequest(BaseModel):
     params: dict[str, Any] | list[Any] | None = None
 
 
+# Версии протокола, которые сервер умеет отдавать в initialize. Порядок —
+# от старой к новой; DEFAULT — для клиентов, которые версию не назвали.
+SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
+DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+
+
 def _ok(req_id: Any, result: Any) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
@@ -684,8 +690,10 @@ async def _resolve_agent_full(request: Request) -> tuple[str, str | None]:
     """Резолвит api_key в (agent_id, owner_user_id). Кеширует в request.state
     чтобы не дёргать БД повторно на цепочке tool-вызовов одного request'а.
 
-    owner_user_id может быть None для legacy env-агентов (admin-pre-provisioned).
-    Для UI-созданных через /user/agents/create или claim-wizard — всегда есть.
+    owner_user_id: для env-агентов (AGENT_API_KEYS) — settings.cogcore_admin_owner_user_id
+    или None (admin-режим, config-provisioned секрет). Для ключей из БД владелец
+    ОБЯЗАТЕЛЕН: NULL → ValueError (до 2026-09-05 NULL = admin, чем и была дыра
+    открытого /agents/register).
     """
     cached = getattr(request.state, "_resolved_agent", None)
     if cached is not None:
@@ -695,12 +703,12 @@ async def _resolve_agent_full(request: Request) -> tuple[str, str | None]:
     if not api_key:
         raise ValueError("X-API-Key header required (set in MCP client config or curl -H 'X-API-Key: ...')")
 
-    # 1. Static env JSON (быстрый lookup, admin-pre-provisioned ключи —
-    #    owner_user_id у них None — это owner-уровень доступа).
+    # 1. Static env JSON (быстрый lookup, config-provisioned ключи).
     keys = _load_keys()
     for agent_id, key in keys.items():
         if key == api_key:
-            result = (agent_id, None)
+            from app.security.owner import env_agent_owner
+            result = (agent_id, env_agent_owner())
             request.state._resolved_agent = result
             return result
 
@@ -715,9 +723,14 @@ async def _resolve_agent_full(request: Request) -> tuple[str, str | None]:
                 api_key,
             )
         if row:
+            if not row["owner_user_id"]:
+                from app.security.owner import ORPHAN_KEY_DETAIL
+                raise ValueError(ORPHAN_KEY_DETAIL)
             result = (row["agent_id"], row["owner_user_id"])
             request.state._resolved_agent = result
             return result
+    except ValueError:
+        raise
     except Exception as e:
         # FIX 2026-05-26: silent except скрывал postgres pool/connection failures
         # → агент видел "API key not registered" даже когда настоящая причина
@@ -754,12 +767,13 @@ _GH_API = "https://api.github.com"
 def _can_deploy(owner_user_id: str | None) -> bool:
     """Может ли вызывающий запустить деплой.
 
-    Разрешено:
-      • legacy env-агентам (owner_user_id is None) — pre-provisioned admin.
-      • owner_user_id из COGCORE_DEPLOY_ADMIN_OWNER_IDS (CSV).
+    Разрешено ТОЛЬКО owner_user_id из COGCORE_DEPLOY_ADMIN_OWNER_IDS (CSV).
+    None (env-агент без назначенного владельца) — отказ: до 2026-09-05 None
+    означал «admin», и ключ из открытого /agents/register мог деплоить прод.
+    Env-агенту деплой даётся через COGCORE_ADMIN_OWNER_USER_ID + этот список.
     """
-    if owner_user_id is None:
-        return True
+    if not owner_user_id:
+        return False
     raw = os.environ.get("COGCORE_DEPLOY_ADMIN_OWNER_IDS", "")
     allowed = {x.strip() for x in raw.split(",") if x.strip()}
     return owner_user_id in allowed
@@ -936,6 +950,31 @@ async def _enrich_continue(request: Request, agent_id: str, base_state: dict) ->
     )
 
     return enriched
+
+
+async def _rate_limit_ok(request: Request) -> bool:
+    """Per-agent лимит на tools/call (settings.rate_limit_per_agent в секунду).
+
+    Тот же Redis-счётчик, что у /events (app.security.auth.check_rate_limit).
+    Fail-open: без Redis или без валидного ключа лимит не мешает — отказ по
+    ключу выдаст сам инструмент, а не этот фильтр.
+    """
+    try:
+        agent_id, _ = await _resolve_agent_full(request)
+    except Exception:
+        return True
+    try:
+        from fastapi import HTTPException
+
+        from app.security.auth import check_rate_limit
+        try:
+            await check_rate_limit(agent_id)
+        except HTTPException:
+            log.warning("rate limit exceeded agent=%s", agent_id)
+            return False
+    except Exception as e:  # Redis недоступен и т.п.
+        log.debug("rate limit check skipped: %s", type(e).__name__)
+    return True
 
 
 async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
@@ -1525,10 +1564,17 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
         return {}  # notification — no response
 
     if method == "initialize":
+        # Версию протокола отражаем клиентскую, если она из поддерживаемых
+        # (Streamable HTTP появился в 2025-03-26; MCP 2026-07-28 — stateless
+        # без initialize вовсе, такие клиенты сюда не приходят). Раньше всегда
+        # отдавали 2024-11-05 — клиенты 2025-xx уходили в legacy SSE-режим.
+        params = req.params if isinstance(req.params, dict) else {}
+        asked = str(params.get("protocolVersion") or "")
+        version = asked if asked in SUPPORTED_PROTOCOL_VERSIONS else DEFAULT_PROTOCOL_VERSION
         return _ok(req_id, {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": version,
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "cognitive-core", "version": "0.5.1"},
+            "serverInfo": {"name": "cognitive-core", "version": "0.6.0"},
         })
 
     if method == "ping":
@@ -1545,7 +1591,12 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
             return _err(req_id, -32602, "tools/call requires 'name'")
         per_tool_to = TOOL_TIMEOUTS_S.get(tool_name, DEFAULT_TOOL_TIMEOUT_S)
         wait_for_to = min(per_tool_to + 5.0, GLOBAL_HARD_CAP_S)
+        # request_id: сквозной id вызова в логах и в тексте ошибки, чтобы
+        # «сообщение в никуда» можно было найти в journalctl (DS-ревью 05.09).
+        rid = getattr(request.state, "request_id", "") or ""
         try:
+            if not await _rate_limit_ok(request):
+                return _err(req_id, -32000, f"rate limit exceeded (request_id={rid})")
             result = await asyncio.wait_for(
                 _dispatch_tool(request, tool_name, tool_args), timeout=wait_for_to,
             )
@@ -1555,12 +1606,14 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
                 "isError": False,
             })
         except ValueError as e:
-            return _err(req_id, -32602, str(e))
+            log.info("tool %s rejected request_id=%s: %s", tool_name, rid, e)
+            return _err(req_id, -32602, f"{e} (request_id={rid})")
         except asyncio.TimeoutError:
-            return _err(req_id, -32603, f"Tool '{tool_name}' timeout ({wait_for_to:.0f}s)")
+            log.warning("tool %s timeout %.0fs request_id=%s", tool_name, wait_for_to, rid)
+            return _err(req_id, -32603, f"Tool '{tool_name}' timeout ({wait_for_to:.0f}s, request_id={rid})")
         except Exception as e:
-            log.exception(f"tool {tool_name} error")
-            return _err(req_id, -32603, f"{type(e).__name__}: {e}")
+            log.exception(f"tool {tool_name} error request_id={rid}")
+            return _err(req_id, -32603, f"{type(e).__name__}: {e} (request_id={rid})")
 
     return _err(req_id, -32601, f"Method not found: {method}")
 
@@ -1592,16 +1645,28 @@ async def mcp_messages(request: Request) -> JSONResponse:
     # сессии. Раньше сессии жили только в памяти одного воркера → ~3/4 POST не
     # доходили до стрима и клиент отваливался каждые ~30с.
     if session_id:
-        # 1) Redis path (cross-worker delivery)
+        # 1) Redis path (cross-worker delivery). PUBLISH возвращает число
+        #    подписчиков: 0 — стрим этой сессии уже мёртв (воркер перезапущен,
+        #    ключ mcp:sess:* доживает свои 120с TTL). Раньше в этом случае
+        #    отдавали 202 «принято» в никуда, и клиент ждал свой 300с-таймаут —
+        #    весь дневной «джанк» 05.09. Теперь — ответ инлайн в HTTP-теле.
         try:
             from app.db.redis import get_redis
             r = await get_redis()
             if await r.exists(f"mcp:sess:{session_id}"):
-                await r.publish(
+                receivers = await r.publish(
                     f"mcp:sse:{session_id}",
                     json.dumps(response, ensure_ascii=False),
                 )
-                return JSONResponse({}, status_code=202)
+                if receivers and int(receivers) > 0:
+                    return JSONResponse({}, status_code=202)
+                log.warning("mcp session %s: no SSE subscriber, answering inline "
+                            "(request_id=%s)", session_id[:8],
+                            getattr(request.state, "request_id", ""))
+                try:
+                    await r.delete(f"mcp:sess:{session_id}")
+                except Exception:
+                    pass
         except Exception as e:
             log.warning("mcp redis publish failed: %s", e)
         # 2) Same-worker in-memory fallback (Redis down)
@@ -1615,6 +1680,58 @@ async def mcp_messages(request: Request) -> JSONResponse:
 
     # Legacy mode — inline HTTP response (curl tests, no-SSE clients)
     return JSONResponse(response)
+
+
+@router.post("")
+@router.post("/http")
+async def mcp_streamable_http(request: Request) -> JSONResponse:
+    """MCP Streamable HTTP transport (spec 2025-03-26+): один endpoint, ответ
+    в теле того же POST. Stateless — без Mcp-Session-Id, без Redis pub/sub,
+    любой uvicorn-воркер отвечает сам. HTTP+SSE (`/mcp/sse` + `/mcp/messages`)
+    официально deprecated с 12-месячным offramp (MCP 2026-07-28) и остаётся
+    для старых клиентов.
+
+    Клиенты: `claude mcp add --transport http cognitive-core https://mcp.me-ai.ru/mcp`
+    (или `/mcp/http`), коннектор claude.ai с тем же URL, X-API-Key в заголовке.
+
+    Поддерживается JSON-RPC batch (массив) — ответы массивом, в том же порядке.
+    Notification (без id) → 202 без тела. GET/DELETE на этот путь — 405/200
+    (серверный push-стрим не открываем, сессий нет).
+    """
+    try:
+        raw = await request.json()
+    except Exception:
+        return JSONResponse(_err(None, -32700, "Parse error"), status_code=400)
+
+    headers = {"Mcp-Protocol-Version": DEFAULT_PROTOCOL_VERSION}
+    if isinstance(raw, list):
+        if not raw:
+            return JSONResponse(_err(None, -32600, "Invalid request: empty batch"), status_code=400)
+        responses = [await _handle_jsonrpc(request, item) for item in raw]
+        responses = [x for x in responses if x]
+        if not responses:
+            return JSONResponse(content=None, status_code=202, headers=headers)
+        return JSONResponse(responses, headers=headers)
+
+    response = await _handle_jsonrpc(request, raw)
+    if not response:
+        return JSONResponse(content=None, status_code=202, headers=headers)
+    return JSONResponse(response, headers=headers)
+
+
+@router.get("")
+@router.get("/http")
+async def mcp_streamable_http_get() -> JSONResponse:
+    """Streamable HTTP: GET открывает серверный поток; мы его не ведём — 405."""
+    return JSONResponse({"error": "server-initiated stream not supported; POST JSON-RPC here"},
+                        status_code=405, headers={"Allow": "POST, DELETE"})
+
+
+@router.delete("")
+@router.delete("/http")
+async def mcp_streamable_http_delete() -> JSONResponse:
+    """Streamable HTTP: DELETE завершает сессию; сессий нет — всегда ок."""
+    return JSONResponse({"ok": True, "stateless": True})
 
 
 def _format_text(data: Any) -> str:
