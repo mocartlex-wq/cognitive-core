@@ -81,3 +81,6 @@ backups/
 # Local edit backups created by sed -i and similar (e.g. .bak.20260508-065910)
 *.bak
 *.bak.[0-9]*
+
+# cc-channel (tools/cc-channel): зависимости ставятся локально
+tools/cc-channel/node_modules/
