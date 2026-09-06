@@ -62,10 +62,20 @@ def test_свёртка_решает_по_высоте_а_не_по_длине()
 
 
 def test_читаемая_колонка_и_композер_по_ней_же():
-    """Лента и поле ввода держат одну колонку в 900 точек."""
+    """Лента и поле ввода держат одну колонку: 900 от 900 точек, 1040 от 1280."""
     for селектор in ("#log{padding:16px max(20px", ".composer{padding:10px max(16px"):
         assert селектор in WEBCHAT, селектор
     assert WEBCHAT.count("calc((100% - 900px) / 2)") >= 4
+    assert WEBCHAT.count("calc((100% - 1040px) / 2)") >= 4
+
+
+def test_колонка_расширяется_но_строка_не_растёт():
+    """Шире становится лента, а не строка: пузырь остаётся не шире 800."""
+    широкий = WEBCHAT[WEBCHAT.index("@media (min-width: 1280px)"):]
+    широкий = широкий[: широкий.index("@media (min-width: 1600px)")]
+    assert "calc((100% - 1040px) / 2)" in широкий
+    assert "max-width:min(800px,82%)" in WEBCHAT
+    assert "max-width:min(720px,82%)" not in WEBCHAT
 
 
 def test_широкий_экран_занят():
