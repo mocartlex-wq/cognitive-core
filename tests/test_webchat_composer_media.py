@@ -52,7 +52,9 @@ class TestSizeGuard:
 
     def test_audio_detected_by_emoji_or_mime(self):
         assert "emoji==='🎤'" in WEBCHAT
-        assert r"/^audio\//.test(file.type" in WEBCHAT
+        # Детекция аудио переехала в capMbFor(file, emoji) — ревью 06.09,
+        # потолок стал зависеть от типа файла (25/50/50/200).
+        assert r"/^audio\//.test(type)" in WEBCHAT
 
 
 class TestAttachmentPreview:
