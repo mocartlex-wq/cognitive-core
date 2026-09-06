@@ -6,6 +6,7 @@
 #   1. git fetch origin/main; если HEAD не сменился — exit 0 (silent)
 #   2. Сохранить prev-sha; git pull --ff-only
 #   3. Запустить conditional_reload.sh — оно решит что перезагружать/пересобирать
+#      (и после подъёма api прогонит alembic upgrade head). Провал → ROLLBACK сразу.
 #   4. SMOKE-TEST: проверить /health 6 раз с интервалом 5 сек (всего ~30 сек window)
 #      — если 5/6 успешных HTTP 200 с healthy=true → deploy ok
 #      — иначе → ROLLBACK к prev-sha + повторный conditional_reload + alert
@@ -234,8 +235,54 @@ if git log -1 --format=%s "$NEW" | grep -qF '[skip-deploy]'; then
     exit 0
 fi
 
-# Применяем изменения через conditional_reload (forward direction PREV → NEW)
-"$REPO_DIR/scripts/conditional_reload.sh" "$PREV" "$NEW"
+# ─── ROLLBACK (функция) ─────────────────────────────────────────────────────
+# Вызывается из двух мест: провал conditional_reload (сборка/миграция) и провал
+# smoke. До 2026-09-05 rollback был только после smoke, а `set -e` на строке с
+# conditional_reload убивал скрипт раньше: битая сборка = молчаливо мёртвый
+# деплой, checkout уже на NEW, следующий тик видит PREV=NEW и ничего не делает.
+rollback_to_prev() {
+    local reason="$1"
+    log "$reason. Rolling back ${NEW:0:7} -> ${PREV:0:7}"
+
+    preserve_foreign_nginx
+    if ! git reset --hard --quiet "$PREV" 2>&1; then
+        restore_foreign_nginx
+        log "FATAL: git reset to $PREV failed — manual recovery required" >&2
+        exit 2
+    fi
+    restore_foreign_nginx
+
+    # Reverse-direction conditional reload: тот же diff в обратном направлении
+    # триггерит те же rebuild-actions для откаченных файлов.
+    # ⚠️ Схема БД при откате НЕ понижается (alembic downgrade не запускаем).
+    if ! COGNITIVE_MIGRATE=0 "$REPO_DIR/scripts/conditional_reload.sh" "$NEW" "$PREV"; then
+        log "ERROR: rollback conditional_reload failed — service may be in degraded state" >&2
+    fi
+
+    log "post-rollback smoke-check"
+    local post_ok=0 i
+    for i in 1 2 3; do
+        if eval "$HEALTH_CMD" 2>/dev/null | grep -q '"healthy":true'; then
+            post_ok=$((post_ok + 1))
+        fi
+        [ "$i" -lt 3 ] && sleep 5
+    done
+
+    if [ "$post_ok" -ge 2 ]; then
+        log "ROLLED BACK successfully to ${PREV:0:7} (post-smoke ${post_ok}/3 ok)"
+        notify "Deploy ${NEW:0:7} failed (${reason}), auto-rolled back to ${PREV:0:7}. Service is healthy on previous version."
+        exit 1
+    fi
+    log "FATAL: rollback to ${PREV:0:7} also unhealthy — production in degraded state" >&2
+    notify "FULL DEPLOY FAILURE: ${PREV:0:7}->${NEW:0:7} broken (${reason}) AND rollback to ${PREV:0:7} also unhealthy. Manual intervention required."
+    exit 2
+}
+
+# Применяем изменения через conditional_reload (forward direction PREV → NEW).
+# Провал (docker build, alembic, nginx -t) — сразу откат, не ждём smoke.
+if ! "$REPO_DIR/scripts/conditional_reload.sh" "$PREV" "$NEW"; then
+    rollback_to_prev "conditional_reload FAILED (build/migration/nginx)"
+fi
 
 # Smoke-test нужен только если поменялся application код или infra (compose).
 # Изменения в scripts/auto-deploy*, conditional_reload*, deploy/*, *.md, docs/*
@@ -304,42 +351,4 @@ if [ "$ok_count" -ge "$SMOKE_MIN_OK" ]; then
     exit 0
 fi
 
-# ─── ROLLBACK ────────────────────────────────────────────────────────────────
-log "SMOKE FAILED (only ${ok_count}/${SMOKE_ATTEMPTS} healthy). Rolling back ${NEW:0:7} -> ${PREV:0:7}"
-
-preserve_foreign_nginx
-if ! git reset --hard --quiet "$PREV" 2>&1; then
-    restore_foreign_nginx
-    log "FATAL: git reset to $PREV failed — manual recovery required" >&2
-    exit 2
-fi
-restore_foreign_nginx
-
-# Reverse-direction conditional reload: применяем то же что бы поменялось
-# при движении NEW → PREV (сейчас файлы уже как в PREV-state, нужно
-# rebuild контейнеров если они менялись). conditional_reload.sh принимает
-# (from, to) — тот же diff в обратной направленности тригерит те же
-# rebuild-actions для откаченных файлов.
-if ! "$REPO_DIR/scripts/conditional_reload.sh" "$NEW" "$PREV"; then
-    log "ERROR: rollback conditional_reload failed — service may be in degraded state" >&2
-fi
-
-# Финальная проверка после rollback
-log "post-rollback smoke-check"
-post_ok=0
-for i in 1 2 3; do
-    if eval "$HEALTH_CMD" 2>/dev/null | grep -q '"healthy":true'; then
-        post_ok=$((post_ok + 1))
-    fi
-    [ "$i" -lt 3 ] && sleep 5
-done
-
-if [ "$post_ok" -ge 2 ]; then
-    log "ROLLED BACK successfully to ${PREV:0:7} (post-smoke ${post_ok}/3 ok)"
-    notify "Deploy ${NEW:0:7} failed smoke-test, auto-rolled back to ${PREV:0:7}. Service is healthy on previous version."
-    exit 1
-else
-    log "FATAL: rollback to ${PREV:0:7} also unhealthy — production in degraded state" >&2
-    notify "FULL DEPLOY FAILURE: ${PREV:0:7}->${NEW:0:7} broken AND rollback to ${PREV:0:7} also unhealthy. Manual intervention required."
-    exit 2
-fi
+rollback_to_prev "SMOKE FAILED (only ${ok_count}/${SMOKE_ATTEMPTS} healthy)"
