@@ -76,6 +76,71 @@ async def trigger_weekly(domain: str, request: Request):
     return result
 
 
+@router.post("/knowledge/retire-thin")
+async def retire_thin_knowledge(request: Request, max_sources: int = 1, since_hours: int = 24,
+                                dry_run: bool = True, domain: str | None = None):
+    """Снять (effective_to = NOW()) активные L3-записи владельца, выведенные из
+    ≤ max_sources L2-буферов за последние since_hours.
+
+    Зачем: 06.09 разовый прогон weekly по 35 застрявшим доменам продвинул в L3
+    знания из ОДНОГО буфера — куратор проигнорировал порог повторяемости в
+    промпте (домен tests получил «необходимо фиксировать инструменты…»). Порог
+    теперь в коде (insufficient_repetition), а эта ручка убирает то, что успело
+    пройти. Мягко: запись остаётся в таблице с effective_to, L2-буферы целы —
+    как только у домена появится второй буфер, weekly продвинет знание честно.
+
+    Только свой владелец; NULL-owner = отказ (гейт 05.09). По умолчанию dry_run.
+    """
+    from collections import Counter
+
+    from fastapi import HTTPException
+
+    from app.security.owner import resolve_owner_user_id
+
+    await verify_api_key(request)
+    owner = await resolve_owner_user_id(request)
+    if not owner:
+        raise HTTPException(status_code=403, detail="ключ без владельца — снимать знания нельзя")
+    max_sources = max(0, min(int(max_sources), 5))
+    since_hours = max(1, min(int(since_hours), 24 * 30))
+    where = """effective_to IS NULL
+               AND owner_user_id = $1::uuid
+               AND effective_from >= NOW() - ($2::int * INTERVAL '1 hour')
+               AND COALESCE(cardinality(derived_from_l2_ids), 0) <= $3::int
+               AND ($4::text IS NULL OR domain = $4::text)"""
+    args = (str(owner), since_hours, max_sources, domain)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT id, domain, knowledge_type FROM l3_master_knowledge WHERE {where}", *args,
+        )
+        retired = 0
+        if rows and not dry_run:
+            res = await conn.execute(
+                f"UPDATE l3_master_knowledge SET effective_to = NOW() WHERE {where}", *args,
+            )
+            try:
+                retired = int(str(res).split()[-1])
+            except (ValueError, IndexError):
+                retired = len(rows)
+    by_domain = dict(Counter(r["domain"] for r in rows))
+    reindex = []
+    if retired:
+        # Индекс OP/pgvector строится по активным записям — пересобираем
+        # затронутые домены, чтобы recall не отдавал снятое (best-effort).
+        for d in sorted(by_domain):
+            try:
+                await index_domain_vectors(d)
+                reindex.append(d)
+            except Exception:
+                pass
+    return {
+        "dry_run": dry_run, "matched": len(rows), "retired": retired,
+        "by_domain": by_domain, "max_sources": max_sources, "since_hours": since_hours,
+        "reindexed": reindex,
+    }
+
+
 @router.post("/audit/monthly")
 async def trigger_monthly_audit(domain: str, request: Request):
     """Ручной запуск ежемесячной ревизии L3."""
