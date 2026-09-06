@@ -215,6 +215,18 @@
   .sheet-btn.primary{background:var(--sent);color:#fff}
   .sheet-btn.danger{background:rgba(255,69,58,.15);color:#ff453a}
 
+  /* ── Чат в рамке витрины (?embed=1) ──────────────────────────────────
+     Витрина /static/chat-prototype.html показывает живой чат внутри
+     нарисованной рамки телефона. Внутри рамки нет ни выреза под камеру, ни
+     системной панели снизу — значит и отступы под них не нужны: иначе
+     появляются пустые поля сверху и снизу, которых на настоящем телефоне не
+     видно. Высоту берём от рамки, а не от окна браузера. */
+  html.в-рамке, html.в-рамке body{height:100%}
+  html.в-рамке .app{height:100%;max-width:none;border:none}
+  html.в-рамке .vhead{padding-top:10px}
+  html.в-рамке .tabbar{padding-bottom:0}
+  html.в-рамке .composer{padding-bottom:8px}
+
   /* ── Разметка внутри пузыря ──────────────────────────────────────────
      Отчёты агентов — это заголовки, списки и куски кода. Раньше всё это
      приходило звёздочками и дефисами прямо в текст; теперь разбирается, но
@@ -343,6 +355,11 @@
 <div class="sheet" id="sheet"><div class="sheet-card" id="sheetCard"></div></div>
 
 <script>
+// Витрина показывает этот же чат в рамке телефона (?embed=1): убираем отступы
+// под вырез камеры и системную панель — внутри рамки их нет.
+if (new URLSearchParams(location.search).get('embed') === '1') {
+  document.documentElement.classList.add('в-рамке');
+}
 const app = document.getElementById('app');
 const log = document.getElementById('log');
 const box = document.getElementById('box');

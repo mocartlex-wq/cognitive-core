@@ -71,6 +71,30 @@
     box-shadow:0 0 0 2px #0a0a0c, 0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(10,132,255,.12)}
   .screen{position:relative;border-radius:46px;overflow:hidden;background:var(--scr);
     height:720px;display:flex;flex-direction:column}
+  /* Живой чат внутри рамки. Рамка меняет размер по переключателю: владелец
+     смотрит один и тот же чат телефоном, планшетом и ноутбуком, не открывая
+     трёх окон. */
+  .демка{display:flex;flex-direction:column;align-items:center;gap:14px}
+  .размеры{display:inline-flex;gap:2px;padding:3px;border-radius:12px;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
+  .размер{appearance:none;border:none;background:none;color:#9aa4b2;cursor:pointer;
+    font:inherit;font-size:13px;padding:6px 14px;border-radius:9px}
+  .размер.on{background:rgba(10,132,255,.22);color:#eaf2ff}
+  .размер:hover:not(.on){color:#e6e9ef}
+  .живой{width:100%;height:100%;border:0;display:block;background:#000}
+  .под-рамкой{max-width:420px;text-align:center;font-size:12.5px;line-height:1.5;color:#8a93a6}
+
+  /* Планшет и ноутбук — без «телефона»: у них нет ни выреза, ни скруглений
+     в палец толщиной, и рисовать их значило бы показывать не то устройство. */
+  .phone.планшет{width:520px;padding:10px;border-radius:26px}
+  .phone.планшет .screen{border-radius:18px;height:690px}
+  .phone.планшет .island{display:none}
+  .phone.ноутбук{width:min(1280px,92vw);padding:0;border-radius:12px;background:none;
+    box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .phone.ноутбук .screen{border-radius:12px;height:min(800px,74vh);
+    border:1px solid rgba(255,255,255,.12)}
+  .phone.ноутбук .island{display:none}
+
   .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);
     width:112px;height:32px;background:#000;border-radius:20px;z-index:20;pointer-events:none}
   .statusbar{display:flex;justify-content:space-between;align-items:center;
@@ -204,84 +228,42 @@
     <div class="side">
       <h2>Что изменилось</h2>
       <div class="card">
-        <div class="item"><span class="tag n">NEW</span><div><b>iMessage-пузыри</b><span>Хвостики, группировка подряд, пружинная анимация — как в iOS 18.</span></div></div>
-        <div class="item"><span class="tag n">NEW</span><div><b>Прикрепления</b><span>📎 фото/файлы и 🎤 голосовые прямо в пузыре.</span></div></div>
-        <div class="item"><span class="tag n">NEW</span><div><b>Индикатор набора</b><span>Три точки «печатает…», пока агент отвечает.</span></div></div>
-        <div class="item"><span class="tag n">NEW</span><div><b>Комнаты и Профиль</b><span>Таб-бар снизу: список чатов + настройки (аккаунт, тема, уведомления). Тапай вкладки и комнаты.</span></div></div>
-        <div class="item"><span class="tag u">UPD</span><div><b>Full-screen на iPhone</b><span>100dvh + safe-area, «на экран Домой» — как нативное.</span></div></div>
+        <div class="item"><span class="tag n">NEW</span><div><b>Две панели на ноутбуке</b><span>Комнаты слева, переписка справа — вкладки внизу остались только на телефоне.</span></div></div>
+        <div class="item"><span class="tag n">NEW</span><div><b>Отчёты агентов читаются</b><span>Заголовки, списки и куски кода вместо звёздочек и дефисов в тексте.</span></div></div>
+        <div class="item"><span class="tag n">NEW</span><div><b>Длинное сворачивается</b><span>Разбор на три экрана прячется под «Показать полностью» и не мешает листать.</span></div></div>
+        <div class="item"><span class="tag n">NEW</span><div><b>Видно, кто ответил</b><span>Если вместо агента ответил заместитель — рядом с именем метка.</span></div></div>
+        <div class="item"><span class="tag u">UPD</span><div><b>Кому адресовано</b><span>Чипы получателей, упоминание по @, вставка картинки из буфера.</span></div></div>
+        <div class="item"><span class="tag u">UPD</span><div><b>«Печатает…»</b><span>В строке состояния, с секундомером — видно, что агент думает, а не молчит.</span></div></div>
       </div>
+
     </div>
 
     <!-- Телефон -->
-    <div class="phone">
-      <div class="screen">
-        <div class="island"></div>
-        <div class="statusbar"><span>9:41</span><span class="r">5G ▪ 100%</span></div>
+    <!-- ⚠ 06.09. Здесь был нарисованный муляж: выдуманная переписка
+         («Привет! Я на связи», смета_ржд.xlsx), статичные вкладки, ничего не
+         нажимается. Владелец: «нужна настоящая демка, мою поставь и гоняй,
+         чтобы визуал видеть». Теперь в рамке — его собственный чат, тот же
+         /chat, что открывается по ссылке: живые комнаты, живые сообщения,
+         работающие кнопки. Демонстрировать нарисованное вместо готового
+         бессмысленно — и обманчиво: муляж всегда красивее живого. -->
+    <div class="демка">
+      <div class="размеры" role="tablist" aria-label="Размер экрана">
+        <button class="размер on" type="button" data-раз="phone" role="tab" aria-selected="true">iPhone</button>
+        <button class="размер" type="button" data-раз="tablet" role="tab" aria-selected="false">iPad</button>
+        <button class="размер" type="button" data-раз="desktop" role="tab" aria-selected="false">Ноутбук</button>
+      </div>
 
-        <div class="app">
-          <!-- ЭКРАН: ЧАТ -->
-          <div class="view active" id="vChat">
-            <div class="chdr">
-              <span class="bk">‹</span>
-              <div class="peer"><div class="ava">🧠</div><div><b id="chatName">Память</b><small>агенты на связи</small></div></div>
-              <span style="font-size:19px">📱</span>
-            </div>
-            <div class="log" id="log">
-              <div class="tstamp">Сегодня 9:38</div>
-              <div class="who">Память</div>
-              <div class="row them"><div class="b">Привет! Я на связи. Чем помочь?</div></div>
-              <div class="row me"><div class="b">покажи задачи по проекту РЖД</div></div>
-              <div class="row me grp"><div class="b att"><span class="ic">📎</span> смета_ржд.xlsx</div></div>
-              <div class="who">Память</div>
-              <div class="row them"><div class="b">Нашёл 3 задачи. Сметы приложил, дедлайн ближайшей — сегодня 18:00.</div></div>
-              <div class="row them grp"><div class="b att"><span class="ic">🎤</span> голосовое · 0:12</div></div>
-              <div class="row me"><div class="b">спасибо 👍</div></div>
-            </div>
-            <div class="comp">
-              <span class="ib" id="pAtt" title="Файл">📎</span><span class="ib" id="pMic" title="Голос">🎤</span>
-              <input class="in" id="pIn" placeholder="Сообщение…" enterkeyhint="send">
-              <div class="snd" id="pSnd">↑</div>
-            </div>
-          </div>
-
-          <!-- ЭКРАН: КОМНАТЫ -->
-          <div class="view" id="vRooms">
-            <div class="vhdr"><b>Комнаты</b><span class="vplus" title="Создать">+</span></div>
-            <div class="rlist">
-              <div class="rrow" data-name="Память"><div class="rav" style="background:linear-gradient(135deg,#5e5ce6,#0a84ff)">🧠</div><div class="rmain"><div class="rname">Память</div><div class="rlast">Нашёл 3 задачи, дедлайн 18:00</div></div><div class="rmeta"><span>9:38</span><span class="rbadge">2</span></div></div>
-              <div class="rrow" data-name="Аналитик"><div class="rav" style="background:linear-gradient(135deg,#30d158,#0a84ff)">📊</div><div class="rmain"><div class="rname">Аналитик</div><div class="rlast">Отчёт по неделе готов</div></div><div class="rmeta"><span>вчера</span></div></div>
-              <div class="rrow" data-name="Проект РЖД"><div class="rav" style="background:linear-gradient(135deg,#ff9f0a,#ff453a)">🚄</div><div class="rmain"><div class="rname">Проект РЖД</div><div class="rlast">Смета отправлена на подпись</div></div><div class="rmeta"><span>вчера</span></div></div>
-              <div class="rrow" data-name="Общий чат"><div class="rav" style="background:linear-gradient(135deg,#8e8e93,#48484a)">#</div><div class="rmain"><div class="rname">Общий чат</div><div class="rlast">3 участника · @-адресация</div></div><div class="rmeta"><span>пн</span></div></div>
-            </div>
-          </div>
-
-          <!-- ЭКРАН: ПРОФИЛЬ -->
-          <div class="view" id="vProfile">
-            <div class="vhdr"><b>Профиль</b></div>
-            <div class="pbody">
-              <div class="pcard">
-                <div class="pav">АЛ</div>
-                <div><div class="pname">Алексей</div><div class="pmeta">mozartlex@yandex.ru · Владелец</div></div>
-              </div>
-              <div class="pgrp">Общие</div>
-              <div class="prow"><div class="pl"><span class="pic">🔔</span>Push-уведомления</div><div class="toggle on"></div></div>
-              <div class="prow"><div class="pl"><span class="pic">🌙</span>Тёмная тема</div><div class="toggle on" id="thToggle"></div></div>
-              <div class="prow"><div class="pl"><span class="pic">🔄</span>Версия</div><div class="pval">v0.6.0</div></div>
-              <div class="pgrp">Помощь</div>
-              <div class="prow tap"><div class="pl"><span class="pic">🛟</span>Техподдержка</div><span class="parr">›</span></div>
-              <div class="pgrp">Аккаунт</div>
-              <div class="prow tap"><div class="pl"><span class="pic">👥</span>Войти под другим</div><span class="parr">›</span></div>
-              <div class="prow tap"><div class="pl"><span class="pic" style="color:#ff453a">⎋</span><span style="color:#ff453a">Выйти</span></div></div>
-            </div>
-          </div>
+      <div class="phone" id="рамка">
+        <div class="screen">
+          <div class="island"></div>
+          <iframe id="живойЧат" class="живой" src="/chat?embed=1"
+                  title="Живой чат — тот же, что по ссылке mcp.me-ai.ru/chat"></iframe>
         </div>
+      </div>
 
-        <div class="tabbar">
-          <div class="tab active" data-v="vChat">💬<span>Чат</span></div>
-          <div class="tab" data-v="vRooms">👥<span>Комнаты</span></div>
-          <div class="tab" data-v="vProfile">⚙️<span>Профиль</span></div>
-        </div>
-        <div class="home"></div>
+      <div class="под-рамкой">
+        Это не картинка: внутри работает настоящий <span class="mono">/chat</span>.
+        Не вошли — рамка покажет вход, после него вернётесь сюда же.
       </div>
     </div>
 
@@ -289,13 +271,17 @@
     <div class="side">
       <h2>Что здесь работает</h2>
       <div class="card">
+        <!-- Список описывает то, что человек может проверить прямо в рамке
+             слева. Обещаний «на будущее» здесь нет намеренно: витрина, которая
+             показывает больше, чем умеет продукт, разочаровывает на первом же
+             нажатии. -->
         <ul class="bul">
-          <li><b>Чат с агентами</b> — комнаты, @-адресация, ответы в реальном времени. Живой в <b>/chat</b>.</li>
-          <li><b>Прикрепления</b> — фото, файлы, голосовые (upload_b64), кликабельны.</li>
-          <li><b>Установка</b> — QR + «на экран Домой», запуск как приложение без Safari-панелей.</li>
-          <li><b>Аккаунты</b> — вход по почте, переключение между аккаунтами.</li>
-          <li><b>Дизайн</b> — нативный iOS: пузыри, статус-бар, Dynamic Island, тёмная тема.</li>
-        </ul>
+          <li><b>Это ваш чат</b> — не запись и не картинка: те же комнаты и те же сообщения, что по прямой ссылке.
+          <li><b>Комнаты и агенты</b> — переписка с несколькими агентами, адресация через @, ответы приходят живьём.
+          <li><b>Вложения</b> — фотографии, файлы и голосовые: картинка открывается сразу, голос — с расшифровкой.
+          <li><b>Уведомления</b> — включаются в Профиле внутри чата; приходят и когда приложение закрыто.
+          <li><b>Тема</b> — светлая и тёмная переключаются там же, в Профиле.
+        </ul></ul>
       </div>
       <div class="card" style="text-align:center">
         <a href="/chat" style="display:inline-block;padding:10px 18px;border-radius:12px;background:var(--sent);color:#fff;text-decoration:none;font-weight:600">Открыть рабочий /chat →</a>
@@ -364,6 +350,24 @@
     if(hint){ hint.hidden=!hint.hidden; btn.textContent=hint.hidden?'📲 Установить приложение':(isIOS?'Инструкция ниже ↓':'Инструкция ниже ↓'); }
   });
   window.addEventListener('appinstalled',function(){ btn.textContent='✓ Установлено'; btn.disabled=true; btn.style.opacity=.6; if(hint) hint.hidden=true; });
+})();
+</script>
+<script>
+/* Размер рамки. Живой чат внутри перерисовывается сам: он адаптивный, и на
+   ширине от 900 точек показывает две панели — ровно то, что владелец увидит
+   на ноутбуке. */
+(function(){
+  var рамка = document.getElementById('рамка');
+  var кнопки = document.querySelectorAll('.размер');
+  if (!рамка || !кнопки.length) return;
+  var классы = { phone: '', tablet: 'планшет', desktop: 'ноутбук' };
+  кнопки.forEach(function(к){
+    к.addEventListener('click', function(){
+      кнопки.forEach(function(д){ д.classList.remove('on'); д.setAttribute('aria-selected','false'); });
+      к.classList.add('on'); к.setAttribute('aria-selected','true');
+      рамка.className = 'phone' + (классы[к.dataset.раз] ? ' ' + классы[к.dataset.раз] : '');
+    });
+  });
 })();
 </script>
 </body>
