@@ -394,9 +394,20 @@ async def get_my_room_detail(room_id: str, request: Request):
                        -- нет ни одной. Окно 300с как в /agents/online (там 120с
                        -- по умолчанию, но для комнаты нужна терпимость к паузе
                        -- между heartbeat'ами, иначе чип мигает).
-                       GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at) AS last_seen,
+                       -- ⚠️ last_heartbeat_at имеет DEFAULT NOW(): у агента,
+                       -- который ни разу не выходил на связь, отметка равна
+                       -- created_at (одна транзакция INSERT). На проде это
+                       -- дало шести участникам orchestra один и тот же
+                       -- «был(а): 2026-08-10T17:02:43» — момент пересоздания
+                       -- комнаты, а не присутствие. Отметка не позже
+                       -- created_at → NULL («не выходил на связь»).
+                       CASE
+                         WHEN GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at) > s.created_at
+                         THEN GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at)
+                       END AS last_seen,
                        COALESCE(
-                         GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at)
+                         GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at) > s.created_at
+                         AND GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at)
                            > NOW() - INTERVAL '300 seconds',
                          false
                        ) AS online
