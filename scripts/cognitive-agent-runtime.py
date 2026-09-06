@@ -6,7 +6,7 @@
 # Persona configurable through cognitive memory.
 # v2 ADD: DeepSeek function calling with whitelisted tools for factual replies.
 
-import os, sys, json, re, time, logging, urllib.request, urllib.error, subprocess
+import os, sys, json, re, time, logging, threading, urllib.request, urllib.error, subprocess
 from datetime import datetime, timezone
 
 ENDPOINT = "https://mcp.xn----8sbwawqx4fza.xn--p1ai"
@@ -18,6 +18,13 @@ LOG_FILE = os.environ.get("COGCORE_RUNTIME_LOG", "/var/log/cognitive-agent-runti
 HISTORY_DIR = os.environ.get("COGCORE_RUNTIME_HISTORY", "/var/run/cognitive/agent-history")
 PERSONA_REFRESH_SEC = 60  # was 300; lower so UI channel/standin changes apply within ~1 min
 DEFAULT_POLL_SEC = 5
+# Пока жив LISTEN (см. wake_listener), опрос — только страховка: раз в 30с, а
+# не раз в 5с. Просыпаемся по PG NOTIFY (room_event / agent_inbox) за доли
+# секунды. До 2026-09-05 демон НЕ слушал ни одного канала, хотя триггеры были:
+# потолок задержки owner→агент = 5с даже для мгновенных каналов.
+SAFETY_POLL_SEC = int(os.environ.get("COGCORE_SAFETY_POLL_SEC", "30"))
+# Дать мосту rooms→agent_inbox и коммиту строки долететь до чтения ящика.
+WAKE_SETTLE_SEC = float(os.environ.get("COGCORE_WAKE_SETTLE_SEC", "0.3"))
 NOTIFY_BIN = "/usr/local/bin/cognitive-notify.sh"
 TOOL_TIMEOUT_SEC = 10
 MAX_TOOL_CALLS_PER_REPLY = 3
@@ -51,6 +58,76 @@ logging.basicConfig(
 )
 log = logging.getLogger("cogcore-agent-runtime")
 os.makedirs(HISTORY_DIR, exist_ok=True)
+
+
+# === Пробуждение по PG NOTIFY (2026-09-05, Фаза 2 плана «связь owner↔флот») ===
+# Триггеры в БД уже шлют NOTIFY 'room_event' (INSERT в room_messages) и
+# 'agent_inbox' (INSERT в l1_raw_events domain=agent_inbox). Отдельный поток
+# держит LISTEN-соединение (psycopg, как у /wait в cognitive-rooms.py) и по
+# любому уведомлению поднимает событие; главный цикл вместо time.sleep(5)
+# ждёт это событие. Дедуп и догон после рестарта уже есть: load_inbox берёт
+# окно 60 мин, HistoryStore.already_seen отсекает обработанное — replay-курсор
+# отдельно не нужен. Нет psycopg / БД недоступна → прежний опрос раз в 5с.
+_WAKE = threading.Event()
+_LISTEN_STATE = {"active": False}
+
+
+def _build_pg_dsn():
+    """DSN к контейнеру postgres: IP из docker inspect + пароль из env контейнера
+    (тот же приём, что в cognitive-rooms.py — порт наружу не опубликован)."""
+    pwd = subprocess.run(
+        ["docker", "exec", "cognitive_postgres", "printenv", "POSTGRES_PASSWORD"],
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    ip = subprocess.run(
+        ["docker", "inspect", "cognitive_postgres",
+         "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip().splitlines()[0]
+    return f"postgresql://cognitive:{pwd}@{ip}:5432/cognitive_core"
+
+
+def compute_wait_seconds(poll_sec, listen_active):
+    """Сколько ждать до следующего прохода: с живым LISTEN — страховочный
+    интервал (не меньше персонального), без него — персональный опрос."""
+    poll_sec = max(1, int(poll_sec or DEFAULT_POLL_SEC))
+    if listen_active:
+        return max(poll_sec, SAFETY_POLL_SEC)
+    return poll_sec
+
+
+def wake_listener():
+    """Фоновый поток: LISTEN room_event + agent_inbox → _WAKE.set().
+    Переподключается с backoff; при отсутствии psycopg молча выходит
+    (главный цикл остаётся на опросе)."""
+    try:
+        import psycopg
+    except ImportError:
+        log.warning("wake_listener: psycopg недоступен — остаёмся на опросе раз в %ss", DEFAULT_POLL_SEC)
+        return
+    backoff = 5
+    while True:
+        conn = None
+        try:
+            conn = psycopg.connect(_build_pg_dsn(), autocommit=True, connect_timeout=10)
+            conn.execute("LISTEN room_event;")
+            conn.execute("LISTEN agent_inbox;")
+            _LISTEN_STATE["active"] = True
+            backoff = 5
+            log.info("wake_listener: LISTEN room_event, agent_inbox — опрос теперь страховочный (%ss)", SAFETY_POLL_SEC)
+            for _n in conn.notifies():
+                _WAKE.set()
+        except Exception as e:
+            _LISTEN_STATE["active"] = False
+            log.warning("wake_listener: %s: %s — переподключение через %ss", type(e).__name__, e, backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def load_deepseek_env():
@@ -1844,6 +1921,7 @@ def main():
     last_persona_load = 0
     last_sig = None
     personas = {}
+    threading.Thread(target=wake_listener, name="wake-listener", daemon=True).start()
     while True:
         try:
             now = time.time()
@@ -1910,7 +1988,13 @@ def main():
                 except Exception as e:
                     log.error(f"[{pid}] process failed: {e}")
             poll_sec = min(p.get("poll_interval_seconds", DEFAULT_POLL_SEC) for p in personas.values())
-            time.sleep(poll_sec)
+            # Ждём NOTIFY (доли секунды) или страховочный интервал. Событие
+            # сбрасываем ПОСЛЕ ожидания: уведомление, пришедшее во время
+            # обработки, не теряется — следующий проход начнётся сразу.
+            woke = _WAKE.wait(compute_wait_seconds(poll_sec, _LISTEN_STATE["active"]))
+            _WAKE.clear()
+            if woke:
+                time.sleep(WAKE_SETTLE_SEC)
         except KeyboardInterrupt:
             log.info("keyboard interrupt shutting down")
             break
