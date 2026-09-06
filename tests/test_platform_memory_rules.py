@@ -50,7 +50,10 @@ class TestMigrationShape:
         assert upgrade.count("'post-task'") == len(EXPECTED_RULES)
 
     def test_idempotent_insert(self):
-        assert "ON CONFLICT (owner_user_id, rule_id) DO NOTHING" in _src()
+        # Без цели конфликта: у platform-правил owner_user_id IS NULL, и их
+        # уникальность держит partial index из 0013 (rule_id WHERE owner IS NULL),
+        # а не UNIQUE (owner_user_id, rule_id) — с целью повтор дал бы ошибку.
+        assert "ON CONFLICT DO NOTHING" in _src()
 
     def test_upgrade_is_add_only(self):
         # Никаких UPDATE/DELETE/DROP по чужим правилам в upgrade.
