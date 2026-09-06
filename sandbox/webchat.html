@@ -144,6 +144,9 @@
   .att-bar{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:7px 10px 0;
     overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--panel);scrollbar-width:none}
   .att-bar::-webkit-scrollbar{display:none}
+  /* Авторский display:flex перебивает UA-правило [hidden]{display:none} —
+     без этого пустые полосы «Кому»/вложений всегда занимали 6+7px. */
+  .rcp-bar[hidden],.att-bar[hidden]{display:none}
   .att-chip{flex:0 0 auto;position:relative;display:flex;align-items:center;gap:7px;
     border:.5px solid var(--hair);background:rgba(255,255,255,.07);border-radius:12px;
     padding:5px 26px 5px 6px;max-width:60vw}
@@ -403,7 +406,7 @@
          ЧТО прикреплено, и убрать его можно было только правкой текста. -->
     <div class="att-bar" id="attBar" hidden></div>
     <div class="composer">
-      <input type="file" id="filePicker" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip,.csv,.xlsx" hidden>
+      <input type="file" id="filePicker" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.rtf,.odt,.ods,.zip" hidden>
       <button id="fileBtn" class="icon-btn" title="Прикрепить файл">📎</button>
       <button id="micBtn" class="icon-btn" title="Записать голос">🎤<span id="micTimer"></span></button>
       <textarea id="box" rows="1" placeholder="Сообщение… (@Память чтобы адресовать)" enterkeyhint="send"></textarea>
@@ -488,7 +491,10 @@ let roomId = null, rooms = [], supportRoomId = null, roomKey = null, liveGen = 0
 const seen = new Set();
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 const J = {credentials:'include'};
-const H = s => (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Экранируем и кавычки: H() стоит внутри атрибутов (data-name, title,
+// data-token), и без этого имя файла из чужого сообщения закрывало атрибут
+// и вставляло обработчик — XSS от любого агента с ключом комнаты (ревью 06.09).
+const H = s => (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isMe = a => (a||'').startsWith('owner');
 const initials = s => (s||'?').trim().replace(/^[@#]/,'').slice(0,2).toUpperCase();
 const AVAP=['#5e5ce6,#0a84ff','#ff375f,#ff9f0a','#30d158,#0a84ff','#bf5af2,#5e5ce6','#ff9f0a,#ff375f','#64d2ff,#5e5ce6'];
@@ -833,6 +839,11 @@ function applyPresence(){
   chatStatus.classList.toggle('off', presenceOff);
 }
 function updatePresence(parts){
+  // Техподдержка — не комната агентов: её статус «отвечу здесь» нельзя
+  // затирать счётчиком присутствия при каждом paint().
+  if(supportRoomId && roomId===supportRoomId){
+    presenceText='техподдержка · отвечу здесь'; presenceOff=false; applyPresence(); return;
+  }
   const agents=(parts||[]).filter(p=>p&&p.agent_id);
   const n=agents.filter(p=>p.online===true).length;
   presenceText = n ? (n+' на связи') : (agents.length?'нет агентов на связи':'агенты на связи');
@@ -963,7 +974,17 @@ function fileToB64(file){ return new Promise((res,rej)=>{ const r=new FileReader
 // Серверные потолки (app/api/media.py): 200 МБ обычные, 50 МБ аудио. Проверяем
 // на клиенте: иначе файл сначала целиком уезжает в base64 (+33% памяти на
 // телефоне) и только потом приходит отказ.
-const MAX_MB=200, MAX_AUDIO_MB=50;
+const MAX_MB=200, MAX_AUDIO_MB=50, MAX_IMAGE_MB=25, MAX_DOC_MB=50;
+// Потолок по типу, как на сервере: upload_b64 kind:auto раскладывает по
+// /api/media/{image|document|audio|video}, и у каждого свой предел — иначе
+// PNG на 30 МБ проходил клиентскую проверку и получал 413 после base64.
+function capMbFor(file, emoji){
+  const type=file.type||'', name=(file.name||'').toLowerCase();
+  if(emoji==='🎤'||/^audio\//.test(type)) return MAX_AUDIO_MB;
+  if(/^image\//.test(type)||/\.(jpe?g|png|webp|gif|bmp)$/.test(name)) return MAX_IMAGE_MB;
+  if(/^video\//.test(type)||/\.(mp4|webm|mov|mkv|avi|m4v)$/.test(name)) return MAX_MB;
+  return MAX_DOC_MB;
+}
 let pendingAtt=[];   // {mid,name,emoji,size,url}
 function fmtSize(b){
   if(b===null||b===undefined) return '';
@@ -997,8 +1018,7 @@ function clearAtt(){
   pendingAtt=[]; renderAtt();
 }
 async function uploadAndInsert(file, emoji){
-  const isAudio=(emoji==='🎤')||/^audio\//.test(file.type||'');
-  const capMb=isAudio?MAX_AUDIO_MB:MAX_MB;
+  const capMb=capMbFor(file, emoji);
   if(file.size>capMb*1048576){
     alert('Файл '+fmtSize(file.size)+' — больше допустимых '+capMb+' МБ.'); return;
   }
