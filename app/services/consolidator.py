@@ -264,6 +264,21 @@ async def weekly_consolidate(domain: str) -> dict:
         return await _weekly_consolidate_impl(domain)
 
 
+def _max_per_owner(buffers: list[dict]) -> int:
+    """Сколько буферов у самого «богатого» владельца.
+
+    Повтор считается внутри одного владельца: буферы разных владельцев не
+    складываются, их знание не смешивается (см. разбиение by_owner). Поэтому
+    решать о расширении окна по сумме на домен нельзя — домен из двух буферов
+    разных владельцев выглядел бы достаточным, хотя у каждого по одному.
+    """
+    counts: dict = {}
+    for b in buffers:
+        k = b.get("owner_user_id")
+        counts[k] = counts.get(k, 0) + 1
+    return max(counts.values(), default=0)
+
+
 async def _fetch_l2_window(conn, domain: str, days: int) -> list[dict]:
     """L2-буферы домена за последние `days` дней, по возрастанию даты."""
     rows = await conn.fetch(
@@ -304,7 +319,7 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
         # stale_tail_days), у weekly не было.
         # Расширяем окно ТОЛЬКО когда материала не хватает на повтор: домены,
         # которые и так проходят, второго запроса не делают и работают как раньше.
-        if len(all_buffers) < settings.min_l2_repetitions_for_l3:
+        if _max_per_owner(all_buffers) < settings.min_l2_repetitions_for_l3:
             wide = await _fetch_l2_window(conn, domain, settings.weekly_backfill_days)
             if len(wide) > len(all_buffers):
                 log.info("weekly window widened domain=%s buffers %d->%d (%dd->%dd)",
@@ -341,8 +356,11 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
         {"owner": r.get("owner"), "error": r["curator_error"]}
         for r in per_owner if r.get("curator_error")
     ]
+    # «no_buffers», когда буферы были и мы их сознательно не понесли в LLM, —
+    # это ложь в отчёте: ровно такой невнятный сигнал стоил сегодня разбора.
+    insufficient = [r for r in per_owner if r.get("status") == "insufficient_repetition"]
     return {
-        "status": "consolidated" if ok else "no_buffers",
+        "status": "consolidated" if ok else ("insufficient_repetition" if insufficient else "no_buffers"),
         "curator_errors": curator_errors,
         "owners": per_owner,
         "new_items": sum(r.get("new_items", 0) for r in ok),
@@ -356,6 +374,16 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
 
 async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) -> dict:
     """Синтез L2 → L3 для одного владельца в одном домене."""
+    # Порог повторяемости держим КОДОМ, а не просьбой в промпте. 06.09 прогон по
+    # 35 застрявшим доменам поднял l3_coverage_pct 27.5 → 94.1, но куратор
+    # проигнорировал правило prompts.py:282 («паттерн в < min_repetitions буферах
+    # → рано в L3») и наплодил «знания» из ОДНОГО буфера: домен tests получил три
+    # записи вида «необходимо фиксировать инструменты». Просьба в промпте — не
+    # гарантия. Гарантия — не звать модель вовсе: заодно не платим за вызов.
+    if len(l2_buffers) < settings.min_l2_repetitions_for_l3:
+        log.info("weekly: недостаточно повторов domain=%s owner=%s buffers=%d < %d",
+                 domain, owner, len(l2_buffers), settings.min_l2_repetitions_for_l3)
+        return {"status": "insufficient_repetition", "buffers": len(l2_buffers)}
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Действующие знания владельца
