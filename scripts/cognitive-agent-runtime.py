@@ -23,6 +23,8 @@ DEFAULT_POLL_SEC = 5
 # секунды. До 2026-09-05 демон НЕ слушал ни одного канала, хотя триггеры были:
 # потолок задержки owner→агент = 5с даже для мгновенных каналов.
 SAFETY_POLL_SEC = int(os.environ.get("COGCORE_SAFETY_POLL_SEC", "30"))
+# Как часто LISTEN-поток проверяет живость соединения, если уведомлений нет.
+LISTEN_PROBE_SEC = int(os.environ.get("COGCORE_LISTEN_PROBE_SEC", "60"))
 # Дать мосту rooms→agent_inbox и коммиту строки долететь до чтения ящика.
 WAKE_SETTLE_SEC = float(os.environ.get("COGCORE_WAKE_SETTLE_SEC", "0.3"))
 NOTIFY_BIN = "/usr/local/bin/cognitive-notify.sh"
@@ -84,7 +86,22 @@ def _build_pg_dsn():
          "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
         capture_output=True, text=True, timeout=5,
     ).stdout.strip().splitlines()[0]
-    return f"postgresql://cognitive:{pwd}@{ip}:5432/cognitive_core"
+    # Пароль экранируем (после ротации в нём могут быть @ / %), keepalive'ы —
+    # чтобы полуоткрытый сокет (postgres пересоздан, старому некому слать RST)
+    # не висел вечно в LISTEN, изображая живое соединение.
+    from urllib.parse import quote
+    return (f"postgresql://cognitive:{quote(pwd, safe='')}@{ip}:5432/cognitive_core"
+            f"?keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=3")
+
+
+def _as_int(value, default):
+    """Числа из JSON-персон бывают null/"5" — min() на них падает, а падение
+    главного цикла = sleep(30) без NOTIFY на каждом проходе."""
+    try:
+        v = int(value)
+        return v if v > 0 else default
+    except (TypeError, ValueError):
+        return default
 
 
 def compute_wait_seconds(poll_sec, listen_active):
@@ -115,8 +132,17 @@ def wake_listener():
             _LISTEN_STATE["active"] = True
             backoff = 5
             log.info("wake_listener: LISTEN room_event, agent_inbox — опрос теперь страховочный (%ss)", SAFETY_POLL_SEC)
-            for _n in conn.notifies():
-                _WAKE.set()
+            # notifies() с таймаутом: раз в LISTEN_PROBE_SEC без событий
+            # проверяем соединение SELECT 1 — иначе мёртвый сокет держал
+            # active=True, а «сабсекунда» молча превращалась в страховочный
+            # опрос раз в 30с до рестарта демона.
+            while True:
+                got = False
+                for _n in conn.notifies(timeout=LISTEN_PROBE_SEC):
+                    got = True
+                    _WAKE.set()
+                if not got:
+                    conn.execute("SELECT 1")
         except Exception as e:
             _LISTEN_STATE["active"] = False
             log.warning("wake_listener: %s: %s — переподключение через %ss", type(e).__name__, e, backoff)
@@ -1342,6 +1368,7 @@ def match_trigger(text, triggers):
 
 
 ROOM_CONTEXT_MESSAGES = int(os.environ.get("COGCORE_ROOM_CONTEXT_MESSAGES", "12"))
+_CTX_WARNED = {}  # room_id → ts последнего предупреждения (rate-limit)
 
 
 def room_recent_context(msg, limit=ROOM_CONTEXT_MESSAGES):
@@ -1362,7 +1389,12 @@ def room_recent_context(msg, limit=ROOM_CONTEXT_MESSAGES):
                      headers={"X-Room-Key": key}, timeout=10)
         items = d.get("messages") or []
     except Exception as e:
-        log.debug(f"room_recent_context failed for {room_id}: {e}")
+        # Видимо (WARNING), но не чаще раза в 10 мин на комнату: молчаливый
+        # DEBUG прятал бы регресс «мозг отвечает без истории комнаты».
+        last = _CTX_WARNED.get(room_id, 0)
+        if time.time() - last > 600:
+            _CTX_WARNED[room_id] = time.time()
+            log.warning(f"room_recent_context failed for {room_id}: {type(e).__name__}: {e} — отвечаем без истории")
         return ""
     cur_id = str(msg.get("id") or "")
     lines = []
@@ -1572,6 +1604,7 @@ def openai_reply_with_tools(persona, message, *, base_url, api_key, model, label
 ANTHROPIC_DEFAULT_MODEL = os.environ.get("COGCORE_MANAGED_MODEL", "claude-sonnet-5")
 ANTHROPIC_FALLBACK_MODEL = os.environ.get("COGCORE_MANAGED_FALLBACK_MODEL", "claude-haiku-4-5")
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MIN_MAX_TOKENS = int(os.environ.get("COGCORE_MANAGED_MIN_MAX_TOKENS", "4096"))
 
 
 def _anthropic_tools(schema_list):
@@ -1615,15 +1648,24 @@ def anthropic_reply_with_tools(persona, message, *, api_key, model=None, label="
     calls = 0
     results_log = []
     tried_fallback = False
+    # max_tokens: у Claude 5 thinking-токены входят в бюджет; с 800–1024 на
+    # непростой вопрос ответ приходил пустым (stop_reason=max_tokens) и канал
+    # молча откатывался на DeepSeek — ровно на «сложных» вопросах владельца.
+    max_tokens = max(int(llm.get("max_tokens") or 0), ANTHROPIC_MIN_MAX_TOKENS)
     for _ in range(MAX_TOOL_CALLS_PER_REPLY + 1):
         payload = {
             "model": model,
-            "max_tokens": llm.get("max_tokens", 1024),
+            "max_tokens": max_tokens,
             "system": sys_prompt,
             "messages": msgs,
         }
-        if tools and calls < MAX_TOOL_CALLS_PER_REPLY:
+        if tools:
+            # tools обязаны быть в КАЖДОМ запросе, где в истории есть
+            # tool_use/tool_result — иначе API отвечает 400. Лимит вызовов
+            # держим через tool_choice=none, а не удалением схемы.
             payload["tools"] = tools
+            if calls >= MAX_TOOL_CALLS_PER_REPLY:
+                payload["tool_choice"] = {"type": "none"}
         try:
             d = _anthropic_post(payload, api_key)
         except urllib.error.HTTPError as e:
@@ -1672,7 +1714,7 @@ def anthropic_reply_with_tools(persona, message, *, api_key, model=None, label="
     # Финализация без инструментов — как в openai-цикле.
     try:
         d = _anthropic_post({
-            "model": model, "max_tokens": llm.get("max_tokens", 1024),
+            "model": model, "max_tokens": max_tokens,
             "system": sys_prompt + "\n\nTool results below. Synthesize a SHORT user-facing answer in Russian.",
             "messages": [{"role": "user", "content": user_msg + "\n\nTool results collected:\n\n"
                           + "\n\n".join(results_log)[:5000] + "\n\nNow write the final answer."}],
@@ -1923,6 +1965,12 @@ def check_routine_timeouts(persona, history):
         age = now - float(entry.get("fired_at") or 0)
         if age < ROUTINE_REPLY_TIMEOUT_SEC:
             continue
+        if age > ROUTINE_REPLY_TIMEOUT_SEC * 4:
+            # Залежалось (демон стоял / заместителя выключали): запасной ответ
+            # на многочасовое сообщение в обход can_reply — хуже тишины.
+            pending.pop(mid, None)
+            log.warning(f"[{pid}] routine pending msg={mid[:8]} устарел ({int(age)}s) — снят без запасного ответа")
+            continue
         msg = entry.get("msg") or {}
         room_id = room_ctx(msg)
         answered = bool(room_id) and live_agent_active(pid, room_id, history, window_sec=int(age) + 60)
@@ -2067,16 +2115,21 @@ def process_persona(persona):
         log.warning(f"[{pid}] routine timeout check failed: {e}")
     msgs = load_inbox(pid, since_minutes=60)
     new_count = 0
-    for msg in msgs:
+    def _one(msg):
+        """Одно сообщение. Исключение здесь НЕ должно ронять весь проход:
+        иначе (ревью 06.09) пропадал history.save() → seen_ids терялись,
+        уже отвеченные сообщения обрабатывались заново, а «ядовитое»
+        сообщение слалось провайдеру каждый проход до выпадения из окна."""
+        nonlocal new_count
         msg_id = msg.get("id")
         if not msg_id:
-            continue
+            return
         if history.already_seen(msg_id):
-            continue
+            return
         real_sender = extract_real_sender(msg)
         if real_sender == pid:
             history.mark_seen(msg_id)
-            continue
+            return
         history.mark_seen(msg_id)
         new_count += 1
         text = msg.get("text", "")
@@ -2087,7 +2140,7 @@ def process_persona(persona):
         if persona.get("room_responder_only"):
             rid = room_mention_ctx(msg)
             if not rid or rid not in persona.get("room_responder_rooms", set()):
-                continue
+                return
         # Заместитель молчит, когда в тексте адресуют КОГО-ТО ДРУГОГО.
         # Мост кладёт «ничьи» комнатные сообщения дирижёру (unaddressed:true), и
         # без этой проверки заместитель владельца отвечал на реплики,
@@ -2097,31 +2150,31 @@ def process_persona(persona):
         # Явное обращение К СЕБЕ не блокируем, безадресные реплики — тоже.
         if addressed_to_others(text, pid, persona.get("agent_label")):
             log.info(f"[{pid}] SKIP: адресовано другому агенту")
-            continue
+            return
         # Живой агент на связи — замещать некого.
         _rid = room_ctx(msg)
         if _rid and live_agent_active(pid, _rid, history):
             log.info(f"[{pid}] SKIP: живая сессия активна, заместитель молчит")
-            continue
+            return
         trigger = match_trigger(text, persona.get("triggers", []))
         if not trigger:
-            continue
+            return
         action = trigger.get("action", "silent")
         log.info(f"[{pid}] msg={msg_id[:8]} from={msg.get('from', '?')} action={action} prio={trigger.get('priority')}")
         if action in ("auto_ack", "llm_reply"):
             ok, reason = history.can_reply(persona)
             if not ok:
                 log.warning(f"[{pid}] BLOCKED: {reason}")
-                continue
+                return
             depth, max_depth = history.loop_depth(msg_id, persona)
             if depth >= max_depth:
                 log.warning(f"[{pid}] LOOP_BLOCKED depth={depth}>={max_depth}")
-                continue
+                return
             peer = extract_real_sender(msg) or msg.get("from")
             peer_ok, peer_reason = history.peer_exchange_ok(persona, peer)
             if not peer_ok:
                 log.warning(f"[{pid}] PEER_LOOP_BLOCKED {peer_reason}")
-                continue
+                return
         channel = persona.get("wake_channel", "deepseek")
         if action == "llm_reply" and channel == "claude_routine":
             # Route to the REAL cloud Claude via Routine /fire; if it can't fire
@@ -2154,9 +2207,17 @@ def process_persona(persona):
         if action in ("auto_ack", "llm_reply") and sent_id:
             history.record_reply(sent_id, parent_id=msg_id)
             history.record_peer_exchange(extract_real_sender(msg) or msg.get("from"))
-    if new_count:
-        log.info(f"[{pid}] processed {new_count} new msgs")
-    history.save()
+
+    try:
+        for msg in msgs:
+            try:
+                _one(msg)
+            except Exception as e:
+                log.error(f"[{pid}] msg={str(msg.get('id', '?'))[:8]} handler crashed: {type(e).__name__}: {e}")
+    finally:
+        if new_count:
+            log.info(f"[{pid}] processed {new_count} new msgs")
+        history.save()
 
 
 def main():
@@ -2230,7 +2291,7 @@ def main():
                     process_persona(persona)
                 except Exception as e:
                     log.error(f"[{pid}] process failed: {e}")
-            poll_sec = min(p.get("poll_interval_seconds", DEFAULT_POLL_SEC) for p in personas.values())
+            poll_sec = min(_as_int(p.get("poll_interval_seconds"), DEFAULT_POLL_SEC) for p in personas.values())
             # Ждём NOTIFY (доли секунды) или страховочный интервал. Событие
             # сбрасываем ПОСЛЕ ожидания: уведомление, пришедшее во время
             # обработки, не теряется — следующий проход начнётся сразу.

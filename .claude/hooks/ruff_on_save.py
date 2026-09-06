@@ -4,7 +4,11 @@
 Ошибку видно на месте, а не через двадцать минут на гейте перед пушем.
 Ничего не блокирует — только сообщает.
 """
-import json, os, shutil, subprocess, sys
+import json
+import os
+import shutil
+import subprocess
+import sys
 
 # Windows: стандартный вывод по умолчанию в кодировке системы (cp1251), и любой
 # символ вне её роняет хук с UnicodeEncodeError. Хук падает МОЛЧА — харнесс

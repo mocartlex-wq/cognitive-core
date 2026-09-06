@@ -7,7 +7,10 @@
 
 Переменная SHOW_FULL_TESTS=1 отключает фильтр, когда нужен полный вывод.
 """
-import json, os, re, sys
+import json
+import os
+import re
+import sys
 
 # Windows: стандартный вывод по умолчанию в кодировке системы (cp1251), и любой
 # символ вне её роняет хук с UnicodeEncodeError. Хук падает МОЛЧА — харнесс

@@ -15,6 +15,7 @@
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -77,7 +78,9 @@ def test_hook_survives_narrow_console_encoding(hook_name: str, encoding: str):
         "На такой консоли хук молча не применит решение, оставаясь в списке "
         "установленных."
     )
-    assert "UnicodeEncodeError" not in res.stderr, res.stderr
+    # Ищем ИСКЛЮЧЕНИЕ, а не подстроку: ruff цитирует исходник хука, где это
+    # слово стоит в комментарии — подстрочная проверка давала ложный провал.
+    assert not re.search(r"^(Traceback|\w*UnicodeEncodeError)", res.stderr, re.M), res.stderr
 
 
 @pytest.mark.parametrize("hook_name", sorted(PAYLOADS))
