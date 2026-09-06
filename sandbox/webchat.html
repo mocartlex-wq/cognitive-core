@@ -113,6 +113,14 @@
     color:#fff;font-size:18px;font-weight:700;cursor:pointer;transition:transform .12s,opacity .12s;
     display:flex;align-items:center;justify-content:center}
   #send:disabled{opacity:0;transform:scale(.5);pointer-events:none;width:0;margin:0}
+  /* Чипы адресатов над композером */
+  .rcp-bar{flex:0 0 auto;display:flex;gap:6px;align-items:center;padding:6px 10px 0;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--panel);scrollbar-width:none}
+  .rcp-bar::-webkit-scrollbar{display:none}
+  .rcp-chip{flex:0 0 auto;border:.5px solid var(--hair);background:rgba(255,255,255,.07);color:var(--ink);
+    border-radius:999px;padding:4px 11px;font-size:13px;font-family:inherit;cursor:pointer;white-space:nowrap}
+  .rcp-chip:active{background:var(--sent);color:#fff}
+  #chatStatus.typing{color:var(--sent)}
 
   /* ── Комнаты ── */
   .rlist{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -299,6 +307,8 @@
       <button class="hbtn" id="roomInfo" title="Настройки комнаты" type="button">⋯</button>
     </header>
     <div id="log"><div class="empty">Загрузка…</div></div>
+    <!-- Чипы «кому писать» — по одному на участника-агента (перенесено из room.html) -->
+    <div class="rcp-bar" id="rcpBar" hidden></div>
     <div class="composer">
       <input type="file" id="filePicker" hidden>
       <button id="fileBtn" class="icon-btn" title="Прикрепить файл">📎</button>
@@ -544,7 +554,10 @@ function renderRoomList(){
 // отфильтрован по is_owner, а /detail требует ровно владения — 403 здесь
 // взяться неоткуда.
 async function autoOpen(){
-  const first = realRooms()[0];
+  // /chat?room=<id> (и ?id= — старые ссылки /ui/room?id=…) открывает указанную
+  // комнату; иначе — первую из списка.
+  const want=(new URLSearchParams(location.search).get('room')||new URLSearchParams(location.search).get('id')||'').trim();
+  const first = (want && rooms.find(x=>x.id===want)) || realRooms()[0];
   if(!first){
     roomId=null;
     log.innerHTML='<div class="empty">Нет доступных комнат для чтения. Открой свою в «Комнатах».</div>';
@@ -626,8 +639,54 @@ function свернутьДлинное(row, текст){
   row.after(строка);
 }
 
+/* ─── «Агент печатает…» в шапке: detail.typing = label'ы (Redis TTL, гаснет сам).
+   Секундомер клиентский, как в Claude Code: «Память печатает… 33s». Перенесено
+   из room.html (там был отдельный бар), здесь живёт в строке статуса. ─── */
+let typingSince=0, typingTick=null, typingLabels=[];
+const chatStatus=document.getElementById('chatStatus');
+function renderTypingText(){
+  if(!typingLabels.length) return;
+  const secs=Math.max(1,Math.round((Date.now()-typingSince)/1000));
+  chatStatus.textContent=typingLabels.join(', ')+(typingLabels.length===1?' печатает… ':' печатают… ')+secs+'s';
+}
+function updateTypingBar(typing){
+  const list=Array.isArray(typing)?typing.filter(Boolean):[];
+  if(!list.length){
+    if(typingLabels.length){ chatStatus.textContent='агенты на связи'; chatStatus.classList.remove('typing'); }
+    typingSince=0; typingLabels=[];
+    if(typingTick){ clearInterval(typingTick); typingTick=null; }
+    return;
+  }
+  typingLabels=list; if(!typingSince) typingSince=Date.now();
+  chatStatus.classList.add('typing'); renderTypingText();
+  if(!typingTick) typingTick=setInterval(renderTypingText,1000);
+}
+/* ─── Чипы «кому»: клик подставляет @имя в начало поля. Backend резолвит @ по
+   agent_label ИЛИ agent_id; если в имени пробел — шлём agent_id. ─── */
+let rcpKey='';
+function renderRecipients(parts){
+  const bar=document.getElementById('rcpBar');
+  const agents=(parts||[]).filter(p=>p&&p.agent_id);
+  const key=agents.map(p=>p.agent_id+':'+(p.display_name||'')).join('|');
+  if(key===rcpKey) return; rcpKey=key;
+  if(!agents.length){ bar.hidden=true; bar.innerHTML=''; return; }
+  bar.innerHTML='<span style="font-size:12px;color:var(--mut)">Кому:</span>'+agents.map(p=>{
+    const disp=p.display_name||p.agent_id, token=/\s/.test(disp)?p.agent_id:disp;
+    return `<button type="button" class="rcp-chip" data-token="${H(token)}">@${H(disp)}</button>`;
+  }).join('');
+  bar.hidden=false;
+  bar.querySelectorAll('.rcp-chip').forEach(ch=>ch.addEventListener('click',()=>insertMention(ch.getAttribute('data-token'))));
+}
+function insertMention(token){
+  const m='@'+token+' ';
+  const cur=box.value;
+  box.value = cur.startsWith(m) ? cur : (cur.replace(/^@[^\s]+\s*/,'') ? m+cur.replace(/^@[^\s]+\s*/,'') : m);
+  box.dispatchEvent(new Event('input',{bubbles:true})); box.focus();
+}
 function paint(d, reset){
   if(d && d.api_key) roomKey=d.api_key;   // ключ комнаты для live-подписки
+  updateTypingBar(d && d.typing);
+  renderRecipients(d && d.participants);
   const msgs=(d&&d.messages)||[];
   if(reset){ log.innerHTML=''; seen.clear(); lastTs=null; }
   let added=false; msgs.forEach(m=>{ if(render(m)) added=true; });
@@ -706,6 +765,18 @@ async function uploadAndInsert(file, emoji){
 }
 fileBtn.addEventListener('click',()=>filePicker.click());
 filePicker.addEventListener('change',async e=>{ const f=(e.target.files||[])[0]; if(f) await uploadAndInsert(f,'📎'); filePicker.value=''; });
+// Вставка из буфера (Ctrl+V / «Вставить» на телефоне): скрин или файл падает
+// в композер и грузится как через 📎. Текстовая вставка не трогается.
+box.addEventListener('paste', async e=>{
+  const files=Array.from((e.clipboardData&&e.clipboardData.files)||[]);
+  if(!files.length) return;
+  e.preventDefault();
+  for(const f of files){
+    const emoji=(f.type||'').startsWith('image/')?'🖼':'📎';
+    const named=(f.name&&f.name!=='image.png')?f:new File([f],`paste-${Date.now()}.png`,{type:f.type||'image/png'});
+    await uploadAndInsert(named, emoji);
+  }
+});
 
 let rec=null, chunks=[], stream=null, t0=0, tick=null;
 micBtn.addEventListener('click',async ()=>{

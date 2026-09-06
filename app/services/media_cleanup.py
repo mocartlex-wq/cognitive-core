@@ -95,6 +95,14 @@ async def cleanup_expired_media() -> dict:
             media_id = payload.get("media_id")
             kind = payload.get("kind")
 
+            # Вложения комнат и документы — не «кадры для анализа», а переписка
+            # владельца с флотом: они обязаны жить столько же, сколько сама
+            # комната. До 2026-09-05 удалялись через 24ч вместе с остальным
+            # media_analysis (план «связь owner↔флот», Фаза 6).
+            if kind == "document" or payload.get("room_id"):
+                stats["kept"] = stats.get("kept", 0) + 1
+                continue
+
             # Try cleanup files (no-op if already deleted by v1)
             if media_id and kind:
                 count, errors = await _cleanup_one_media(media_id, kind)
