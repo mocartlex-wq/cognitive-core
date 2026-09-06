@@ -470,6 +470,19 @@ async def login_page():
 
 @app.get("/ui/room")
 async def room_page():
+    """Один UI на комнаты (2026-09-05, Фаза 1 плана «связь owner↔флот»).
+
+    Раньше здесь жил room.html: опрос setInterval 5с, без service worker и
+    push, свои прикрепления и typing-бар — второй интерфейс, разошедшийся с
+    /chat (long-poll /wait, PWA, push). Теперь /ui/room и /chat — одна
+    страница; старые ссылки /ui/room?id=<room> открывают ту же комнату.
+    room.html оставлен на /ui/room-legacy как аварийный запасной выход.
+    """
+    return _html("webchat.html")
+
+
+@app.get("/ui/room-legacy")
+async def room_page_legacy():
     return _html("room.html")
 
 
