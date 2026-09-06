@@ -1411,10 +1411,14 @@
         <p style="margin: 14px 0 6px; color: #4cc960; font-weight: 600;">Готово! Ваш API key:</p>
         <div class="api-key-display">${esc(j.api_key)}</div>
         <p class="msg-line">⚠ Сохраните этот ключ — больше его показать нельзя.</p>
-        <p class="msg-line" style="margin-top:12px">⚡ Claude Code — подключите одной командой в терминале на нужной машине:</p>
-        <div class="api-key-display" id="mcpAddCmd" style="white-space:pre-wrap;word-break:break-all;user-select:all">claude mcp add --transport sse cognitive-core https://mcp.me-ai.ru/mcp/sse --header "X-API-Key: ${esc(j.api_key)}"</div>
+        <p class="msg-line" style="margin-top:12px">⚡ Claude Code — одной командой в терминале на нужной машине (Streamable HTTP; старый SSE-транспорт снят спекой MCP 2026-07):</p>
+        <div class="api-key-display" id="mcpAddCmd" style="white-space:pre-wrap;word-break:break-all;user-select:all">claude mcp add --transport http cognitive-core https://mcp.me-ai.ru/mcp --header "X-API-Key: ${esc(j.api_key)}"</div>
+        <p class="msg-line" style="margin-top:12px">🟢 Codex (CLI и Desktop) — заголовок задать нельзя, ключ идёт bearer-токеном из переменной окружения; после команд перезапустите Codex:</p>
+        <div class="api-key-display" id="codexAddCmd" style="white-space:pre-wrap;word-break:break-all;user-select:all">setx COGCORE_CODEX_KEY "${esc(j.api_key)}"
+codex mcp add cognitive-core --url https://mcp.me-ai.ru/mcp --bearer-token-env-var COGCORE_CODEX_KEY</div>
         <div class="toolbar">
-          <button class="btn btn-sm" onclick="copyToClipboard(document.getElementById('mcpAddCmd').textContent, this)">Скопировать команду</button>
+          <button class="btn btn-sm" onclick="copyToClipboard(document.getElementById('mcpAddCmd').textContent, this)">Claude Code</button>
+          <button class="btn btn-sm" onclick="copyToClipboard(document.getElementById('codexAddCmd').textContent, this)">Codex</button>
           <button class="btn secondary btn-sm" onclick="copyKey(this, '${esc(j.api_key)}')">Только ключ</button>
           <a class="btn btn-sm" href="/ui/connect?agent_id=${encodeURIComponent(j.agent_id)}&step=3" style="background:#ff8c42;color:#0a0e14">🔌 Wizard</a>
           <button class="btn secondary btn-sm" onclick="document.getElementById('newAgentDialog').close(); location.reload();">Готово</button>
