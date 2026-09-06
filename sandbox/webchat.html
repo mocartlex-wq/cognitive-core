@@ -120,6 +120,21 @@
   .rcp-chip{flex:0 0 auto;border:.5px solid var(--hair);background:rgba(255,255,255,.07);color:var(--ink);
     border-radius:999px;padding:4px 11px;font-size:13px;font-family:inherit;cursor:pointer;white-space:nowrap}
   .rcp-chip:active{background:var(--sent);color:#fff}
+  /* Полоса вложений: что реально уедет с сообщением, видно ДО отправки. */
+  .att-bar{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:7px 10px 0;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--panel);scrollbar-width:none}
+  .att-bar::-webkit-scrollbar{display:none}
+  .att-chip{flex:0 0 auto;position:relative;display:flex;align-items:center;gap:7px;
+    border:.5px solid var(--hair);background:rgba(255,255,255,.07);border-radius:12px;
+    padding:5px 26px 5px 6px;max-width:60vw}
+  .att-chip img{width:34px;height:34px;border-radius:8px;object-fit:cover;display:block;flex:0 0 auto}
+  .att-chip .ic{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;
+    justify-content:center;font-size:17px;background:rgba(255,255,255,.09);flex:0 0 auto}
+  .att-chip .nm{font-size:12.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .att-chip .sz{font-size:11px;color:var(--mut)}
+  .att-chip .x{position:absolute;top:2px;right:3px;width:18px;height:18px;border:none;padding:0;
+    border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:11px;line-height:1;cursor:pointer}
+  .app.light .att-chip{background:rgba(0,0,0,.05)}
   #chatStatus.typing{color:var(--sent)}
   /* Никого на связи — зелёный кружок в статусе вводил бы в заблуждение. */
   #chatStatus.off{color:var(--mut)}
@@ -341,8 +356,11 @@
     <div id="log"><div class="empty">Загрузка…</div></div>
     <!-- Чипы «кому писать» — по одному на участника-агента (перенесено из room.html) -->
     <div class="rcp-bar" id="rcpBar" hidden></div>
+    <!-- Превью вложений до отправки: маркер (media:id) в поле ввода не показывает,
+         ЧТО прикреплено, и убрать его можно было только правкой текста. -->
+    <div class="att-bar" id="attBar" hidden></div>
     <div class="composer">
-      <input type="file" id="filePicker" hidden>
+      <input type="file" id="filePicker" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip,.csv,.xlsx" hidden>
       <button id="fileBtn" class="icon-btn" title="Прикрепить файл">📎</button>
       <button id="micBtn" class="icon-btn" title="Записать голос">🎤<span id="micTimer"></span></button>
       <textarea id="box" rows="1" placeholder="Сообщение… (@Память чтобы адресовать)" enterkeyhint="send"></textarea>
@@ -844,6 +862,7 @@ async function submit(){
   const out = (roomId===supportRoomId) ? (t+' @dsdsd') : t;
   try{ await fetch(`/user/rooms/${roomId}/post`,{...J,method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({text:out})}); }catch(e){}
+  clearAtt();   // отправлено — превью больше не про это сообщение
   await refresh(false); showTyping(); setTimeout(()=>refresh(false),800);
 }
 
@@ -852,7 +871,49 @@ const fileBtn=document.getElementById('fileBtn'), filePicker=document.getElement
 const micBtn=document.getElementById('micBtn'), micTimer=document.getElementById('micTimer');
 function fileToB64(file){ return new Promise((res,rej)=>{ const r=new FileReader();
   r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(file); }); }
+/* --- Вложения: что уедет с сообщением, видно до отправки --- */
+// Серверные потолки (app/api/media.py): 200 МБ обычные, 50 МБ аудио. Проверяем
+// на клиенте: иначе файл сначала целиком уезжает в base64 (+33% памяти на
+// телефоне) и только потом приходит отказ.
+const MAX_MB=200, MAX_AUDIO_MB=50;
+let pendingAtt=[];   // {mid,name,emoji,size,url}
+function fmtSize(b){
+  if(b===null||b===undefined) return '';
+  return b<1024?b+' Б':(b<1048576?(b/1024).toFixed(0)+' КБ':(b/1048576).toFixed(1)+' МБ');
+}
+function renderAtt(){
+  const bar=document.getElementById('attBar');
+  if(!pendingAtt.length){ bar.hidden=true; bar.innerHTML=''; return; }
+  bar.innerHTML=pendingAtt.map(function(a,i){
+    const thumb=a.url?('<img src="'+a.url+'" alt="">'):('<span class="ic">'+(a.emoji||'📎')+'</span>');
+    return '<div class="att-chip">'+thumb+'<div><div class="nm">'+H(a.name)+'</div>'+
+           '<div class="sz">'+H(fmtSize(a.size))+'</div></div>'+
+           '<button type="button" class="x" data-i="'+i+'" aria-label="Убрать">✕</button></div>';
+  }).join('');
+  bar.hidden=false;
+  bar.querySelectorAll('.x').forEach(function(b){
+    b.addEventListener('click',function(){ dropAtt(+b.getAttribute('data-i')); });
+  });
+}
+// Снять вложение: вместе с чипом убираем и его маркер из поля — иначе сообщение
+// уедет со ссылкой на файл, которого пользователь уже не ждёт.
+function dropAtt(i){
+  const a=pendingAtt[i]; if(!a) return;
+  box.value=box.value.split('\n').filter(function(l){ return l.indexOf('(media:'+a.mid+')')===-1; }).join('\n');
+  if(a.url){ try{ URL.revokeObjectURL(a.url); }catch(e){} }
+  pendingAtt.splice(i,1); renderAtt();
+  box.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function clearAtt(){
+  pendingAtt.forEach(function(a){ if(a.url){ try{ URL.revokeObjectURL(a.url); }catch(e){} } });
+  pendingAtt=[]; renderAtt();
+}
 async function uploadAndInsert(file, emoji){
+  const isAudio=(emoji==='🎤')||/^audio\//.test(file.type||'');
+  const capMb=isAudio?MAX_AUDIO_MB:MAX_MB;
+  if(file.size>capMb*1048576){
+    alert('Файл '+fmtSize(file.size)+' — больше допустимых '+capMb+' МБ.'); return;
+  }
   send.disabled=true; const ph=box.placeholder; box.placeholder='Загрузка…';
   try{
     const b64=await fileToB64(file);
@@ -862,6 +923,10 @@ async function uploadAndInsert(file, emoji){
     if(!r.ok){ let d=r.status; try{ d=(await r.json()).detail||d; }catch(e){} alert('Не удалось загрузить: '+d); return; }
     const mid=(await r.json()).media_id||'?';
     box.value=(box.value?box.value.replace(/\n?$/,'\n'):'')+`${emoji} ${file.name} (media:${mid})`+'\n';
+    let url=null;
+    if(/^image\//.test(file.type||'')){ try{ url=URL.createObjectURL(file); }catch(e){} }
+    pendingAtt.push({mid:mid, name:file.name, emoji:emoji, size:file.size, url:url});
+    renderAtt();
     box.dispatchEvent(new Event('input',{bubbles:true})); box.focus();
   }catch(e){ alert('Ошибка: '+(e&&e.message||e)); }
   finally{ box.placeholder=ph; send.disabled=!box.value.trim(); }
