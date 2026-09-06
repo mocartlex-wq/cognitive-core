@@ -781,6 +781,20 @@ function updateTypingBar(typing){
 /* ─── Чипы «кому»: клик подставляет @имя в начало поля. Backend резолвит @ по
    agent_label ИЛИ agent_id; если в имени пробел — шлём agent_id. ─── */
 let rcpKey='';
+// Когда агента видели в последний раз, человеческим языком. Сырой ISO
+// («был(а): 2026-08-10T17:02:43.741856+00:00») читать невозможно, а это
+// единственное, что подсказывает: агент отвалился минуту назад или месяц.
+// now передаётся явно — так функция чистая и её видно из теста.
+function humanSince(iso, now){
+  if(!iso) return 'не выходил(а) на связь';
+  const t=Date.parse(iso);
+  if(isNaN(t)) return 'не выходил(а) на связь';
+  const sec=Math.floor(((now||Date.now())-t)/1000);
+  if(sec<60) return 'был(а) только что';        // и часы вперёд сюда же
+  if(sec<3600) return 'был(а) '+Math.floor(sec/60)+' мин назад';
+  if(sec<86400) return 'был(а) '+Math.floor(sec/3600)+' ч назад';
+  return 'был(а) '+Math.floor(sec/86400)+' дн назад';
+}
 function renderRecipients(parts){
   const bar=document.getElementById('rcpBar');
   const agents=(parts||[]).filter(p=>p&&p.agent_id);
@@ -791,7 +805,7 @@ function renderRecipients(parts){
   bar.innerHTML='<span style="font-size:12px;color:var(--mut)">Кому:</span>'+agents.map(p=>{
     const disp=p.display_name||p.agent_id, token=/\s/.test(disp)?p.agent_id:disp;
     const dot=p.online?'<i class="pdot"></i>':'';
-    const ttl=p.online?'на связи':(p.last_seen?('был(а): '+p.last_seen):'офлайн');
+    const ttl=p.online?'на связи':humanSince(p.last_seen);
     return `<button type="button" class="rcp-chip" data-token="${H(token)}" title="${H(ttl)}">${dot}@${H(disp)}</button>`;
   }).join('');
   bar.hidden=false;
