@@ -132,9 +132,11 @@ ssh -i ~/.ssh/cogserver_deploy salex@192.168.0.118 \
 ## 6. Регистрация в Cognitive Core (когда v0.5.5 готов)
 
 ```bash
-# одной командой, при старте агента:
+# одной командой, при старте агента. X-API-Key — ключ ЛЮБОГО уже подключённого
+# помощника владельца: новый агент регистрируется под тем же аккаунтом.
+# Без ключа — 401 (анонимная регистрация закрыта 2026-09-05).
 curl -X POST https://mcp.me-ai.ru/agents/register \
-  -H "X-API-Key: <per-agent-key>" \
+  -H "X-API-Key: <ключ своего помощника>" \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "ai-crm-server-v1",
