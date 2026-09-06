@@ -600,6 +600,13 @@ async def profile_aliases():
 # ─────────────────────────────────────────────────────────────────────────
 # Health
 # ─────────────────────────────────────────────────────────────────────────
+def _coverage_pct(covered: int, total: int) -> float | None:
+    """Доля доменов с живым знанием L3, в процентах. None — доменов ещё нет."""
+    if not total:
+        return None
+    return round(covered * 100.0 / total, 1)
+
+
 @app.get("/health")
 async def health():
     """Проверка здоровья всех сервисов с детализацией."""
@@ -674,6 +681,33 @@ async def health():
                      "oldest": r0["oldest"].isoformat() if r0["oldest"] else None}
                     for r0 in backlog_rows
                 ]
+            # ── Покрытие доменов знанием L3 ──────────────────────────────────
+            # Домены, где накоплен опыт (L1), против тех, где из него уже выведено
+            # ЖИВОЕ знание L3 (effective_to IS NULL). Низкий процент = опыт копится,
+            # но в знание не превращается: recall по такому домену вернёт пусто, а
+            # это неотличимо от «в памяти ничего нет».
+            try:
+                cov = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*) AS total,
+                           COUNT(*) FILTER (WHERE has_l3) AS covered
+                      FROM (
+                            SELECT d.domain,
+                                   EXISTS (SELECT 1 FROM l3_master_knowledge k
+                                            WHERE k.domain = d.domain
+                                              AND k.effective_to IS NULL) AS has_l3
+                              FROM (SELECT DISTINCT domain FROM l1_raw_events) d
+                           ) t
+                    """
+                )
+                total_domains = (cov["total"] if cov else 0) or 0
+                covered_domains = (cov["covered"] if cov else 0) or 0
+                deep["l3_domains_total"] = total_domains
+                deep["l3_domains_covered"] = covered_domains
+                deep["l3_coverage_pct"] = _coverage_pct(covered_domains, total_domains)
+            except Exception as e:  # noqa: BLE001 — метрика не должна ронять /health
+                log_event("debug", "l3 coverage probe failed", error=type(e).__name__)
+
             if last_l2:
                 # Считаем от МОМЕНТА создания буфера, а не от полуночи его даты.
                 # l2_daily_buffers.date — это дата среза (без времени), поэтому
