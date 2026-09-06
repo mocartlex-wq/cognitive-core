@@ -357,9 +357,15 @@
 <script>
 // Витрина показывает этот же чат в рамке телефона (?embed=1): убираем отступы
 // под вырез камеры и системную панель — внутри рамки их нет.
-if (new URLSearchParams(location.search).get('embed') === '1') {
+const вРамке = new URLSearchParams(location.search).get('embed') === '1';
+if (вРамке) {
   document.documentElement.classList.add('в-рамке');
 }
+// Куда возвращаться после входа. ⚠ Раньше здесь всегда стоял «/chat», и из
+// рамки витрины человек возвращался в чат БЕЗ метки embed: появлялись отступы
+// под вырез камеры и системную панель, которых внутри рамки нет, — сверху и
+// снизу пустые поля. Возвращаем ровно туда, откуда ушли.
+const кудаПослеВхода = '/ui/login?return=' + encodeURIComponent(вРамке ? '/chat?embed=1' : '/chat');
 const app = document.getElementById('app');
 const log = document.getElementById('log');
 const box = document.getElementById('box');
@@ -513,7 +519,7 @@ document.getElementById('toRooms').addEventListener('click',()=>go('vRooms'));
 async function loadRooms(){
   try{
     const r = await fetch('/user/rooms', J);
-    if(r.status===401){ location.href='/ui/login?return=/chat'; return; }
+    if(r.status===401){ location.href=кудаПослеВхода; return; }
     const d = await r.json();
     rooms = (d.items||[]).filter(x=>x.is_owner!==false);
     // Комната техподдержки — служебная, прячем её из списка «Комнаты».
@@ -836,7 +842,7 @@ async function loadProfile(){
   try{ const h=await (await fetch('/health',J)).json(); appVer=h.version||''; }catch(e){}
   try{
     const r=await fetch('/user/me', J);
-    if(r.status===401){ location.href='/ui/login?return=/chat'; return; }
+    if(r.status===401){ location.href=кудаПослеВхода; return; }
     lastUser=await r.json();
   }catch(e){ lastUser=null; }
   buildProfile(lastUser);
@@ -892,7 +898,7 @@ function buildProfile(u){
   document.getElementById('rSwitch').addEventListener('click',async ()=>{
     if(!confirm('Выйти из текущего аккаунта и войти под другим?')) return;
     try{ await fetch('/auth/logout',{method:'POST',credentials:'include'}); }catch(e){}
-    location.href='/ui/login?return=/chat';
+    location.href=кудаПослеВхода;
   });
   document.getElementById('rLogout').addEventListener('click',async ()=>{
     if(!confirm('Выйти из аккаунта?')) return;
