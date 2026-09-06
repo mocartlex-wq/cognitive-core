@@ -140,9 +140,15 @@ class TestPresenceUI:
 
     def test_typing_wins_over_presence(self):
         # applyPresence обязан уступать индикатору печати.
+        # Проверяем поведение, а не точную строку: после полировки 06.09 ветка
+        # печати снимает класс off и только потом выходит (CI упал на старой
+        # подстрочной проверке, локальный прогон этот файл не включал).
         i = WEBCHAT.index("function applyPresence(")
-        body = WEBCHAT[i:i + 260]
-        assert "if(typingLabels.length) return;" in body
+        body = WEBCHAT[i:WEBCHAT.index("function updatePresence(", i)]
+        guard = body.index("if(typingLabels.length)")
+        ret = body.index("return;", guard)
+        write = body.index("chatStatus.textContent=presenceText")
+        assert guard < ret < write, "выход по печати должен стоять до записи статуса"
 
     def test_presence_updated_from_paint_after_typing(self):
         i_t = WEBCHAT.index("updateTypingBar(d && d.typing);")
