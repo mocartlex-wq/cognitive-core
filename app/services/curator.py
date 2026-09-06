@@ -1,4 +1,6 @@
 import json
+import logging
+import re
 
 from app.config import settings
 from app.security.validator import validate_llm_response
@@ -9,6 +11,31 @@ from app.services.prompts import (
     get_quality_prompt,
     lang,
 )
+
+log = logging.getLogger(__name__)
+
+# Сообщение LLM-клиента может нести URL с токеном или заголовок авторизации —
+# в лог это попадать не должно.
+_SECRET_RE = re.compile(
+    r"(sk-[A-Za-z0-9_\-]{8,}|rk_[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key[=:]\S+)",
+    re.I,
+)
+
+
+def _safe_err(e: Exception, limit: int = 200) -> str:
+    """Тип и текст исключения без секретов и без простыни на весь лог."""
+    msg = _SECRET_RE.sub("<redacted>", str(e))
+    if len(msg) > limit:
+        msg = msg[:limit] + "…"
+    return f"{type(e).__name__}: {msg}" if msg else type(e).__name__
+
+
+# Пустой вердикт куратора. Он же возвращается при сбое — но тогда с
+# curator_error, иначе «LLM не ответил» неотличимо от «нечего продвигать».
+_EMPTY_QUALITY: dict = {
+    "ready_for_l3": [], "not_ready_for_l3": [], "deprecated_l3": [],
+    "conflicts": [], "deduplicated_to_existing": [],
+}
 
 
 async def pre_daily_filter(events: list[dict], domain: str) -> dict:
@@ -27,8 +54,9 @@ async def pre_daily_filter(events: list[dict], domain: str) -> dict:
         ])
         if raw:
             return validate_llm_response(json.dumps(raw), schema="curator_filter")
-    except Exception:
-        pass
+        log.warning("curator daily-filter: пустой ответ LLM domain=%s", domain)
+    except Exception as e:
+        log.warning("curator daily-filter упал domain=%s err=%s", domain, _safe_err(e))
 
     all_ids = [str(e["id"]) for e in events]
     return {"skip": False, "filtered_event_ids": all_ids, "noise_event_ids": [], "reason": "Skipped curator (all passed)"}
@@ -61,10 +89,12 @@ async def pre_weekly_check(
         ])
         if raw:
             return validate_llm_response(json.dumps(raw), schema="curator_quality")
-    except Exception:
-        pass
-
-    return {"ready_for_l3": [], "not_ready_for_l3": [], "deprecated_l3": [], "conflicts": [], "deduplicated_to_existing": []}
+        log.warning("curator quality: пустой ответ LLM domain=%s", domain)
+        return {**_EMPTY_QUALITY, "curator_error": "empty response"}
+    except Exception as e:
+        err = _safe_err(e)
+        log.warning("curator quality упал domain=%s err=%s", domain, err)
+        return {**_EMPTY_QUALITY, "curator_error": err}
 
 
 async def monthly_audit(domain: str, l3_knowledge: list[dict], l3_tools: list[dict]) -> dict:
@@ -94,7 +124,8 @@ async def monthly_audit(domain: str, l3_knowledge: list[dict], l3_tools: list[di
         ])
         if raw:
             return validate_llm_response(json.dumps(raw), schema="curator_audit")
-    except Exception:
-        pass
+        log.warning("curator monthly-audit: пустой ответ LLM domain=%s", domain)
+    except Exception as e:
+        log.warning("curator monthly-audit упал domain=%s err=%s", domain, _safe_err(e))
 
     return {"stale_knowledge_ids": [], "internal_conflicts": [], "dead_tool_ids": [], "duplicate_pairs": [], "health_score": 1.0, "recommendations": "Audit skipped (error)"}
