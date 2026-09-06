@@ -155,6 +155,11 @@
   .att-chip .x{position:absolute;top:2px;right:3px;width:18px;height:18px;border:none;padding:0;
     border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:11px;line-height:1;cursor:pointer}
   .app.light .att-chip{background:rgba(0,0,0,.05)}
+  /* Чипы «Кому» в светлой теме оставались с тёмной подложкой
+     rgba(255,255,255,.07) — белое на белом, от чипа виднелась только
+     волосяная рамка (замер на боевом 06.09). Полю ввода и чипам вложений
+     светлую подложку когда-то дали, а этим забыли. */
+  .app.light .rcp-chip{background:rgba(0,0,0,.05)}
   #chatStatus.typing{color:var(--sent)}
   /* Никого на связи — зелёный кружок в статусе вводил бы в заблуждение. */
   #chatStatus.off{color:var(--mut)}
@@ -222,6 +227,21 @@
     width:9px;height:9px;border-radius:50%;background:#0a84ff;border:2px solid rgba(18,18,20,.92)}
   .tab .badge.on{display:block}
   .app.light .tab .badge{border-color:rgba(245,245,247,.92)}
+
+  /* Телефон в альбоме. При высоте 393 шапка, чипы «Кому», композер и
+     таб-бар занимали 210 точек из 389 — на саму переписку оставалось 179,
+     то есть одно сообщение (замер на боевом 06.09). Полосы ужимаем: текст
+     в них тот же, но каждая отдаёт ленте по десятку точек. */
+  @media (max-height: 460px){
+    .vhead{padding:calc(env(safe-area-inset-top,0px) + 6px) 12px 6px}
+    .vhead>b{font-size:17px}
+    .tab{padding:5px 0 3px;font-size:19px}
+    .tab span{font-size:9px;margin-top:0}
+    .rcp-bar{padding-top:4px}
+    .rcp-chip{padding:3px 10px;font-size:12.5px}
+    .composer{padding-top:5px;padding-bottom:6px}
+    #box{min-height:32px}
+  }
 
   /* ── Светлая тема ── */
   .app.light{--chatbg:#fff;--recv:#e5e5ea;--recv-t:#000;--ink:#000;--mut:#6b7280;
