@@ -25,11 +25,12 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.db.postgres import get_pool
 from app.security.auth import verify_api_key
+from app.security.owner import resolve_owner_user_id
 
 router = APIRouter(prefix="/agents", tags=["multi-agent"])
 
@@ -78,38 +79,64 @@ def _new_api_key() -> str:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
-@router.post("/register", response_model=RegisterResponse)
-async def register_agent(req: RegisterRequest):
-    """Register a new agent and return a fresh per-agent API key.
+REGISTER_AUTH_DETAIL = (
+    "Регистрация требует владельца: пришлите X-API-Key любого своего помощника "
+    "(новый агент будет принадлежать тому же аккаунту) или подключайте через "
+    "/ui/profile → «Передать помощнику» (claim-token). "
+    "Анонимная регистрация закрыта 2026-09-05: ключ без владельца читал память "
+    "всех аккаунтов и мог запускать деплой."
+)
 
-    No auth required for registration (bootstrap scenario). Operator can
-    audit via agent_keys.created_at and revoke abusers via /keys/revoke.
+
+@router.post("/register", response_model=RegisterResponse)
+async def register_agent(req: RegisterRequest, request: Request):
+    """Register a new agent under the caller's account and return a fresh key.
+
+    Владелец берётся из запроса (session-cookie или X-API-Key своего агента);
+    без него — 401. Существующий agent_id другого владельца — 403: раньше
+    повторный register на чужой agent_id («orchestrator») выдавал новый
+    ключ к его входящим. Ключ и agent_states получают owner_user_id всегда.
     """
+    owner = await resolve_owner_user_id(request)
+    if not owner:
+        raise HTTPException(status_code=401, detail=REGISTER_AUTH_DETAIL)
+
     pool = await get_pool()
     api_key = _new_api_key()
     async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT owner_user_id::text AS owner_user_id FROM agent_states WHERE agent_id = $1",
+            req.agent_id,
+        )
+        if existing is not None and (existing["owner_user_id"] or "") != owner:
+            raise HTTPException(
+                status_code=403,
+                detail="agent_id уже занят другим владельцем — выберите другое имя",
+            )
         # Upsert agent_states row
         await conn.execute(
             """
-            INSERT INTO agent_states (agent_id, project, machine, capabilities, last_heartbeat_at)
-            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            INSERT INTO agent_states (agent_id, project, machine, capabilities,
+                                      last_heartbeat_at, owner_user_id)
+            VALUES ($1, $2, $3, $4::jsonb, NOW(), $5::uuid)
             ON CONFLICT (agent_id) DO UPDATE SET
                 project = EXCLUDED.project,
                 machine = EXCLUDED.machine,
                 capabilities = EXCLUDED.capabilities,
                 last_heartbeat_at = NOW(),
+                owner_user_id = EXCLUDED.owner_user_id,
                 updated_at = NOW()
             """,
             req.agent_id, req.project, req.machine,
-            json.dumps(req.capabilities, ensure_ascii=False),
+            json.dumps(req.capabilities, ensure_ascii=False), owner,
         )
         # Issue new key
         await conn.execute(
             """
-            INSERT INTO agent_keys (api_key, agent_id, description)
-            VALUES ($1, $2, $3)
+            INSERT INTO agent_keys (api_key, agent_id, description, owner_user_id)
+            VALUES ($1, $2, $3, $4::uuid)
             """,
-            api_key, req.agent_id, req.description,
+            api_key, req.agent_id, req.description, owner,
         )
     return RegisterResponse(agent_id=req.agent_id, api_key=api_key)
 

@@ -34,7 +34,7 @@ def daemon(tmp_path_factory):
     d = tmp_path_factory.mktemp("rt")
     import os
     os.environ["COGCORE_RUNTIME_LOG"] = str(d / "rt.log")
-    os.environ["COGCORE_RUNTIME_HISTORY_DIR"] = str(d)
+    os.environ["COGCORE_RUNTIME_HISTORY"] = str(d)
     spec = importlib.util.spec_from_file_location("cogcore_rt_origin", DAEMON)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
