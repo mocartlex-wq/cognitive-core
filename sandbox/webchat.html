@@ -232,10 +232,11 @@
     padding:28px 22px;text-align:center;max-width:300px}
   .вход-значок{font-size:30px;opacity:.85}
   .вход-текст{font-size:14px;line-height:1.45;color:var(--mut)}
-  .вход-кнопка{appearance:none;border:none;border-radius:12px;padding:10px 18px;font:inherit;
+  .вход-кнопка{appearance:none;border:none;border-radius:12px;padding:12px 18px;font:inherit;
+    text-decoration:none;display:inline-flex;align-items:center;min-height:44px;
     font-size:14px;font-weight:600;background:var(--sent);color:#fff;cursor:pointer}
   .вход-обновить{appearance:none;border:1px solid var(--кромка);border-radius:12px;
-    padding:8px 16px;font:inherit;font-size:13px;background:transparent;color:var(--ink);cursor:pointer}
+    min-height:44px;padding:8px 16px;font:inherit;font-size:13px;background:transparent;color:var(--ink);cursor:pointer}
 
   /* ── Разметка внутри пузыря ──────────────────────────────────────────
      Отчёты агентов — это заголовки, списки и куски кода. Раньше всё это
@@ -397,12 +398,14 @@ function уйтиНаВход(){
     '<div class="вход-в-рамке">' +
       '<div class="вход-значок">🔒</div>' +
       '<div class="вход-текст">Это ваш настоящий чат — чтобы увидеть его здесь, войдите.</div>' +
-      '<button type="button" class="вход-кнопка">Войти в новой вкладке</button>' +
+      '<a class="вход-кнопка" href="/ui/login?return=%2Fchat" target="_blank" rel="noopener">Войти в новой вкладке</a>' +
       '<button type="button" class="вход-обновить">Я вошёл — обновить</button>' +
     '</div>';
-  место.querySelector('.вход-кнопка').addEventListener('click', function(){
-    window.open('/ui/login?return=' + encodeURIComponent('/chat'), '_blank', 'noopener');
-  });
+  // ⚠ Здесь была кнопка с window.open — и она молча не срабатывала: открытие
+  // окна из рамки браузеры считают всплывашкой и глушат без всякого следа
+  // (проверено на боевом 06.09 — нажатие есть, вкладки нет). Обычная ссылка
+  // с target="_blank" такого запрета не знает: переход по ссылке — то, ради
+  // чего ссылки и существуют.
   место.querySelector('.вход-обновить').addEventListener('click', function(){
     location.reload();
   });
