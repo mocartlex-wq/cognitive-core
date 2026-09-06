@@ -84,7 +84,9 @@ async def _enforce_owns_agent(request: Request, agent_id: str) -> None:
     """PR #23 tenant isolation: проверяет что текущий caller владеет agent_id.
 
     Если owner_user_id из request не совпадает с agent_states.owner_user_id —
-    выбрасывает HTTP 403. Legacy env-keys (owner=None) видят всё (admin mode).
+    выбрасывает HTTP 403. Env-keys без назначенного владельца (owner=None)
+    видят всё (admin mode). Агент БЕЗ владельца — чужой для любого владельца
+    (2026-09-05: раньше пропускался как «не наш»).
     """
     from fastapi import HTTPException
 
@@ -100,9 +102,7 @@ async def _enforce_owns_agent(request: Request, agent_id: str) -> None:
             "SELECT owner_user_id::text FROM agent_states WHERE agent_id = $1 LIMIT 1",
             agent_id,
         )
-    if agent_owner is None:
-        return  # legacy agent без owner — пропускаем (не наш)
-    if str(agent_owner) != str(caller_owner):
+    if agent_owner is None or str(agent_owner) != str(caller_owner):
         raise HTTPException(status_code=403, detail="Помощник не принадлежит вам")
 
 
