@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Changed — План «связь owner↔флот» v2, 2026-09-05/06 (#240–#246 + ветки форка/дизайнера)
+
+- **Деплой (#240)**: откат и при провале сборки/миграции, не только smoke;
+  `conditional_reload.sh` после подъёма api прогоняет `alembic upgrade head`
+  (`COGNITIVE_MIGRATE=0` на откате — схема не понижается).
+- **Гейт владельца (#241)**: ключ из БД без `owner_user_id` → 403 (раньше = admin);
+  `POST /agents/register` требует владельца; `_can_deploy(None)` → False;
+  alembic 0024 (сироты отозваны); `X-Request-Id` в логах и ответах; rate-limit
+  на `tools/call`. Cookie-путь `resolve_owner_user_id` починен (импортировал
+  несуществующую функцию).
+- **MCP Streamable HTTP (#241)**: `POST /mcp` — ответ инлайн, stateless, batch;
+  legacy SSE при `PUBLISH` без подписчиков отвечает инлайн вместо 202 «в никуда».
+  Клиент: `claude mcp add --transport http cognitive-core https://mcp.me-ai.ru/mcp`.
+- **Демон (#242, #244)**: пробуждение по PG NOTIFY (`room_event`, `agent_inbox`);
+  один инструментный цикл для всех мозгов — `managed` (Anthropic, по умолчанию
+  `claude-sonnet-5`), `custom_llm` (OpenAI-совместимые), `deepseek`; контекст
+  комнаты в промпте; инструмент `cognitive_remember`; таймаут `claude_routine`
+  с запасным ответом.
+- **Один UI (#243, #246, design/*)**: `/ui/room` = webchat; чипы «Кому», typing
+  в статусе, вставка из буфера, `?room=`; две панели на десктопе, markdown в
+  пузырях, «Показать полностью», чип «заместитель»; витрина
+  `/static/chat-prototype.html` показывает живой чат (`/chat?embed=1`,
+  nginx `location = /chat` → `X-Frame-Options SAMEORIGIN`).
+- **Память**: вложения комнат/документы не удаляются через сутки (#245);
+  restore снапшота ставит `owner_user_id`; `cognitive_recall` без `domain`
+  достижим через MCP (review/recall-domain-optional); `l3_coverage_pct` в
+  `/health.deep`; platform-правила гигиены памяти (alembic 0025).
+- **Канал Claude Code** `tools/cc-channel/` (Channels preview): комнаты пушат
+  сообщения в живую сессию, ответ через `reply`.
+- Web Push включён на проде (VAPID в override.yml).
+
+
 ### Added — Wake-channels: провайдер-агностик каналы пробуждения агентов (#191–#201)
 
 - Демон `scripts/cognitive-agent-runtime.py` обобщён: 24/7 stand-in для ЛЮБОГО
