@@ -142,3 +142,31 @@ class TestOwnerSplitPreserved:
             await consolidator._weekly_consolidate_impl("d")
         # Разделение по владельцам — обязательное свойство: чужое знание смешивать нельзя.
         assert sorted(seen) == ["o1", "o2"]
+
+
+class TestWeeklyCyclePicksStaleDomains:
+    """Второй гейт того же тупика: run_weekly_cycle отбирал домены по окну
+    weekly_days, и домен с единственным буфером старше недели в цикл не
+    попадал вовсе — расширенное окно внутри weekly_consolidate ему не помогало."""
+
+    @pytest.mark.asyncio
+    async def test_domain_selection_uses_backfill_window(self):
+        from app import worker
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[])
+
+        class _Acq:
+            async def __aenter__(self):
+                return conn
+
+            async def __aexit__(self, *a):
+                return False
+
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acq())
+        with patch.object(worker, "get_pool", AsyncMock(return_value=pool)),                 patch.object(worker, "_retry_queue_pending", AsyncMock(return_value=set())),                 patch.object(worker, "log_audit", AsyncMock()):
+            await worker.run_weekly_cycle()
+        window = conn.fetch.call_args[0][1]
+        assert window == settings.weekly_backfill_days
+        assert window > settings.weekly_days
+

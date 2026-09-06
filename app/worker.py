@@ -107,12 +107,17 @@ async def run_weekly_cycle():
     """Еженедельная консолидация L2→L3."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Отбор доменов — по ДОГОНЯЮЩЕМУ окну, а не по weekly_days: иначе
+        # домен с единственным буфером старше недели в цикл не попадает вовсе,
+        # и расширенное окно внутри weekly_consolidate (f9732ce) ему не помогает.
+        # Сам weekly_consolidate по-прежнему сначала смотрит weekly_days и
+        # расширяется только при нехватке материала на повтор.
         rows = await conn.fetch("""
             SELECT DISTINCT domain FROM l2_daily_buffers
             WHERE date >= CURRENT_DATE - $1::int
             UNION
             SELECT DISTINCT domain FROM l3_master_knowledge WHERE effective_to IS NULL
-        """, settings.weekly_days)
+        """, max(settings.weekly_days, settings.weekly_backfill_days))
         domains = {r["domain"] for r in rows}
 
     # Подмешиваем доменов из retry-очереди прошлой попытки.
