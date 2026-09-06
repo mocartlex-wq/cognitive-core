@@ -121,6 +121,10 @@
     border-radius:999px;padding:4px 11px;font-size:13px;font-family:inherit;cursor:pointer;white-space:nowrap}
   .rcp-chip:active{background:var(--sent);color:#fff}
   #chatStatus.typing{color:var(--sent)}
+  /* Никого на связи — зелёный кружок в статусе вводил бы в заблуждение. */
+  #chatStatus.off{color:var(--mut)}
+  .rcp-chip .pdot{display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:#30d158;margin-right:5px;vertical-align:1px}
 
   /* ── Комнаты ── */
   .rlist{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -728,12 +732,28 @@ function renderTypingText(){
   const secs=Math.max(1,Math.round((Date.now()-typingSince)/1000));
   chatStatus.textContent=typingLabels.join(', ')+(typingLabels.length===1?' печатает… ':' печатают… ')+secs+'s';
 }
+// Строка статуса вне печати: сколько агентов реально на связи.
+// Заполняется из participants[].online (окно 300с считает backend).
+let presenceText='агенты на связи', presenceOff=false;
+function applyPresence(){
+  if(typingLabels.length) return;      // печать важнее присутствия
+  chatStatus.textContent=presenceText;
+  chatStatus.classList.toggle('off', presenceOff);
+}
+function updatePresence(parts){
+  const agents=(parts||[]).filter(p=>p&&p.agent_id);
+  const n=agents.filter(p=>p.online===true).length;
+  presenceText = n ? (n+' на связи') : (agents.length?'нет агентов на связи':'агенты на связи');
+  presenceOff = !n;
+  applyPresence();
+}
 function updateTypingBar(typing){
   const list=Array.isArray(typing)?typing.filter(Boolean):[];
   if(!list.length){
-    if(typingLabels.length){ chatStatus.textContent='агенты на связи'; chatStatus.classList.remove('typing'); }
+    if(typingLabels.length){ chatStatus.classList.remove('typing'); }
     typingSince=0; typingLabels=[];
     if(typingTick){ clearInterval(typingTick); typingTick=null; }
+    applyPresence();
     return;
   }
   typingLabels=list; if(!typingSince) typingSince=Date.now();
@@ -746,12 +766,15 @@ let rcpKey='';
 function renderRecipients(parts){
   const bar=document.getElementById('rcpBar');
   const agents=(parts||[]).filter(p=>p&&p.agent_id);
-  const key=agents.map(p=>p.agent_id+':'+(p.display_name||'')).join('|');
+  // Присутствие входит в ключ: иначе бар не перерисуется, когда агент ожил.
+  const key=agents.map(p=>p.agent_id+':'+(p.display_name||'')+':'+(p.online?1:0)).join('|');
   if(key===rcpKey) return; rcpKey=key;
   if(!agents.length){ bar.hidden=true; bar.innerHTML=''; return; }
   bar.innerHTML='<span style="font-size:12px;color:var(--mut)">Кому:</span>'+agents.map(p=>{
     const disp=p.display_name||p.agent_id, token=/\s/.test(disp)?p.agent_id:disp;
-    return `<button type="button" class="rcp-chip" data-token="${H(token)}">@${H(disp)}</button>`;
+    const dot=p.online?'<i class="pdot"></i>':'';
+    const ttl=p.online?'на связи':(p.last_seen?('был(а): '+p.last_seen):'офлайн');
+    return `<button type="button" class="rcp-chip" data-token="${H(token)}" title="${H(ttl)}">${dot}@${H(disp)}</button>`;
   }).join('');
   bar.hidden=false;
   bar.querySelectorAll('.rcp-chip').forEach(ch=>ch.addEventListener('click',()=>insertMention(ch.getAttribute('data-token'))));
@@ -765,6 +788,7 @@ function insertMention(token){
 function paint(d, reset){
   if(d && d.api_key) roomKey=d.api_key;   // ключ комнаты для live-подписки
   updateTypingBar(d && d.typing);
+  updatePresence(d && d.participants);
   renderRecipients(d && d.participants);
   const msgs=(d&&d.messages)||[];
   if(reset){ log.innerHTML=''; seen.clear(); lastTs=null; }
