@@ -82,7 +82,6 @@
      в комнате с несколькими агентами это первое, что ищет глаз. */
   .who{font-size:13px;color:var(--ink);margin:14px 0 3px 14px;font-weight:600;
     display:flex;align-items:baseline;gap:7px}
-  .who .когда{font-size:11.5px;color:var(--mut);font-weight:400}
   .row{display:flex;align-items:flex-end;gap:7px;margin:1px 0}
   .row.me{justify-content:flex-end}
   /* Время у КАЖДОГО сообщения, а не только у разделителя дня: в длинной
@@ -754,7 +753,23 @@ async function openRoom(id,name){
 }
 
 /* ─── Рендер сообщений ─── */
-function lastRow(){ let n=log.lastElementChild; while(n && !n.classList.contains('row')) n=n.previousElementSibling; return n; }
+// Очередь на свёртку: заполняется при вставке, разбирается одним проходом.
+const ждутСвёртки = [];
+function свернутьОчередь(){
+  if(!ждутСвёртки.length) return;
+  const пачка = ждутСвёртки.splice(0, ждутСвёртки.length);
+  for(const [row, текст] of пачка) свернутьДлинное(row, текст);
+}
+
+// Последнее СООБЩЕНИЕ в ленте. Строка с кнопкой «Показать полностью» тоже
+// имеет класс row (выравнивание по стороне пузыря держится на нём), но
+// сообщением не является: без этой проверки следующий ответ того же агента
+// считался «от другого» и получал повторную подпись с хвостиком.
+function lastRow(){
+  let n=log.lastElementChild;
+  while(n && (!n.classList.contains('row') || n.classList.contains('строка-кнопки'))) n=n.previousElementSibling;
+  return n;
+}
 function render(m){
   if(seen.has(m.id)) return false;
   seen.add(m.id); hideTyping();
@@ -773,11 +788,8 @@ function render(m){
     const имя=document.createElement('span');
     имя.textContent=m.display_name||m.from_agent;
     w.appendChild(имя);
-    if(ts && !isNaN(ts)){
-      const когда=document.createElement('span');
-      когда.className='когда'; когда.textContent=чч_мм(ts);
-      w.appendChild(когда);
-    }
+    // Время в шапке группы не рисуем: оно и так стоит у каждого сообщения,
+    // включая первое, — выходило две одинаковых метки в двух точках экрана.
     // Ответил заместитель — говорим об этом сразу. Иначе кажется, что писал
     // сам агент, и человек ждёт от ответа большего, чем тот может дать.
     if(m.origin==='standin'){
@@ -799,7 +811,11 @@ function render(m){
     row.appendChild(метка);
   }
   log.appendChild(row);
-  свернутьДлинное(row, m.text);
+  // Не считаем высоту здесь: scrollHeight заставляет браузер разложить
+  // страницу немедленно, и при обновлении ленты на 200 сообщений это 200
+  // раскладок подряд. Складываем в очередь — разберём одним проходом,
+  // когда все сообщения уже вставлены (см. свернутьОчередь).
+  ждутСвёртки.push([row, m.text]);
   row.querySelectorAll('.media[data-media]').forEach(hydrateMedia);
   return true;
 }
@@ -812,24 +828,37 @@ function render(m){
 // то двадцать строк. Решаем по фактической высоте пузыря: свернуть, если он
 // выше примерно двенадцати строк. Длина остаётся запасным признаком — в
 // скрытой вкладке браузер не считает размеры и высота приходит нулевой.
-const ПОТОЛОК_ВЫСОТЫ = 290;      // ≈ 12 строк при 16/1.35
+// Потолок зависит от ширины экрана, и вот почему. Высота — честная мера
+// «сколько места занял ответ», но за одной и той же высотой стоит разный
+// объём: в колонке 900 точек 290px — это около 900 знаков, а на телефоне
+// в 390 — всего 340. С единым потолком на телефоне сворачивалась половина
+// переписки (49 сообщений из 99 на боевом), и человек жал «Показать
+// полностью» ради полутора абзацев. На узком экране потолок выше: 480
+// точек — это те же ~900 знаков, то есть равный объём, а не равная высота.
+function потолокСвёртки(){
+  return (typeof window !== 'undefined' && window.innerWidth >= 900) ? 290 : 480;
+}
+// Гистерезис: сворачивать только заметное превышение. Пузырь на 300 точек
+// при потолке 290 прятал полторы строки и взамен подставлял кнопку — чистый
+// проигрыш для читателя.
+const ЗАПАС_СВЁРТКИ = 60;
 const ПОРОГ_СВЁРТКИ = 1200;      // запасной признак, когда высоту не измерить
 function свернутьДлинное(row, текст){
-  const п = row.querySelector('.bubble');
-  const высота = п ? п.scrollHeight : 0;
-  const длинно = высота > 0
-    ? высота > ПОТОЛОК_ВЫСОТЫ
-    : (текст||'').length > ПОРОГ_СВЁРТКИ;
-  if(!длинно) return;
   const пузырь = row.querySelector('.bubble');
   if(!пузырь) return;
+  const высота = пузырь.scrollHeight;
+  const длинно = высота > 0
+    ? высота > потолокСвёртки() + ЗАПАС_СВЁРТКИ
+    : (текст||'').length > ПОРОГ_СВЁРТКИ;
+  if(!длинно) return;
+  if(пузырь.classList.contains('свёрнут')) return;
   пузырь.classList.add('свёрнут');
   // Кнопка идёт ОТДЕЛЬНОЙ строкой под пузырём, а не внутри него: строка
   // сообщения — это flex-ряд, и кнопка в нём встаёт сбоку, посреди пустоты
   // (проверено глазами на 1920). Выравниваем по той же стороне, что и само
   // сообщение, — иначе она отрывается от своего пузыря.
   const строка = document.createElement('div');
-  строка.className = 'row ' + (row.classList.contains('me') ? 'me' : 'them');
+  строка.className = 'row строка-кнопки ' + (row.classList.contains('me') ? 'me' : 'them');
   const кнопка = document.createElement('button');
   кнопка.type='button'; кнопка.className='развернуть'; кнопка.textContent='Показать полностью';
   кнопка.addEventListener('click', ()=>{
@@ -854,7 +883,13 @@ function renderTypingText(){
 // Заполняется из participants[].online (окно 300с считает backend).
 let presenceText='агенты на связи', presenceOff=false;
 function applyPresence(){
-  if(typingLabels.length) return;      // печать важнее присутствия
+  if(typingLabels.length){
+    // Печать важнее присутствия — но снимаем «серый» признак отсутствия,
+    // иначе «X печатает… 5s» показывался тускло-серым: класс off остался
+    // с прошлого расчёта, а сюда мы выходили раньше, чем его снять.
+    chatStatus.classList.remove('off');
+    return;
+  }
   chatStatus.textContent=presenceText;
   chatStatus.classList.toggle('off', presenceOff);
 }
@@ -904,7 +939,12 @@ function renderRecipients(parts){
   const bar=document.getElementById('rcpBar');
   const agents=(parts||[]).filter(p=>p&&p.agent_id);
   // Присутствие входит в ключ: иначе бар не перерисуется, когда агент ожил.
-  const key=agents.map(p=>p.agent_id+':'+(p.display_name||'')+':'+(p.online?1:0)).join('|');
+  // last_seen — часть ключа: без него бар не перерисовывался, пока агент не
+  // менял состояние, и подсказка «был(а) 2 мин назад» висела час спустя.
+  // У тех, кто на связи, время в ключ не берём: подсказка у них постоянная
+  // («на связи»), а last_seen у них меняется с каждым ударом сердца — иначе
+  // бар перерисовывался бы вхолостую по нескольку раз в минуту.
+  const key=agents.map(p=>p.agent_id+':'+(p.display_name||'')+':'+(p.online?1:0)+':'+(p.online?'':(p.last_seen||''))).join('|');
   if(key===rcpKey) return; rcpKey=key;
   if(!agents.length){ bar.hidden=true; bar.innerHTML=''; return; }
   bar.innerHTML='<span style="font-size:12px;color:var(--mut)">Кому:</span>'+agents.map(p=>{
@@ -930,6 +970,7 @@ function paint(d, reset){
   const msgs=(d&&d.messages)||[];
   if(reset){ log.innerHTML=''; seen.clear(); lastTs=null; }
   let added=false; msgs.forEach(m=>{ if(render(m)) added=true; });
+  свернутьОчередь();                     // одна раскладка на всю пачку
   if(!log.children.length) log.innerHTML='<div class="empty">Пока пусто — напиши первым</div>';
   if(added||reset) log.scrollTop=log.scrollHeight;
   // Прочитано = показано. Ставим здесь, а не в openRoom: пока комната
