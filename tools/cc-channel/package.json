@@ -1,0 +1,16 @@
+{
+  "name": "cogcore-cc-channel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Канал Cognitive Core для Claude Code: комнаты пушат события в живую сессию, ответ через reply.",
+  "bin": { "cogcore-channel": "./index.mjs" },
+  "scripts": {
+    "check": "node --check index.mjs && node --check lib/poller.mjs",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1"
+  },
+  "engines": { "node": ">=18" }
+}
