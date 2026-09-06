@@ -20,14 +20,24 @@
     --sent:#0a84ff; --recv:#26262b; --recv-t:#fff; --chatbg:#000;
     --ink:#fff; --mut:#8a93a6; --hair:rgba(255,255,255,.08);
     --panel:rgba(20,20,22,.72);
+    --поле:rgba(255,255,255,.04);      /* стекло: подложка панелей */
+    --кромка:rgba(255,255,255,.10);
+    --код-фон:rgba(255,255,255,.07);
     --sysfont:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
   }
+
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;background:var(--chatbg);font-family:var(--sysfont);
     color:var(--ink);-webkit-font-smoothing:antialiased}
 
   .app{max-width:820px;margin:0 auto;height:100vh;height:100dvh;
-    display:flex;flex-direction:column;background:var(--chatbg);overflow:hidden}
+    display:flex;flex-direction:column;background:var(--chatbg);overflow:hidden;
+    /* ⚠ Цвет текста берём ЗДЕСЬ, а не на body. Светлая тема переопределяет
+       --ink на самом .app, а body стоит выше в дереве и остаётся с тёмным
+       набором — потомки наследовали от него белый. Итог: в светлой теме имена
+       отправителей и заголовок шапки были белым по белому, контраст 1.0
+       (замер 06.09). Дефект жил давно и виден только при переключении темы. */
+    color:var(--ink)}
 
   /* Экраны-вкладки */
   .view{flex:1 1 auto;min-height:0;display:none;flex-direction:column}
@@ -55,7 +65,10 @@
   /* ── Лента чата ── */
   #log{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8px;
     display:flex;flex-direction:column;gap:2px}
-  .who{font-size:11px;opacity:.5;margin:12px 0 3px 14px;font-weight:500}
+  /* Имя отправителя: цветом, а не прозрачностью. Полупрозрачный белый на
+     светлой теме давал контраст 1.9 при норме 4.5 — подпись «Память» под
+     сообщением приходилось угадывать (замер 06.09). */
+  .who{font-size:11px;color:var(--mut);margin:12px 0 3px 14px;font-weight:500}
   .row{display:flex;margin:1px 0}
   .row.me{justify-content:flex-end}
   .bubble{position:relative;max-width:75%;padding:8px 14px;font-size:16px;line-height:1.35;
@@ -168,7 +181,11 @@
 
   /* ── Светлая тема ── */
   .app.light{--chatbg:#fff;--recv:#e5e5ea;--recv-t:#000;--ink:#000;--mut:#6b7280;
-    --panel:rgba(245,245,247,.86);--hair:rgba(0,0,0,.08)}
+    --panel:rgba(245,245,247,.86);--hair:rgba(0,0,0,.08);
+    /* 06.09: те же три величины для светлой темы — подложка панелей, кромка и
+       фон кусков кода. Без них разметка в пузырях на светлом фоне теряется:
+       код сливается с сообщением, а вторая панель — с лентой. */
+    --поле:rgba(0,0,0,.035);--кромка:rgba(0,0,0,.09);--код-фон:rgba(0,0,0,.06)}
   .app.light .tabbar{background:rgba(245,245,247,.92)}
   .app.light #box{background:rgba(0,0,0,.05)}
   .app.light .pcard,.app.light .pgrp{background:rgba(0,0,0,.05)}
@@ -197,6 +214,79 @@
   .app.light .sheet-btn{background:rgba(0,0,0,.06)}
   .sheet-btn.primary{background:var(--sent);color:#fff}
   .sheet-btn.danger{background:rgba(255,69,58,.15);color:#ff453a}
+
+  /* ── Разметка внутри пузыря ──────────────────────────────────────────
+     Отчёты агентов — это заголовки, списки и куски кода. Раньше всё это
+     приходило звёздочками и дефисами прямо в текст; теперь разбирается, но
+     должно и выглядеть спокойно: пузырь остаётся сообщением, а не страницей
+     документации. Отсюда сдержанные размеры и никаких рамок вокруг всего. */
+  .bubble .заголовок{font-weight:700;margin:10px 0 4px;line-height:1.25}
+  .bubble .заголовок:first-child{margin-top:0}
+  .bubble .у1{font-size:17px}
+  .bubble .у2{font-size:16px}
+  .bubble .у3,.bubble .у4{font-size:15px;opacity:.9}
+  .bubble .список{margin:5px 0;padding-left:20px}
+  .bubble .список li{margin:2px 0}
+  .bubble .черта{border:none;border-top:1px solid var(--кромка);margin:10px 0}
+  .bubble .встроенный{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.88em;background:var(--код-фон);padding:1px 5px;border-radius:5px}
+  .bubble .код{margin:8px 0;padding:10px 12px;border-radius:12px;background:var(--код-фон);
+    overflow-x:auto;font-size:12.5px;line-height:1.45;white-space:pre}
+  .bubble .код code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .bubble .ссылка{color:inherit;text-decoration:underline;text-underline-offset:2px}
+  .me .bubble .встроенный,.me .bubble .код{background:rgba(255,255,255,.16)}
+
+  /* Длинный отчёт складываем: агент может прислать три экрана разбора, и
+     переписка после этого не листается. Показываем начало и кнопку. */
+  .bubble.свёрнут{max-height:290px;overflow:hidden;position:relative}
+  .bubble.свёрнут::after{content:'';position:absolute;left:0;right:0;bottom:0;height:64px;
+    background:linear-gradient(180deg,transparent,var(--recv))}
+  .me .bubble.свёрнут::after{background:linear-gradient(180deg,transparent,var(--sent))}
+  .развернуть{display:inline-block;margin:4px 0 2px;padding:5px 12px;border-radius:14px;
+    border:1px solid var(--кромка);background:var(--поле);color:var(--ink);
+    font:inherit;font-size:12.5px;cursor:pointer}
+  .развернуть:hover{background:var(--код-фон)}
+
+  /* Кто ответил вместо агента: заместитель отвечает от своего имени, и это
+     должно быть видно сразу — иначе кажется, что писал сам агент. */
+  .чип-зам{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;
+    font-size:10.5px;font-weight:600;letter-spacing:.2px;
+    background:var(--код-фон);color:var(--mut);vertical-align:1px}
+
+  /* ── Ноутбук и монитор: две панели вместо телефонной колонки ───────────
+     Владелец 06.09: «дизайн так себе, чат не удобный». На экране 1920 приложение
+     оставалось узкой телефонной полосой шириной 820 посреди чёрного поля, а
+     переход между комнатами и перепиской шёл через нижние вкладки — как на
+     телефоне, хотя места хватает на обе панели сразу.
+
+     От 900 точек: слева список комнат, справа переписка. Вкладки прячем — они
+     телефонная вещь, на ноутбуке их место занимает сама раскладка. Ширину
+     держим 1440: это MacBook 13 целиком и MacBook 15 с ровными полями. */
+  @media (min-width: 900px){
+    .app{max-width:1440px;display:grid;grid-template-columns:320px 1fr;
+      grid-template-rows:100%;height:100vh;height:100dvh;
+      border-left:1px solid var(--кромка);border-right:1px solid var(--кромка)}
+    .app > .view{display:flex!important}
+    #vRooms{grid-column:1;border-right:1px solid var(--кромка);background:var(--поле)}
+    #vChat{grid-column:2;min-width:0}
+    /* Профиль на широком экране — накладкой поверх переписки, а не третьей
+       вкладкой: заходят туда редко, а место отнимал бы постоянно. */
+    #vProfile{position:fixed;inset:0;z-index:60;max-width:520px;margin:auto;height:auto;
+      max-height:82vh;border-radius:18px;border:1px solid var(--кромка);
+      background:var(--panel);backdrop-filter:saturate(180%) blur(22px);
+      -webkit-backdrop-filter:saturate(180%) blur(22px);box-shadow:0 24px 60px rgba(0,0,0,.45)}
+    #vProfile:not(.active){display:none!important}
+    .tabbar{display:none}
+    .chat-head .back{display:none}          /* назад некуда — список всегда виден */
+    /* Отчёты агентов длинные: на широкой панели пузырь может позволить себе
+       больше, иначе текст ползёт узкой лентой посреди пустоты. */
+    .bubble{max-width:min(720px,82%)}
+    #log{padding:16px 20px 10px}
+    .composer{padding:10px 16px 14px}
+  }
+  @media (min-width: 1280px){
+    .app{grid-template-columns:340px 1fr}
+  }
 
   /* Убираем плавающий ассистент-виджет — приложение само по себе чат */
   #cogasst-fab,#cogasst-panel{display:none!important}
@@ -272,8 +362,83 @@ function renderText(s){
   let t = H((s||'').replace(/\s*@dsdsd\b/gi,''));
   t = t.replace(/(?:📎|🎤|📷)?\s*([^\n(]*?)\s*\(media:([a-f0-9-]{6,})\)/g, (m, fname, id)=>
     `<span class="media" data-media="${id}" data-name="${H((fname||'').trim())}">📎 ${H((fname||'').trim()||'файл')}</span>`);
-  return t;
+  return разметка(t);
 }
+
+// Разметка в сообщениях агентов.
+//
+// Владелец 06.09: «чат не удобный» — агенты пишут отчёты обычной разметкой, а
+// чат показывал её как есть: строки в звёздочках, дефисы вместо списков,
+// «---» поперёк текста. Читать такое невозможно, а писать иначе агенты не
+// станут: разметка — их обычный способ отвечать.
+//
+// ⚠ Разбираем ПОСЛЕ экранирования (H выше): на вход приходит уже безопасный
+// текст, поэтому мы только добавляем свои теги и никогда не пропускаем чужие.
+// Внешних библиотек нет намеренно — страница ходит под строгой политикой
+// источников, чужой адрес подключать нельзя.
+function разметка(t){
+  const блоки = [];
+  // Метка-заглушка для кусков кода. Нулевой символ в сообщении не встречается,
+  // а вот «пробел-число-пробел» встречается сплошь и рядом: на такой заглушке
+  // безобидное «в 3 часа» превратилось бы в кусок чужого кода.
+  const МЕТКА = String.fromCharCode(0);
+  // Куски кода вынимаем первыми, чтобы внутри них ничего не толковалось.
+  t = t.replace(/```([^\n]*)\n?([\s\S]*?)```/g, function(m, язык, тело){
+    блоки.push('<pre class="код"><code>' + тело.replace(/\n$/, '') + '</code></pre>');
+    return МЕТКА + (блоки.length - 1) + МЕТКА;
+  });
+  t = t.replace(/`([^`\n]+)`/g, '<code class="встроенный">$1</code>');
+
+  const строки = t.split('\n');
+  const итог = [];
+  let список = null;                       // какой список сейчас открыт
+  const закрыть = function(){ if (список) { итог.push('</' + список + '>'); список = null; } };
+
+  for (const исходная of строки){
+    const s = исходная.replace(/\s+$/, '');
+    let m;
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(s)) { закрыть(); итог.push('<hr class="черта">'); continue; }
+    if ((m = /^(#{1,4})\s+(.*)$/.exec(s))) {
+      закрыть();
+      итог.push('<div class="заголовок у' + Math.min(m[1].length, 4) + '">' + m[2] + '</div>');
+      continue;
+    }
+    if ((m = /^\s*[-*•]\s+(.*)$/.exec(s))) {
+      if (список !== 'ul') { закрыть(); итог.push('<ul class="список">'); список = 'ul'; }
+      итог.push('<li>' + m[1] + '</li>');
+      continue;
+    }
+    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(s))) {
+      if (список !== 'ol') { закрыть(); итог.push('<ol class="список">'); список = 'ol'; }
+      итог.push('<li>' + m[1] + '</li>');
+      continue;
+    }
+    закрыть();
+    итог.push(s);
+  }
+  закрыть();
+  t = итог.join('\n');
+  // Пузырь показывает текст «как есть» (white-space: pre-wrap), поэтому
+  // переносы, оставшиеся ВОКРУГ блочных тегов, превращаются в пустые строки:
+  // список разъезжается, между пунктами дыры в строку (видно на снимке 393).
+  // Убираем именно их — переносы внутри обычного текста трогать нельзя, на
+  // них держится абзац.
+  t = t
+    .replace(/\n*(<(?:ul|ol|hr|pre|div)[^>]*>)\n*/g, '$1')
+    .replace(/\n*(<\/(?:ul|ol|pre|div)>)\n*/g, '$1')
+    .replace(/\n*(<li>)/g, '$1')
+    .replace(/(<\/li>)\n*/g, '$1');
+
+  // Выделения — после разбора строк, чтобы звёздочка списка не путалась с курсивом.
+  t = t.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  t = t.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:)!?]|$)/g, '$1<i>$2</i>');
+  // Ссылки: только http(s). Иначе в текст можно подсунуть javascript: и прочее.
+  t = t.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
+    '<a class="ссылка" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  return t.replace(new RegExp(МЕТКА + '(\\d+)' + МЕТКА, 'g'), function(m, i){ return блоки[+i]; });
+}
+
 // Асинхронная гидратация вложения: картинка инлайн, голос → транскрипт, прочее → ссылка.
 async function hydrateMedia(span){
   if(span.dataset.h) return; span.dataset.h='1';
@@ -431,15 +596,49 @@ function render(m){
   const sameSender = prev && prev.dataset.who===m.from_agent;
   if(!mine && !sameSender){
     const w=document.createElement('div'); w.className='who';
-    w.textContent=m.display_name||m.from_agent; log.appendChild(w);
+    w.textContent=m.display_name||m.from_agent;
+    // Ответил заместитель — говорим об этом сразу. Иначе кажется, что писал
+    // сам агент, и человек ждёт от ответа большего, чем тот может дать.
+    if(m.origin==='standin'){
+      const чип=document.createElement('span');
+      чип.className='чип-зам'; чип.textContent='заместитель';
+      w.appendChild(чип);
+    }
+    log.appendChild(w);
   }
   const row=document.createElement('div');
   row.className='row '+(mine?'me':'them')+(sameSender?' grp':''); row.dataset.who=m.from_agent;
   row.innerHTML='<div class="bubble">'+renderText(m.text)+'</div>';
   log.appendChild(row);
+  свернутьДлинное(row, m.text);
   row.querySelectorAll('.media[data-media]').forEach(hydrateMedia);
   return true;
 }
+// Длинный отчёт складываем до кнопки: агент присылает разбор на три экрана,
+// и переписка после такого не листается вовсе. Порог 1200 знаков — примерно
+// полтора экрана телефона; короткие ответы не трогаем.
+const ПОРОГ_СВЁРТКИ = 1200;
+function свернутьДлинное(row, текст){
+  if((текст||'').length <= ПОРОГ_СВЁРТКИ) return;
+  const пузырь = row.querySelector('.bubble');
+  if(!пузырь) return;
+  пузырь.classList.add('свёрнут');
+  // Кнопка идёт ОТДЕЛЬНОЙ строкой под пузырём, а не внутри него: строка
+  // сообщения — это flex-ряд, и кнопка в нём встаёт сбоку, посреди пустоты
+  // (проверено глазами на 1920). Выравниваем по той же стороне, что и само
+  // сообщение, — иначе она отрывается от своего пузыря.
+  const строка = document.createElement('div');
+  строка.className = 'row ' + (row.classList.contains('me') ? 'me' : 'them');
+  const кнопка = document.createElement('button');
+  кнопка.type='button'; кнопка.className='развернуть'; кнопка.textContent='Показать полностью';
+  кнопка.addEventListener('click', ()=>{
+    пузырь.classList.remove('свёрнут');
+    строка.remove();
+  });
+  строка.appendChild(кнопка);
+  row.after(строка);
+}
+
 /* ─── «Агент печатает…» в шапке: detail.typing = label'ы (Redis TTL, гаснет сам).
    Секундомер клиентский, как в Claude Code: «Память печатает… 33s». Перенесено
    из room.html (там был отдельный бар), здесь живёт в строке статуса. ─── */
