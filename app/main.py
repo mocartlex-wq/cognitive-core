@@ -182,6 +182,37 @@ def _redact_path(path: str, query: str) -> str:
 
 
 # HTTP метрики + логирование middleware
+class BearerApiKeyShim:
+    """`Authorization: Bearer <ключ агента>` → `X-API-Key`.
+
+    Codex CLI умеет подключать Streamable-HTTP MCP только с bearer-токеном
+    (`codex mcp add --url … --bearer-token-env-var …`), заголовок X-API-Key ему
+    не задать. Без этого GPT-агенты владельца (codex-cli, codex-app) жили без
+    общей памяти («MCP никогда», 06.09). Шим подставляет ключ ТОЛЬКО когда
+    X-API-Key отсутствует, дальше работает обычная проверка verify_api_key —
+    те же ключи, тот же гейт владельца.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            headers = scope.get("headers") or []
+            names = {k for k, _ in headers}
+            if b"x-api-key" not in names:
+                for k, v in headers:
+                    if k == b"authorization" and v[:7].lower() == b"bearer ":
+                        token = v[7:].strip()
+                        if token:
+                            scope["headers"] = list(headers) + [(b"x-api-key", token)]
+                        break
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(BearerApiKeyShim)
+
+
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     # Для лога — маскируем токены в URL
