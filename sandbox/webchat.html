@@ -177,7 +177,12 @@
     background:none;border:none;cursor:pointer;font-family:inherit}
   .tab span{display:block;font-size:10px;margin-top:1px}
   .tab.active{color:var(--sent)}
-  .tab .badge{display:none}
+  .tab{position:relative}
+  /* Точка на вкладке: в другой вкладке иначе не видно, что где-то пришло. */
+  .tab .badge{display:none;position:absolute;top:6px;left:50%;margin-left:9px;
+    width:9px;height:9px;border-radius:50%;background:#0a84ff;border:2px solid rgba(18,18,20,.92)}
+  .tab .badge.on{display:block}
+  .app.light .tab .badge{border-color:rgba(245,245,247,.92)}
 
   /* ── Светлая тема ── */
   .app.light{--chatbg:#fff;--recv:#e5e5ea;--recv-t:#000;--ink:#000;--mut:#6b7280;
@@ -357,7 +362,7 @@
   <!-- ТАБ-БАР -->
   <nav class="tabbar">
     <button class="tab active" data-v="vChat" type="button">💬<span>Чат</span></button>
-    <button class="tab" data-v="vRooms" type="button">👥<span>Комнаты</span></button>
+    <button class="tab" data-v="vRooms" type="button">👥<span>Комнаты</span><i class="badge" id="roomsDot"></i></button>
     <button class="tab" data-v="vProfile" type="button">⚙️<span>Профиль</span></button>
   </nav>
 </div>
@@ -560,7 +565,7 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>go(t
 document.getElementById('toRooms').addEventListener('click',()=>go('vRooms'));
 
 /* ─── Комнаты ─── */
-async function loadRooms(){
+async function loadRooms({open=true}={}){
   try{
     const r = await fetch('/user/rooms', J);
     if(r.status===401){ уйтиНаВход(); return; }
@@ -570,8 +575,13 @@ async function loadRooms(){
     const sr=rooms.find(x=>(x.name||'').indexOf('🛟')===0 || x.name==='Техподдержка');
     supportRoomId = sr ? sr.id : null;
     renderRoomList();
-    await autoOpen();
+    if(open) await autoOpen();
   }catch(e){ document.getElementById('rlist').innerHTML='<div class="empty">Ошибка загрузки комнат</div>'; }
+}
+// Точка на вкладке «Комнаты» — есть ли хоть одна непрочитанная.
+function updateTabBadge(){
+  const el=document.getElementById('roomsDot'); if(!el) return;
+  el.classList.toggle('on', realRooms().some(isUnread));
 }
 // Обычные комнаты (без служебной техподдержки).
 function realRooms(){ return rooms.filter(x=> x.id!==supportRoomId && (x.name||'').indexOf('🛟')!==0 && x.name!=='Техподдержка'); }
@@ -579,7 +589,8 @@ function realRooms(){ return rooms.filter(x=> x.id!==supportRoomId && (x.name||'
 // «кто что видел», а ради точки в списке миграция не окупается. Цена честная —
 // метка не переезжает между устройствами.
 function seenKey(id){ return 'cc_seen_'+id; }
-function markSeen(id, iso){ try{ localStorage.setItem(seenKey(id), iso||new Date().toISOString()); }catch(e){} }
+function markSeen(id, iso){ try{ localStorage.setItem(seenKey(id), iso||new Date().toISOString()); }catch(e){}
+  updateTabBadge(); }
 function isUnread(x){
   const lm=x.last_message; if(!lm || isMe(lm.from_agent)) return false;
   let seenIso=null; try{ seenIso=localStorage.getItem(seenKey(x.id)); }catch(e){}
@@ -616,6 +627,7 @@ function renderRoomList(){
   el.querySelectorAll('.rrow').forEach(row=>row.addEventListener('click',()=>{
     openRoom(row.getAttribute('data-id'), row.getAttribute('data-name'));
   }));
+  updateTabBadge();
 }
 // Открыть первую комнату. Проба запросом больше не нужна: список уже
 // отфильтрован по is_owner, а /detail требует ровно владения — 403 здесь
@@ -1136,6 +1148,9 @@ loadRooms();
 loadProfile();
 // Живая доставка идёт через startLive() (long-poll). Лёгкий страховочный refresh раз в 20с.
 setInterval(()=>{ if(roomId && document.getElementById('vChat').classList.contains('active')) refresh(false); }, 20000);
+// Список комнат в фоне: без него точка на вкладке зажглась бы только после перезахода.
+// open:false — не переоткрывать комнату, пользователь может быть в другой.
+setInterval(()=>{ loadRooms({open:false}); }, 60000);
 </script>
 </body>
 </html>
