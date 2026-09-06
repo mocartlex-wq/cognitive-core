@@ -264,6 +264,22 @@ async def weekly_consolidate(domain: str) -> dict:
         return await _weekly_consolidate_impl(domain)
 
 
+async def _fetch_l2_window(conn, domain: str, days: int) -> list[dict]:
+    """L2-буферы домена за последние `days` дней, по возрастанию даты."""
+    rows = await conn.fetch(
+        """
+        SELECT id, date, domain, owner_user_id::text AS owner_user_id,
+               summary, source_event_ids, confidence
+        FROM l2_daily_buffers
+        WHERE domain = $1
+          AND date >= CURRENT_DATE - $2::int
+        ORDER BY date
+        """,
+        domain, days,
+    )
+    return [dict(r) for r in rows]
+
+
 async def _weekly_consolidate_impl(domain: str) -> dict:
     """L2 → L3 по домену, отдельно для каждого владельца.
 
@@ -278,18 +294,23 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Загружаем L2 буферы за неделю — вместе с владельцем
-        l2_rows = await conn.fetch(
-            """
-            SELECT id, date, domain, owner_user_id::text AS owner_user_id,
-                   summary, source_event_ids, confidence
-            FROM l2_daily_buffers
-            WHERE domain = $1
-              AND date >= CURRENT_DATE - $2::int
-            ORDER BY date
-            """,
-            domain, settings.weekly_days,
-        )
-        all_buffers = [dict(r) for r in l2_rows]
+        all_buffers = await _fetch_l2_window(conn, domain, settings.weekly_days)
+        # Порог повторяемости (min_l2_repetitions_for_l3=2) куратор проверяет по
+        # тем буферам, что мы ему передали, а окно — weekly_days=7. Домен,
+        # роняющий один буфер в месяц, КАЖДУЮ неделю выглядит как «один буфер»:
+        # паттерн не может повториться, и L3 у него не появится никогда. На
+        # 06.09 так застряли ~30 доменов из 51 (l2=1 при l3_active=0), из-за
+        # чего l3_coverage_pct = 27.5. У daily догоняющий режим есть (backfill,
+        # stale_tail_days), у weekly не было.
+        # Расширяем окно ТОЛЬКО когда материала не хватает на повтор: домены,
+        # которые и так проходят, второго запроса не делают и работают как раньше.
+        if len(all_buffers) < settings.min_l2_repetitions_for_l3:
+            wide = await _fetch_l2_window(conn, domain, settings.weekly_backfill_days)
+            if len(wide) > len(all_buffers):
+                log.info("weekly window widened domain=%s buffers %d->%d (%dd->%dd)",
+                         domain, len(all_buffers), len(wide),
+                         settings.weekly_days, settings.weekly_backfill_days)
+                all_buffers = wide
 
     if not all_buffers:
         return {"status": "no_buffers"}
