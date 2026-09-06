@@ -104,6 +104,15 @@ class TestPresenceSQL:
     def test_window_is_300_seconds(self):
         assert "INTERVAL '300 seconds'" in SRC
 
+    def test_default_heartbeat_is_not_presence(self):
+        """last_heartbeat_at DEFAULT NOW() = created_at у агента, который ни разу
+        не выходил на связь. Без этой защиты шесть участников orchestra
+        показывали один и тот же «был(а): 2026-08-10T17:02:43» — время
+        пересоздания комнаты. Отметка ≤ created_at → last_seen NULL, online false."""
+        block = SRC[SRC.index("AS last_seen"):SRC.index("AS online")]
+        assert "> s.created_at" in SRC[:SRC.index("AS last_seen")][-400:]
+        assert "> s.created_at" in block
+
     def test_online_never_null(self):
         # Без COALESCE агент без отметок дал бы online=None, и UI показал бы
         # «неизвестно» как «онлайн».
