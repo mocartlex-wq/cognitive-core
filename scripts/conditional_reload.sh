@@ -117,10 +117,39 @@ _prepull_base_images() {
     done
 }
 
+# Миграции схемы (2026-09-05). До этого деплой НИКОГДА не запускал alembic:
+# файлы миграций приезжали в образ, а схема прода отставала (0016→0018 в июле
+# докатывали руками; 2026-09-05 две ветки взяли один номер 0022). Теперь после
+# каждого подъёма api — `alembic upgrade head`: идемпотентно, лечит отставание
+# любого происхождения. Провал миграции = провал деплоя (auto-deploy откатит
+# код). ⚠️ Схему при откате НЕ понижаем: миграции обязаны быть обратно
+# совместимыми (add-only), иначе откат кода на старую схему — отдельная беда.
+_migrate() {
+    # При откате (auto-deploy зовёт нас с COGNITIVE_MIGRATE=0) старый образ не
+    # знает ревизию, которую только что применил новый → alembic упал бы на
+    # «Can't locate revision». Схему не трогаем, код откатываем.
+    if [ "${COGNITIVE_MIGRATE:-1}" != "1" ]; then
+        echo "[$(date -Iseconds)] alembic: пропуск (COGNITIVE_MIGRATE=${COGNITIVE_MIGRATE}, откат кода без понижения схемы)"
+        return 0
+    fi
+    local attempt
+    for attempt in 1 2 3; do
+        if docker compose $COMPOSE_FILES exec -T api alembic upgrade head; then
+            echo "[$(date -Iseconds)] alembic upgrade head: ok"
+            return 0
+        fi
+        echo "[$(date -Iseconds)] alembic upgrade head: попытка $attempt не удалась (api/БД ещё поднимаются?)"
+        sleep 5
+    done
+    echo "[$(date -Iseconds)] ERROR: alembic upgrade head провалился 3 раза — деплой считаем неудачным" >&2
+    return 1
+}
+
 if [ "$restart_full" = "1" ]; then
     echo "[$(date -Iseconds)] full restart (compose-file or env changed)"
     _prepull_base_images
     docker compose $COMPOSE_FILES up -d --build
+    _migrate
     exit 0
 fi
 
@@ -142,6 +171,9 @@ if [ -n "$services_to_build" ]; then
     echo "[$(date -Iseconds)] rebuilding:$services_to_build"
     _prepull_base_images
     docker compose $COMPOSE_FILES up -d --build $services_to_build
+    if echo " $services_to_build " | grep -q " api "; then
+        _migrate
+    fi
 elif [ "$rebuild_api" = "1" ] || [ "$rebuild_mcp" = "1" ]; then
     echo "[$(date -Iseconds)] api/mcp rebuild requested but no such services in compose ($COMPOSE_SERVICES) — skipping"
 fi

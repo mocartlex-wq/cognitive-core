@@ -52,6 +52,11 @@ class Settings(BaseSettings):
 
     # Безопасность
     agent_api_keys: str = '{"agent_default":"default-key"}'
+    # Владелец, которому принадлежат env-ключи из AGENT_API_KEYS (UUID accounts).
+    # Задан — env-агенты работают как обычные агенты этого владельца (owner-scoped).
+    # Пуст — env-агенты остаются «admin без фильтра» (config-provisioned секрет,
+    # не самозарегистрированный). NULL-owner в БД с 2026-09-05 = отказ, не admin.
+    cogcore_admin_owner_user_id: str = ""
     max_payload_size: int = 262144  # 256KB
     rate_limit_per_agent: int = 100
     max_payload_depth: int = 10

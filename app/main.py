@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -188,13 +189,23 @@ async def metrics_middleware(request: Request, call_next):
     if settings.log_redact_secrets and request.url.query:
         safe_path = _redact_path(request.url.path, request.url.query)
 
-    trace_id = log_event("info", "request", method=request.method, path=safe_path)
+    # Сквозной request_id: берём клиентский X-Request-Id (если он короткий и
+    # безопасный), иначе генерируем. Виден в логах, в ответе и в тексте ошибок
+    # MCP-инструментов — чтобы «ответ ушёл в никуда» можно было найти.
+    incoming = (request.headers.get("x-request-id") or "").strip()
+    request_id = incoming if 0 < len(incoming) <= 64 and incoming.isprintable() else uuid.uuid4().hex[:16]
+    request.state.request_id = request_id
+
+    trace_id = log_event("info", "request", method=request.method, path=safe_path,
+                         request_id=request_id)
     start = time.monotonic()
     response = await call_next(request)
     duration = time.monotonic() - start
     track_http(request.method, request.url.path, response.status_code, duration)
     log_event("info", "response", trace_id=trace_id, method=request.method,
-              path=safe_path, status=response.status_code, duration_ms=round(duration * 1000, 2))
+              path=safe_path, status=response.status_code, duration_ms=round(duration * 1000, 2),
+              request_id=request_id)
+    response.headers["X-Request-Id"] = request_id
     return response
 
 

@@ -2,10 +2,12 @@
 
 Usage from any Linux/macOS shell:
 
-    curl https://mcp.me-ai.ru/onboard.sh | bash -s <agent-id> [project]
+    OWNER_API_KEY=<ключ любого своего помощника> \\
+      curl https://mcp.me-ai.ru/onboard.sh | bash -s <agent-id> [project]
 
 Result:
-  - Agent registered via POST /agents/register
+  - Agent registered via POST /agents/register под аккаунтом владельца ключа
+    (с 2026-09-05 анонимная регистрация закрыта — см. agents_collab.register_agent)
   - Personal api_key saved to ~/.cognitive-core/credentials (chmod 600)
   - Claude Desktop / Cursor JSON snippet printed for copy-paste
   - First heartbeat sent to confirm working
@@ -30,16 +32,23 @@ AGENT_ID="${1:-${AGENT_ID:-}}"
 PROJECT="${2:-${PROJECT:-default}}"
 MACHINE="${MACHINE:-$(hostname)}"
 API_BASE="${API_BASE:-https://mcp.me-ai.ru}"
+# Ключ любого УЖЕ подключённого помощника владельца: новый агент регистрируется
+# под тем же аккаунтом. Без него сервер отвечает 401 (анонимная регистрация закрыта).
+OWNER_API_KEY="${OWNER_API_KEY:-${COGNITIVE_API_KEY:-}}"
 
-if [ -z "$AGENT_ID" ]; then
+if [ -z "$AGENT_ID" ] || [ -z "$OWNER_API_KEY" ]; then
     cat <<'USAGE' >&2
 Usage:
-  curl <onboard-url> | bash -s <agent-id> [project]
-  AGENT_ID=my-agent PROJECT=foo curl <onboard-url> | bash
+  OWNER_API_KEY=<ключ своего помощника> curl <onboard-url> | bash -s <agent-id> [project]
+  AGENT_ID=my-agent PROJECT=foo OWNER_API_KEY=... curl <onboard-url> | bash
+
+OWNER_API_KEY — ключ любого помощника, уже подключённого к вашему аккаунту
+(или переменная COGNITIVE_API_KEY из ~/.cognitive-core/credentials).
+Первого помощника подключайте через /ui/profile → «Передать помощнику».
 
 Examples:
-  curl https://mcp.me-ai.ru/onboard.sh | bash -s claude-desktop-laptop
-  curl https://mcp.me-ai.ru/onboard.sh | bash -s ai-crm-deploy ai-crm
+  OWNER_API_KEY=abc... curl https://mcp.me-ai.ru/onboard.sh | bash -s claude-desktop-laptop
+  OWNER_API_KEY=abc... curl https://mcp.me-ai.ru/onboard.sh | bash -s ai-crm-deploy ai-crm
 USAGE
     exit 1
 fi
@@ -53,7 +62,7 @@ fi
 echo "==> Registering agent '$AGENT_ID' for project '$PROJECT' on '$MACHINE'..."
 
 RESPONSE=$(curl -sS --max-time 10 -X POST "$API_BASE/agents/register" \
-    -H "Content-Type: application/json" \
+    -H "Content-Type: application/json" -H "X-API-Key: $OWNER_API_KEY" \
     -d "{\"agent_id\":\"$AGENT_ID\",\"project\":\"$PROJECT\",\"machine\":\"$MACHINE\",\"description\":\"Onboarded via curl|bash\"}")
 
 # Extract api_key — try jq first (clean), fallback to grep+sed
