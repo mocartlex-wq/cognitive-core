@@ -69,7 +69,9 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "domain": {"type": "string", "description": "Предметная область, e.g. fastapi_dev"},
+                "domain": {"type": "string", "description": (
+                    "Предметная область = проект (cognitive_core, ai_crm, deploy…), "
+                    "не имя агента и не test_/probe_. Новый домен — только для нового проекта.")},
                 "task": {"type": "string", "description": "Что было сделано"},
                 "result": {"type": "string", "description": "Каков результат", "default": ""},
                 "feedback": {"type": "string", "description": "positive / negative / neutral", "default": ""},
@@ -892,6 +894,80 @@ async def _deploy_status() -> dict:
     return out
 
 
+# ─── Подсказка доменов владельца в схеме cognitive_remember (Фаза 5б) ──────
+# 55 доменов у владельца, из них 30+ «одиночки» (1 L1 / 1 L2 / 0 L3): агенты
+# придумывали домен на каждую запись (test, tests, functest, e2e_test, имя
+# агента…), и накопительная консолидация не имела что копить → L3 покрытие
+# 27.5%. Статическое описание «e.g. fastapi_dev» этому только помогало.
+# Теперь tools/list подставляет в описание поля domain живой список доменов,
+# которые у ЭТОГО владельца прижились (есть активное L3 или ≥2 L2-буфера).
+DOMAIN_HINT_LIMIT = int(os.environ.get("COGCORE_DOMAIN_HINT_LIMIT", "12"))
+DOMAIN_HINT_TTL_S = float(os.environ.get("COGCORE_DOMAIN_HINT_TTL_S", "300"))
+_DOMAIN_HINT_CACHE: dict[str, tuple[float, list[str]]] = {}
+DOMAIN_DESCRIPTION_BASE = (
+    "Предметная область = проект (cognitive_core, ai_crm, deploy…), "
+    "не имя агента и не test_/probe_. Новый домен — только для нового проекта."
+)
+
+
+async def _owner_domains(request: Request) -> list[str]:
+    """Прижившиеся домены владельца для подсказки; [] для env-агентов, без
+    ключа и при любой ошибке БД — tools/list не должен падать из-за подсказки."""
+    try:
+        owner = await _resolve_owner(request)
+    except Exception:
+        return []
+    if not owner:
+        return []
+    now = time.time()
+    hit = _DOMAIN_HINT_CACHE.get(owner)
+    if hit and now - hit[0] < DOMAIN_HINT_TTL_S:
+        return hit[1]
+    domains: list[str] = []
+    try:
+        from app.db.postgres import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT domain, SUM(w) AS w FROM (
+                    SELECT domain, 3 AS w FROM l3_master_knowledge
+                     WHERE owner_user_id = $1::uuid AND effective_to IS NULL
+                    UNION ALL
+                    SELECT domain, 1 AS w FROM l2_daily_buffers
+                     WHERE owner_user_id = $1::uuid
+                ) x
+                GROUP BY domain
+                HAVING SUM(w) >= 2
+                ORDER BY w DESC, domain
+                LIMIT $2
+                """,
+                owner, DOMAIN_HINT_LIMIT,
+            )
+        domains = [str(r["domain"]) for r in rows if r["domain"]]
+    except Exception as e:
+        log.debug("domain hint unavailable for owner %s: %s", owner, e)
+    _DOMAIN_HINT_CACHE[owner] = (now, domains)
+    return domains
+
+
+def _tools_with_domain_hint(domains: list[str]) -> list[dict[str, Any]]:
+    """Копия TOOLS с описанием domain под владельца. TOOLS не мутируем — это
+    общий модульный список на все ключи."""
+    if not domains:
+        return TOOLS
+    import copy
+    tools = copy.deepcopy(TOOLS)
+    for t in tools:
+        if t.get("name") == "cognitive_remember":
+            prop = t["inputSchema"]["properties"]["domain"]
+            prop["description"] = (
+                DOMAIN_DESCRIPTION_BASE
+                + " У владельца уже есть: " + ", ".join(domains) + " — используй их."
+            )
+    return tools
+
+
 async def _resolve_owner(request: Request) -> str | None:
     """Возвращает owner_user_id (str UUID) или None для legacy env-агентов.
 
@@ -1593,7 +1669,7 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
         return _ok(req_id, {})
 
     if method == "tools/list":
-        return _ok(req_id, {"tools": TOOLS})
+        return _ok(req_id, {"tools": _tools_with_domain_hint(await _owner_domains(request))})
 
     if method == "tools/call":
         params = req.params or {}
