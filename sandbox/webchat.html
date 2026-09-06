@@ -227,6 +227,16 @@
   html.в-рамке .tabbar{padding-bottom:0}
   html.в-рамке .composer{padding-bottom:8px}
 
+  /* Приглашение войти — показывается ВНУТРИ рамки витрины вместо пустоты. */
+  .вход-в-рамке{margin:auto;display:flex;flex-direction:column;align-items:center;gap:12px;
+    padding:28px 22px;text-align:center;max-width:300px}
+  .вход-значок{font-size:30px;opacity:.85}
+  .вход-текст{font-size:14px;line-height:1.45;color:var(--mut)}
+  .вход-кнопка{appearance:none;border:none;border-radius:12px;padding:10px 18px;font:inherit;
+    font-size:14px;font-weight:600;background:var(--sent);color:#fff;cursor:pointer}
+  .вход-обновить{appearance:none;border:1px solid var(--кромка);border-radius:12px;
+    padding:8px 16px;font:inherit;font-size:13px;background:transparent;color:var(--ink);cursor:pointer}
+
   /* ── Разметка внутри пузыря ──────────────────────────────────────────
      Отчёты агентов — это заголовки, списки и куски кода. Раньше всё это
      приходило звёздочками и дефисами прямо в текст; теперь разбирается, но
@@ -366,6 +376,37 @@ if (вРамке) {
 // под вырез камеры и системную панель, которых внутри рамки нет, — сверху и
 // снизу пустые поля. Возвращаем ровно туда, откуда ушли.
 const кудаПослеВхода = '/ui/login?return=' + encodeURIComponent(вРамке ? '/chat?embed=1' : '/chat');
+
+// Уход на вход.
+//
+// ⚠ 06.09, проверка на боевом: в рамке витрины экран оставался чёрным. Причина
+// не в чате — страница входа отдаёт X-Frame-Options: DENY и в рамку не
+// показывается. И это правильно: форму входа как раз и прячут в чужие рамки,
+// чтобы человек вводил пароль, не понимая куда. Ослаблять запрет ради витрины
+// нельзя.
+//
+// Поэтому из рамки не уводим внутрь, а объясняем и открываем вход ОТДЕЛЬНОЙ
+// вкладкой. Витрина при этом остаётся на месте: вернувшись, человек нажимает
+// «Обновить» и видит свой чат.
+function уйтиНаВход(){
+  if (!вРамке) { location.href = кудаПослеВхода; return; }
+  const место = document.getElementById('log') || document.body;
+  if (место.dataset.вход === '1') return;      // уже показали — не мигаем
+  место.dataset.вход = '1';
+  место.innerHTML =
+    '<div class="вход-в-рамке">' +
+      '<div class="вход-значок">🔒</div>' +
+      '<div class="вход-текст">Это ваш настоящий чат — чтобы увидеть его здесь, войдите.</div>' +
+      '<button type="button" class="вход-кнопка">Войти в новой вкладке</button>' +
+      '<button type="button" class="вход-обновить">Я вошёл — обновить</button>' +
+    '</div>';
+  место.querySelector('.вход-кнопка').addEventListener('click', function(){
+    window.open('/ui/login?return=' + encodeURIComponent('/chat'), '_blank', 'noopener');
+  });
+  место.querySelector('.вход-обновить').addEventListener('click', function(){
+    location.reload();
+  });
+}
 const app = document.getElementById('app');
 const log = document.getElementById('log');
 const box = document.getElementById('box');
@@ -519,7 +560,7 @@ document.getElementById('toRooms').addEventListener('click',()=>go('vRooms'));
 async function loadRooms(){
   try{
     const r = await fetch('/user/rooms', J);
-    if(r.status===401){ location.href=кудаПослеВхода; return; }
+    if(r.status===401){ уйтиНаВход(); return; }
     const d = await r.json();
     rooms = (d.items||[]).filter(x=>x.is_owner!==false);
     // Комната техподдержки — служебная, прячем её из списка «Комнаты».
@@ -842,7 +883,7 @@ async function loadProfile(){
   try{ const h=await (await fetch('/health',J)).json(); appVer=h.version||''; }catch(e){}
   try{
     const r=await fetch('/user/me', J);
-    if(r.status===401){ location.href=кудаПослеВхода; return; }
+    if(r.status===401){ уйтиНаВход(); return; }
     lastUser=await r.json();
   }catch(e){ lastUser=null; }
   buildProfile(lastUser);
@@ -898,7 +939,7 @@ function buildProfile(u){
   document.getElementById('rSwitch').addEventListener('click',async ()=>{
     if(!confirm('Выйти из текущего аккаунта и войти под другим?')) return;
     try{ await fetch('/auth/logout',{method:'POST',credentials:'include'}); }catch(e){}
-    location.href=кудаПослеВхода;
+    уйтиНаВход();
   });
   document.getElementById('rLogout').addEventListener('click',async ()=>{
     if(!confirm('Выйти из аккаунта?')) return;
