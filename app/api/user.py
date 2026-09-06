@@ -386,7 +386,20 @@ async def get_my_room_detail(room_id: str, request: Request):
                        -- ни один экран и ни одна ручка не отдавали оба сразу.
                        -- 16.08 из-за этого сняли очевидный, а комнатный
                        -- остался, и часть реплик писал DeepSeek.
-                       COALESCE(s.standin_enabled, false) AS standin_enabled
+                       COALESCE(s.standin_enabled, false) AS standin_enabled,
+                       -- Присутствие агента. Берём максимум из двух живых
+                       -- отметок: MCP-коннект и heartbeat — агент может быть на
+                       -- связи по любой из них. GREATEST в PG игнорирует NULL,
+                       -- поэтому одной достаточно, и NULL выходит только когда
+                       -- нет ни одной. Окно 300с как в /agents/online (там 120с
+                       -- по умолчанию, но для комнаты нужна терпимость к паузе
+                       -- между heartbeat'ами, иначе чип мигает).
+                       GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at) AS last_seen,
+                       COALESCE(
+                         GREATEST(s.last_mcp_connect_at, s.last_heartbeat_at)
+                           > NOW() - INTERVAL '300 seconds',
+                         false
+                       ) AS online
                   FROM room_participants p
                   LEFT JOIN agent_states s ON s.agent_id = p.agent_id
                  WHERE p.room_id = $1::uuid
@@ -397,7 +410,7 @@ async def get_my_room_detail(room_id: str, request: Request):
             )
             for p in prows:
                 d = dict(p)
-                for k in ("joined_at", "last_seen_at"):
+                for k in ("joined_at", "last_seen_at", "last_seen"):
                     if isinstance(d.get(k), datetime):
                         d[k] = d[k].isoformat()
                 # display_name: красивое имя (agent_label) если задано, иначе agent_id.
