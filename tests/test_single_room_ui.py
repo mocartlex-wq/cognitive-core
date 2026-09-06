@@ -50,3 +50,14 @@ def test_webchat_opens_room_from_query():
 def test_webchat_keeps_live_subscription_not_interval_poll():
     assert "/wait?since_seconds=" in WEBCHAT
     assert "serviceWorker.register('/sw.js'" in WEBCHAT
+
+
+def test_desktop_grid_pins_both_panels_to_first_row():
+    """#vChat в DOM первый, #vRooms — второй. С одним grid-column без grid-row
+    авто-размещение уносило список комнат во ВТОРУЮ строку грида, под экран:
+    владелец на 1920×1080 видел пустую чёрную колонку вместо комнат (06.09)."""
+    desktop = WEBCHAT[WEBCHAT.index("@media (min-width: 900px)"):]
+    rooms = desktop[desktop.index("#vRooms{"):desktop.index("}", desktop.index("#vRooms{"))]
+    chat = desktop[desktop.index("#vChat{"):desktop.index("}", desktop.index("#vChat{"))]
+    assert "grid-row:1" in rooms and "grid-column:1" in rooms
+    assert "grid-row:1" in chat and "grid-column:2" in chat

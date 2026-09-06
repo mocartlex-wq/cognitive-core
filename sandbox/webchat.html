@@ -314,8 +314,11 @@
       grid-template-rows:100%;height:100vh;height:100dvh;
       border-left:1px solid var(--кромка);border-right:1px solid var(--кромка)}
     .app > .view{display:flex!important}
-    #vRooms{grid-column:1;border-right:1px solid var(--кромка);background:var(--поле)}
-    #vChat{grid-column:2;min-width:0}
+    /* grid-row обязателен: в DOM #vChat идёт первым, и без явной строки
+       авто-размещение уносило #vRooms во вторую строку грида — под экран
+       (владелец на 1920×1080 видел пустую чёрную колонку вместо комнат). */
+    #vRooms{grid-column:1;grid-row:1;border-right:1px solid var(--кромка);background:var(--поле)}
+    #vChat{grid-column:2;grid-row:1;min-width:0}
     /* Профиль на широком экране — накладкой поверх переписки, а не третьей
        вкладкой: заходят туда редко, а место отнимал бы постоянно. */
     #vProfile{position:fixed;inset:0;z-index:60;max-width:520px;margin:auto;height:auto;
