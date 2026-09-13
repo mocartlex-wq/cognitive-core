@@ -19,8 +19,12 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Зависимости ставятся ДО копирования кода: правка кода не пересобирает
+# колёса, слой берётся из кэша. Ограничения (-c) закрепляют каждую версию,
+# включая транзитивные, по набору, снятому с работающего прода — иначе
+# сборка без единой правки кода тянула бы свежие минорные версии.
+COPY requirements.txt requirements.lock.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock.txt
 
 COPY . .
 
