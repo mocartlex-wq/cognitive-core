@@ -594,7 +594,10 @@ async def _call_self(
         if isinstance(resolved, tuple) and len(resolved) == 2:
             cached_owner = resolved[1]
     if cached_owner:
+        from app.security.owner import INTERNAL_CALL_TOKEN
         headers["X-Owner-User-Id"] = str(cached_owner)
+        # Маркер процесса: без него resolve_owner_user_id заголовок игнорирует.
+        headers["X-Cogcore-Internal"] = INTERNAL_CALL_TOKEN
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://internal", timeout=timeout_s) as client:
