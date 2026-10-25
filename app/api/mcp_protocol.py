@@ -85,7 +85,9 @@ TOOLS: list[dict[str, Any]] = [
         "name": "cognitive_recall",
         "description": (
             "Найти релевантные знания по запросу через KNN-поиск (L3 + tools). "
-            "Возвращает frame с patterns / mistakes / rules / tools. "
+            "Возвращает frame с patterns / mistakes / rules / tools и recent — "
+            "свежие записи владельца за 7 дней (cognitive_remember других агентов), "
+            "ещё не поднятые в L3. "
             "domain НЕОБЯЗАТЕЛЕН: без него поиск идёт по доменам знаний "
             "(work_journal, infra_lessons, skills, setup_log, deploy) — там "
             "выводы, а не переписка. Указывайте домен, только если точно знаете "
