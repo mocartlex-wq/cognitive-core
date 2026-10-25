@@ -17,6 +17,7 @@ from app.services.operative import (
     feedback_record,
     recall_any_domain,
     recall_path,
+    recent_events,
     record_recall_hits,
 )
 
@@ -217,17 +218,32 @@ async def query_operative(
         log.warning("recall hits failed: %s", e)
 
     if grouped:
+        # Свежие L1 владельца за неделю — то, что ещё не стало L3. Без этого
+        # агенты в тандеме не видели записей друг друга до консолидации
+        # (проверка 25.10.2026). Сбой этой ветки не роняет основной поиск.
+        try:
+            recent = await recent_events(
+                query=body.context or "",
+                owner_user_id=owner_user_id,
+                domain=body.domain,
+            )
+        except Exception as e:  # pragma: no cover — наблюдение, не поиск
+            log.warning("recent events failed: %s", e)
+            recent = []
+        frame = _group_results_for_agent(results)
+        frame["recent"] = recent
         # Заменяем плоский results на семантический frame
         return {
             "session_id": session["session_id"],
             "domain": session["domain"],
             "expires_in": session["expires_in"],
-            "frame": _group_results_for_agent(results),
+            "frame": frame,
             "counts": {
                 "patterns": sum(1 for r in results if r.get("knowledge_type") == "pattern"),
                 "mistakes": sum(1 for r in results if r.get("knowledge_type") == "mistake"),
                 "rules": sum(1 for r in results if r.get("knowledge_type") == "rule"),
                 "tools": sum(1 for r in results if r.get("record_type") == "tool"),
+                "recent": len(recent),
                 "total": len(results),
             },
         }

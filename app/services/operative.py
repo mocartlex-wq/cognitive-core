@@ -451,6 +451,73 @@ async def _search_redis_vector(query_vec: list[float], domain: str, top_k: int =
         return []
 
 
+async def recent_events(
+    query: str,
+    owner_user_id: str | None,
+    domain: str | None = None,
+    days: int = 7,
+    limit: int = 5,
+) -> list[dict]:
+    """Свежие L1-события владельца, ещё не поднятые в L3.
+
+    Зачем (25.10.2026, совместная проверка Codex↔Claude): recall читал только
+    l3_master_knowledge / l3_tools_registry. Факт, записанный одним агентом через
+    cognitive_remember, другой агент не находил до недельной консолидации L2→L3
+    (а она требует ≥2 дневных буферов в домене). Для работы в тандеме это
+    слишком долго: записал утром — нужно найти через минуту.
+
+    Только owner-scoped: без владельца (env-ключ в admin-режиме) — пусто, чтобы
+    не смешивать L1 разных арендаторов. Поиск — FTS 'simple' по тексту
+    payload (слова запроса как есть, без морфологии) с запасным ILIKE по
+    первому слову; пустой запрос — просто последние события.
+    """
+    if not owner_user_id:
+        return []
+    q = (query or "").strip()
+    days = max(1, min(int(days), 30))
+    limit = max(1, min(int(limit), 20))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, domain, source_agent, timestamp, raw_payload
+              FROM l1_raw_events
+             WHERE owner_user_id = $1::uuid
+               AND timestamp >= NOW() - ($2::int * INTERVAL '1 day')
+               AND ($3::text IS NULL OR domain = $3::text)
+               AND ($4::text = ''
+                    OR to_tsvector('simple', raw_payload::text) @@ plainto_tsquery('simple', $4::text)
+                    OR raw_payload::text ILIKE '%' || split_part($4::text, ' ', 1) || '%')
+             ORDER BY timestamp DESC
+             LIMIT $5
+            """,
+            owner_user_id, days, domain, q, limit,
+        )
+    out = []
+    for r in rows:
+        payload = r["raw_payload"]
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {"text": payload}
+        if not isinstance(payload, dict):
+            payload = {"text": str(payload)}
+        content = {k: str(payload.get(k))[:400] for k in ("task", "result", "lessons") if payload.get(k)}
+        if not content:
+            content = {"text": json.dumps(payload, ensure_ascii=False)[:400]}
+        ts = r["timestamp"]
+        out.append({
+            "id": str(r["id"]),
+            "record_type": "recent",
+            "domain": r["domain"],
+            "source_agent": r["source_agent"],
+            "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "content": content,
+        })
+    return out
+
+
 async def recall_any_domain(
     query: str,
     top_k: int = 5,
