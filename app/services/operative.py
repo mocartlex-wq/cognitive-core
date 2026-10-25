@@ -476,22 +476,31 @@ async def recent_events(
     q = (query or "").strip()
     days = max(1, min(int(days), 30))
     limit = max(1, min(int(limit), 20))
+    # Ревью Codex 25.10: (1) полные совпадения (все слова, FTS) идут раньше
+    # частичных (одно первое слово), иначе пять свежих событий со словом «канал»
+    # вытесняли бы нужную запись; (2) в запасном ILIKE экранируем % и _ символом
+    # '!' — иначе слово запроса работало бы как шаблон.
+    first = q.split(" ", 1)[0] if q else ""
+    first_like = "%" + first.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, domain, source_agent, timestamp, raw_payload
+            SELECT id, domain, source_agent, timestamp, raw_payload,
+                   CASE WHEN $4::text = '' THEN 0
+                        WHEN to_tsvector('simple', raw_payload::text) @@ plainto_tsquery('simple', $4::text) THEN 0
+                        ELSE 1 END AS rank
               FROM l1_raw_events
              WHERE owner_user_id = $1::uuid
                AND timestamp >= NOW() - ($2::int * INTERVAL '1 day')
                AND ($3::text IS NULL OR domain = $3::text)
                AND ($4::text = ''
                     OR to_tsvector('simple', raw_payload::text) @@ plainto_tsquery('simple', $4::text)
-                    OR raw_payload::text ILIKE '%' || split_part($4::text, ' ', 1) || '%')
-             ORDER BY timestamp DESC
+                    OR raw_payload::text ILIKE $6 ESCAPE '!')
+             ORDER BY rank, timestamp DESC
              LIMIT $5
             """,
-            owner_user_id, days, domain, q, limit,
+            owner_user_id, days, domain, q, limit, first_like,
         )
     out = []
     for r in rows:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -22,6 +23,8 @@ from app.services.operative import (
 )
 
 log = logging.getLogger(__name__)
+
+RECENT_TIMEOUT_S = float(os.environ.get("COGCORE_RECALL_RECENT_TIMEOUT_S", "2.5"))
 
 router = APIRouter(prefix="/operative", tags=["operative"])
 
@@ -221,12 +224,16 @@ async def query_operative(
         # Свежие L1 владельца за неделю — то, что ещё не стало L3. Без этого
         # агенты в тандеме не видели записей друг друга до консолидации
         # (проверка 25.10.2026). Сбой этой ветки не роняет основной поиск.
+        # Свой дедлайн (ревью Codex 25.10): L3-результаты уже есть, и зависший
+        # запрос к L1 не должен утащить весь recall за общий таймаут MCP.
         try:
-            recent = await recent_events(
-                query=body.context or "",
-                owner_user_id=owner_user_id,
-                domain=body.domain,
+            recent = await asyncio.wait_for(
+                recent_events(query=body.context or "", owner_user_id=owner_user_id, domain=body.domain),
+                timeout=RECENT_TIMEOUT_S,
             )
+        except asyncio.TimeoutError:
+            log.warning("recent events timed out after %.1fs", RECENT_TIMEOUT_S)
+            recent = []
         except Exception as e:  # pragma: no cover — наблюдение, не поиск
             log.warning("recent events failed: %s", e)
             recent = []

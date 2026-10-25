@@ -57,8 +57,10 @@ async def test_recent_sql_filters_owner_window_domain_and_query():
         out = await svc.recent_events("канал Codex", owner_user_id=OWNER, domain="cognitive_core", days=99, limit=99)
     sql, args = conn.fetch.call_args[0][0], conn.fetch.call_args[0][1:]
     assert "owner_user_id = $1::uuid" in sql and "l1_raw_events" in sql
-    assert "INTERVAL '1 day'" in sql and "plainto_tsquery" in sql and "ILIKE" in sql
-    assert args == (OWNER, 30, "cognitive_core", "канал Codex", 20), "окно и лимит зажаты"
+    assert "INTERVAL '1 day'" in sql and "plainto_tsquery" in sql and "ILIKE $6 ESCAPE '!'" in sql
+    # Ревью Codex: полные совпадения (FTS по всем словам) раньше частичных.
+    assert "ORDER BY rank, timestamp DESC" in sql and "ELSE 1 END AS rank" in sql
+    assert args == (OWNER, 30, "cognitive_core", "канал Codex", 20, "%канал%"), "окно и лимит зажаты, ILIKE по первому слову"
     assert out == [{
         "id": "e9a89bbc", "record_type": "recent", "domain": "cognitive_core",
         "source_agent": "claude-8d5b07", "timestamp": ts.isoformat(),
@@ -76,6 +78,15 @@ async def test_recent_payload_as_string_and_without_known_keys():
         out = await svc.recent_events("", owner_user_id=OWNER)
     assert out[0]["content"] == {"text": '{"note": "строка json"}'}
     assert out[1]["content"] == {"text": '{"text": "просто текст"}'}
+
+
+@pytest.mark.asyncio
+async def test_recent_escapes_like_wildcards_in_fallback():
+    """Слово запроса со спецсимволами ILIKE не должно превращаться в шаблон."""
+    pool, conn = _pool([])
+    with patch.object(svc, "get_pool", AsyncMock(return_value=pool)):
+        await svc.recent_events("100%_готово! остальное", owner_user_id=OWNER)
+    assert conn.fetch.call_args[0][1:][5] == "%100!%!_готово!!%"
 
 
 # ─── API ─────────────────────────────────────────────────────────────────────
@@ -106,6 +117,23 @@ async def test_grouped_query_carries_recent_section(client):
     assert body["frame"]["rules"] == knowledge and body["frame"]["all"] == knowledge
     assert body["counts"]["recent"] == 1 and body["counts"]["total"] == 1
     rec.assert_awaited_once_with(query="канал Codex", owner_user_id=OWNER, domain="cognitive_core")
+
+
+@pytest.mark.asyncio
+async def test_recent_timeout_returns_empty_and_keeps_l3(client, monkeypatch):
+    """Ревью Codex: зависший запрос к L1 не должен утащить весь recall за общий таймаут."""
+    import asyncio
+
+    async def slow(**kw):
+        await asyncio.sleep(5)
+        return [{"id": "late"}]
+
+    monkeypatch.setattr(api_mod, "RECENT_TIMEOUT_S", 0.05)
+    knowledge = [{"id": "k1", "record_type": "knowledge", "knowledge_type": "rule", "domain": "d", "content": {}}]
+    with patch.object(api_mod, "verify_api_key", AsyncMock(return_value="a")),             patch.object(api_mod, "resolve_owner_user_id", AsyncMock(return_value=OWNER)),             patch.object(api_mod, "build_operative", AsyncMock(return_value=knowledge)),             patch.object(api_mod, "recent_events", slow),             patch.object(api_mod, "create_session", AsyncMock(return_value={"session_id": "s1", "domain": "d", "expires_in": 1})),             patch.object(api_mod, "record_recall_hits", AsyncMock(return_value=None)),             patch.object(api_mod, "_observe_recall", AsyncMock(return_value=None)):
+        r = await client.post("/operative/query?grouped=true", json={"domain": "d", "context": "x", "top_k": 5})
+    body = r.json()
+    assert r.status_code == 200 and body["frame"]["recent"] == [] and body["frame"]["rules"] == knowledge
 
 
 @pytest.mark.asyncio
