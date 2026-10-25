@@ -11,6 +11,10 @@
 """
 import httpx
 import pytest
+# Маркер asyncio, не anyio (25.10.2026): при asyncio_mode = auto фикстуру `client`
+# поднимает pytest-asyncio в своём цикле, а anyio-тест бежал в другом — на
+# teardown httpx закрывал соединение в уже закрытом цикле («Event loop is
+# closed», 13 ошибок в CI db-tests на любой ветке, включая docs-only).
 
 # Все пути роутера. Добавляя новый обработчик в app/api/dashboard.py, добавь его
 # и сюда — иначе он останется непроверенным.
@@ -24,7 +28,7 @@ DASHBOARD_PATHS = [
 ]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", DASHBOARD_PATHS)
 async def test_dashboard_rejects_request_without_key(client: httpx.AsyncClient, path: str):
     """Без X-API-Key — 401, и ни байта данных в ответе."""
@@ -35,7 +39,7 @@ async def test_dashboard_rejects_request_without_key(client: httpx.AsyncClient, 
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", DASHBOARD_PATHS)
 async def test_dashboard_rejects_invalid_key(client: httpx.AsyncClient, path: str):
     """С мусорным ключом — тоже 401 (проверка не должна быть формальной)."""
@@ -43,7 +47,7 @@ async def test_dashboard_rejects_invalid_key(client: httpx.AsyncClient, path: st
     assert r.status_code == 401, f"{path} принял недействительный ключ: {r.status_code}"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_audit_tail_is_admin_only(client: httpx.AsyncClient, headers: dict):
     """Аудит-лог не разделён по владельцам, поэтому обычному ключу — 403.
 
