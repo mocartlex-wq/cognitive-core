@@ -11,6 +11,7 @@
 """
 import httpx
 import pytest
+
 # Маркер asyncio, не anyio (25.10.2026): при asyncio_mode = auto фикстуру `client`
 # поднимает pytest-asyncio в своём цикле, а anyio-тест бежал в другом — на
 # teardown httpx закрывал соединение в уже закрытом цикле («Event loop is
