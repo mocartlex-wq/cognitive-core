@@ -1,22 +1,24 @@
-# Memory Scope в Cognitive Core
+# Memory scope in Cognitive Core
 
-**TL;DR**: память (L1/L2/L3/L4) shared между всеми агентами одного owner-а через `owner_user_id` WHERE-фильтр. Cross-owner isolation гарантирована БД-уровнем (Phase 4, PR #47-#53). Если нужна per-agent логическая изоляция — используйте domain prefix как convention.
+> 🇷🇺 Русская версия: [memory-scope.ru.md](memory-scope.ru.md)
 
-## Кто что видит
+**TL;DR**: memory (L1/L2/L3/L4) is shared between all agents of the same owner through an `owner_user_id` WHERE filter. Cross-owner isolation is guaranteed at the database level (Phase 4, PR #47–#53). If you need per-agent logical isolation, use a domain prefix as a convention.
 
-| Слой | Storage | Scope | Cross-agent same owner? | Cross-owner? |
+## Who sees what
+
+| Layer | Storage | Scope | Cross-agent, same owner? | Cross-owner? |
 |---|---|---|---|---|
-| L0 | Redis | per-agent (key prefix) | ❌ (отдельные ключи) | ❌ |
-| L1 events | Postgres `l1_raw_events` | per-owner (WHERE owner_user_id) | ✅ (видны всем) | ❌ (WHERE filter) |
+| L0 | Redis | per-agent (key prefix) | ❌ (separate keys) | ❌ |
+| L1 events | Postgres `l1_raw_events` | per-owner (WHERE owner_user_id) | ✅ (visible to all) | ❌ (WHERE filter) |
 | L2 daily | Postgres `l2_daily_summaries` | per-owner | ✅ | ❌ |
 | L3 knowledge | Postgres `l3_knowledge_entries` (pgvector KNN) | per-owner | ✅ | ❌ |
 | L4 snapshots | MinIO `s3://l4-snapshots/{owner_user_id}/...` | per-owner (path prefix) | ✅ | ❌ |
-| State | Postgres `agent_states` | per-agent (`agent_id` PK) | ❌ (но видно через `cognitive_my_team`) | ❌ |
+| State | Postgres `agent_states` | per-agent (`agent_id` PK) | ❌ (but visible via `cognitive_my_team`) | ❌ |
 
-## Поток данных
+## Data flow
 
 ```
-агент A → cognitive_remember(domain='msk-58', task=...)
+agent A → cognitive_remember(domain='msk-58', task=...)
   ↓
 INSERT INTO l1_raw_events (agent_id='A', owner_user_id='owner-uuid',
                             domain='msk-58', payload={...})
@@ -29,74 +31,74 @@ INSERT INTO l3_knowledge_entries (owner_user_id='owner-uuid',
                                     domain='msk-58',
                                     content=..., embedding=vector)
 
-агент B (same owner): cognitive_recall(query='проект msk-58')
+agent B (same owner): cognitive_recall(query='project msk-58')
   ↓
 SELECT FROM l3_knowledge_entries
-  WHERE owner_user_id='owner-uuid'  ← оба agent A и B = owner-uuid
+  WHERE owner_user_id='owner-uuid'  ← both agent A and B = owner-uuid
   ORDER BY 1 - (embedding <=> :query_vec) LIMIT top_k
   ↓
-Возвращает что записал агент A. ✅
+Returns what agent A wrote. ✅
 ```
 
-## Если нужна per-agent изоляция (convention)
+## If you need per-agent isolation (convention)
 
-Сам Cognitive Core не разделяет память между агентами одного owner-а — это by-design (общая база знаний). Если у вас case где **агент B не должен видеть** что записал агент A, используйте domain prefix:
+Cognitive Core itself does not partition memory between agents of the same owner; that is by design (a shared knowledge base). If you have a case where **agent B must not see** what agent A wrote, use a domain prefix:
 
 **Convention**: `domain='agent:{agent_id}:project:{project_name}'`
 
 ```python
-# Агент A
+# Agent A
 cognitive_remember(domain=f'agent:{me}:project:secret-research', ...)
 
-# Агент B  
-cognitive_recall(query='research', domain='agent:B')  # не вернёт записи агента A
+# Agent B
+cognitive_recall(query='research', domain='agent:B')  # will not return agent A's entries
 ```
 
-Это **convention, не enforcement** — агент B всё ещё технически может вызвать `cognitive_recall(domain='agent:A:...')` и увидеть. Если нужна жёсткая изоляция — это **отдельный owner_user_id** (создать второй account).
+This is a **convention, not enforcement**: agent B can still technically call `cognitive_recall(domain='agent:A:...')` and see the data. If you need hard isolation, that means a **separate owner_user_id** (create a second account).
 
 ## Cross-platform memory continuity
 
-| Источник | Где живёт | Sync с Cognitive Core? |
+| Source | Where it lives | Synced with Cognitive Core? |
 |---|---|---|
-| Claude Code `~/.claude/projects/.../memory/*.md` | Локально на машине агента | ❌ Не синхронизируется автоматически |
-| Cursor MCP context | Локально + cloud (Cursor) | ❌ |
-| ChatGPT memory | OpenAI cloud (per-account) | ❌ |
-| **Cognitive Core (L1/L2/L3/L4)** | Server Postgres + MinIO | ✅ Centralized — все агенты owner-а видят |
+| Claude Code `~/.claude/projects/.../memory/*.md` | Locally on the agent's machine | ❌ Not synced automatically |
+| Cursor MCP context | Local + cloud (Cursor) | ❌ |
+| ChatGPT memory | OpenAI cloud (per account) | ❌ |
+| **Cognitive Core (L1/L2/L3/L4)** | Server Postgres + MinIO | ✅ Centralized: every agent of the owner sees it |
 
-**Pattern**: храните **persistent across sessions / cross-agent** факты в Cognitive Core через `cognitive_remember`. Локальная Claude Code memory = быстрый file-cache для текущей машины, не для шаринга.
+**Pattern**: keep facts that must **persist across sessions and agents** in Cognitive Core via `cognitive_remember`. Local Claude Code memory is a fast file cache for the current machine, not for sharing.
 
-## DM vs Memory
+## DM vs memory
 
-| Когда | Tool | Storage |
+| When | Tool | Storage |
 |---|---|---|
-| Записать факт для будущего себя или peers | `cognitive_remember` | L1 → L3 (postgres, KNN searchable) |
-| Прямое сообщение конкретному агенту | `cognitive_send(to='agent_id', text=...)` | `agent_messages` table (queue) |
-| Прочитать DM очередь | `cognitive_inbox(since_minutes=60)` | same table |
-| Кто из my agents online | `cognitive_my_team()` | `agent_states` + Redis presence |
+| Record a fact for your future self or peers | `cognitive_remember` | L1 → L3 (Postgres, KNN-searchable) |
+| Direct message to a specific agent | `cognitive_send(to='agent_id', text=...)` | `agent_messages` table (queue) |
+| Read the DM queue | `cognitive_inbox(since_minutes=60)` | same table |
+| Which of my agents are online | `cognitive_my_team()` | `agent_states` + Redis presence |
 
-**Best practice**: DM = эфемерные команды/координация, не для долгого хранения. Если хочешь чтоб inbox сохранился в knowledge — после прочтения вызови `cognitive_remember`.
+**Best practice**: DMs are ephemeral commands and coordination, not long-term storage. If you want an inbox item preserved as knowledge, call `cognitive_remember` after reading it.
 
-## Sanity check production scope
+## Sanity check of production scope
 
 ```bash
-# Сколько L3 entries у моего owner-а
+# How many L3 entries my owner has
 curl https://mcp.me-ai.ru/agents/{my_id}/state \
   -H "X-API-Key: $KEY" | jq '.layers.l3'
 
-# Cross-owner проверка (должна возвращать 0)
-# Невозможно сделать через MCP — owner_user_id берётся из api_key, не из аргумента
+# Cross-owner check (must return 0)
+# Impossible to do through MCP: owner_user_id comes from the api_key, not from an argument
 ```
 
 ## Pitfalls
 
-1. **`domain` поле не санитизируется** — но за-prefix-нутые конвенции (`agent:X:`) можно случайно сломать если кто-то делает `domain='agent:X'` (без post-colon) — `cognitive_recall(domain='agent:X')` найдёт всё с этим префиксом. Используйте полный prefix всегда.
+1. **The `domain` field is not sanitized**, but prefixed conventions (`agent:X:`) can be broken by accident if someone uses `domain='agent:X'` (without the trailing colon): `cognitive_recall(domain='agent:X')` will match everything with that prefix. Always use the full prefix.
 
-2. **L3 KNN ищет across all domains если domain не передан** — `cognitive_recall(query='...')` без `domain=` смотрит ВЮ knowledge base owner-а. Это feature (cross-pollination между проектами) или bug (information leak между ролями) в зависимости от сценария.
+2. **L3 KNN searches across all domains when no domain is given**: `cognitive_recall(query='...')` without `domain=` looks at the owner's ENTIRE knowledge base. Depending on the scenario this is a feature (cross-pollination between projects) or a bug (information leak between roles).
 
-3. **Backups** — `cogcore-backup-tier.sh` daily 03:30 копирует L4 snapshots с hot NVMe на cold HDD (7d → 90d TTL). Если уронили L3 — восстановление из L4 snapshot не trivial (нет автоматики, нужно manual `INSERT FROM` snapshot file). Backlog: написать `scripts/restore-from-l4.sh`.
+3. **Backups**: `cogcore-backup-tier.sh` runs daily at 03:30 and copies L4 snapshots from hot NVMe to cold HDD (7d → 90d TTL). If L3 is lost, restoring from an L4 snapshot is not trivial (no automation; a manual `INSERT FROM` the snapshot file is needed). Backlog: write `scripts/restore-from-l4.sh`.
 
 ## References
 
-- Phase 4 multi-tenancy: PR #47-#53 в этом репо (введены `owner_user_id` columns + WHERE filters)
-- L1-L3 design: `app/services/consolidator.py`
+- Phase 4 multi-tenancy: PR #47–#53 in this repo (introduced `owner_user_id` columns + WHERE filters)
+- L1–L3 design: `app/services/consolidator.py`
 - L4 snapshot format: `app/services/l4_snapshot.py`
