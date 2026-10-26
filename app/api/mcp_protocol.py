@@ -82,6 +82,15 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "cognitive_checkpoint",
+        "description": "Полная последняя контрольная точка владельца за 30 дней и superseded_ids старых точек. Не обрезает result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"domain": {"type": "string", "minLength": 1, "maxLength": 120}},
+            "required": ["domain"],
+        },
+    },
+    {
         "name": "cognitive_recall",
         "description": (
             "Найти релевантные знания по запросу через KNN-поиск (L3 + tools). "
@@ -1087,6 +1096,10 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         body = {"source_agent": agent_id, "domain": domain, "payload": payload}
         return await _call_self(request, "POST", "/events", json_body=body, timeout_s=6.0)
 
+    if name == "cognitive_checkpoint":
+        return await _call_self(request, "GET", "/operative/checkpoint",
+                                params={"domain": a.get("domain", "")}, timeout_s=6.0)
+
     if name == "cognitive_recall":
         # Пустая строка — это «домен не указан», а не домен с пустым именем.
         # Раньше она уходила в поиск как есть и не находила ничего никогда.
@@ -1694,7 +1707,9 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
                 _dispatch_tool(request, tool_name, tool_args), timeout=wait_for_to,
             )
             return _ok(req_id, {
-                "content": [{"type": "text", "text": _format_text(result)}],
+                "content": [{"type": "text", "text": _format_text(
+                    result, limit=None if tool_name == "cognitive_checkpoint" else 8000,
+                )}],
                 "structuredContent": result,
                 "isError": False,
             })
@@ -1827,11 +1842,12 @@ async def mcp_streamable_http_delete() -> JSONResponse:
     return JSONResponse({"ok": True, "stateless": True})
 
 
-def _format_text(data: Any) -> str:
+def _format_text(data: Any, limit: int | None = 8000) -> str:
     try:
-        return json.dumps(data, ensure_ascii=False, indent=2)[:8000]
+        text = json.dumps(data, ensure_ascii=False, indent=2)
     except Exception:
-        return str(data)[:8000]
+        text = str(data)
+    return text if limit is None else text[:limit]
 
 
 async def _mark_mcp_connected(request: Request) -> None:
