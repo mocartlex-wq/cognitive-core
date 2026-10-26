@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS l3_master_knowledge (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     owner_user_id UUID
 );
-CREATE INDEX IF NOT EXISTS idx_l3_active ON l3_master_knowledge(domain, knowledge_type) WHERE effective_to IS NULL;
+  ALTER TABLE l3_master_knowledge ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+  ALTER TABLE l3_master_knowledge ADD COLUMN IF NOT EXISTS retire_reason TEXT;
+  CREATE INDEX IF NOT EXISTS idx_l3_active ON l3_master_knowledge(domain, knowledge_type) WHERE effective_to IS NULL;
 CREATE INDEX IF NOT EXISTS idx_l3_domain ON l3_master_knowledge(domain) WHERE effective_to IS NULL;
 CREATE INDEX IF NOT EXISTS idx_l3_know_owner_domain ON l3_master_knowledge(owner_user_id, domain)
     WHERE owner_user_id IS NOT NULL;
