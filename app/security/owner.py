@@ -3,8 +3,11 @@
 Применяется в memory-endpoints для WHERE owner_user_id = $X фильтрации.
 
 Источники (по приоритету):
-  1. X-Owner-User-Id header — internal trusted call (set by _call_self
-     after first resolve, avoids repeat DB lookup в цепочке tools).
+  1. X-Owner-User-Id header — ТОЛЬКО при внутреннем вызове самого api
+     (`_call_self` в mcp_protocol ставит его вместе с маркером
+     X-Cogcore-Internal — секретом процесса, см. is_internal_call). Снаружи
+     заголовок игнорируется. До 2026-10-25 он принимался от любого клиента:
+     чужой owner_user_id в заголовке = чужая память (аудит 20.10, CRITICAL).
   2. session cookie (для UI-endpoints) — через app.security.session.
   3. X-API-Key header → agent_keys.owner_user_id
      (для external MCP/CLI/Custom-GPT клиентов).
@@ -19,7 +22,23 @@
 """
 from __future__ import annotations
 
+import secrets
+
 from fastapi import HTTPException, Request
+
+# Маркер внутреннего вызова: случайный секрет на процесс. _call_self делает
+# in-process ASGI-запрос к тому же приложению, поэтому значение совпадает;
+# внешний клиент его не знает и подделать не может. Воркеры uvicorn — разные
+# процессы с разными токенами, но _call_self никогда не ходит между ними.
+INTERNAL_CALL_HEADER = "x-cogcore-internal"
+INTERNAL_CALL_TOKEN = secrets.token_hex(16)
+
+
+def is_internal_call(request: Request) -> bool:
+    """True, если запрос пришёл из _call_self (несёт маркер процесса)."""
+    token = request.headers.get(INTERNAL_CALL_HEADER) or ""
+    return bool(token) and secrets.compare_digest(token, INTERNAL_CALL_TOKEN)
+
 
 ORPHAN_KEY_DETAIL = (
     "Ключ без владельца: он не привязан ни к одному аккаунту и не даёт доступа. "
@@ -46,9 +65,10 @@ async def resolve_owner_user_id(request: Request) -> str | None:
 
     owner: str | None = None
 
-    # 1. Internal call с X-Owner-User-Id header — trusted
+    # 1. X-Owner-User-Id — доверяем только внутреннему вызову (маркер процесса).
+    #    Внешний заголовок не учитывается: владелец внешнего клиента — его ключ.
     hdr_owner = request.headers.get("x-owner-user-id")
-    if hdr_owner:
+    if hdr_owner and is_internal_call(request):
         owner = hdr_owner
         request.state._resolved_owner_user_id = owner
         return owner

@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from app.api import agents_collab
 from app.api.agents_collab import RegisterRequest, register_agent
@@ -198,3 +198,132 @@ def test_migration_0024_chain_and_sql():
     assert "owner_user_id = s.owner_user_id" in inherit and "IS NOT NULL" in inherit
     assert "revoked_at = NOW()" in revoke and "owner_user_id IS NULL" in revoke
     assert "DELETE" not in inherit.upper() and "DELETE" not in revoke.upper()
+
+
+# ─── X-Owner-User-Id: доверие только внутреннему вызову (аудит 20.10.2026) ─
+#
+# Подтверждено живьём 20.10 и 24.10: `GET /dashboard/domains` со своим ключом
+# и заголовком `X-Owner-User-Id: <чужой uuid>` отдавал домены чужого владельца.
+# Заголовок принимался от любого клиента; nginx его не срезал. Теперь он
+# учитывается только с маркером процесса, который ставит _call_self.
+
+@pytest.mark.asyncio
+async def test_external_header_alone_does_not_resolve_owner():
+    pool, conn = _pool(fetchrow=None)
+    with _no_session(), patch("app.db.postgres.get_pool", AsyncMock(return_value=pool)):
+        assert await resolve_owner_user_id(_request({"X-Owner-User-Id": OTHER})) is None
+    conn.fetchrow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_external_header_cannot_override_key_owner():
+    """Ключ OWNER + заголовок OTHER → OWNER: чужую память по заголовку не получить."""
+    pool, conn = _pool(fetchrow={"owner_user_id": OWNER})
+    req = _request({"X-API-Key": "k", "X-Owner-User-Id": OTHER})
+    with _no_session(), patch("app.db.postgres.get_pool", AsyncMock(return_value=pool)):
+        assert await resolve_owner_user_id(req) == OWNER
+    assert conn.fetchrow.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_header_with_wrong_internal_marker_is_ignored():
+    pool, _ = _pool(fetchrow={"owner_user_id": OWNER})
+    req = _request({"X-API-Key": "k", "X-Owner-User-Id": OTHER, "X-Cogcore-Internal": "guess"})
+    with _no_session(), patch("app.db.postgres.get_pool", AsyncMock(return_value=pool)):
+        assert await resolve_owner_user_id(req) == OWNER
+
+
+@pytest.mark.asyncio
+async def test_header_with_internal_marker_is_trusted_without_db():
+    req = _request({"X-Owner-User-Id": OTHER, "X-Cogcore-Internal": owner_mod.INTERNAL_CALL_TOKEN})
+    with patch("app.db.postgres.get_pool", AsyncMock(side_effect=AssertionError("БД не нужна"))):
+        assert await resolve_owner_user_id(req) == OTHER
+
+
+def test_internal_token_is_random_and_long():
+    assert len(owner_mod.INTERNAL_CALL_TOKEN) == 32
+    assert owner_mod.is_internal_call(_request({"X-Cogcore-Internal": owner_mod.INTERNAL_CALL_TOKEN}))
+    assert not owner_mod.is_internal_call(_request({"X-Cogcore-Internal": ""}))
+    assert not owner_mod.is_internal_call(_request())
+
+
+@pytest.mark.asyncio
+async def test_call_self_propagates_owner_with_marker_end_to_end():
+    """Внутренний вызов _call_self резолвит владельца из заголовка без БД."""
+    from app.api.mcp_protocol import _call_self
+
+    app = FastAPI()
+
+    @app.get("/echo")
+    async def echo(request: Request):
+        return {"owner": await resolve_owner_user_id(request),
+                "marker": request.headers.get("x-cogcore-internal")}
+
+    req = _request({"X-API-Key": "k"})
+    req.app = app
+    req.state._resolved_owner_user_id = OWNER
+    with patch("app.db.postgres.get_pool", AsyncMock(side_effect=AssertionError("БД не нужна"))):
+        out = await _call_self(req, "GET", "/echo")
+    assert out == {"owner": OWNER, "marker": owner_mod.INTERNAL_CALL_TOKEN}
+
+
+@pytest.mark.asyncio
+async def test_call_self_without_resolved_owner_sends_no_marker():
+    from app.api.mcp_protocol import _call_self
+
+    app = FastAPI()
+
+    @app.get("/echo")
+    async def echo(request: Request):
+        return {"marker": request.headers.get("x-cogcore-internal"),
+                "owner_hdr": request.headers.get("x-owner-user-id")}
+
+    req = _request({"X-API-Key": "k"})
+    req.app = app
+    assert await _call_self(req, "GET", "/echo") == {"marker": None, "owner_hdr": None}
+
+
+# ─── POST /operative/recall_internal ─────────────────────────────────────
+
+def _recall_internal_patches(owner, rows=()):
+    from app.api import operative as op
+    recall = AsyncMock(return_value=list(rows))
+    return (patch.object(op, "verify_api_key", AsyncMock(return_value="orch")),
+            patch.object(op, "resolve_owner_user_id", AsyncMock(return_value=owner)),
+            patch.object(op, "recall_any_domain", recall), recall)
+
+
+@pytest.mark.asyncio
+async def test_recall_internal_uses_key_owner_not_header():
+    from app.api.operative import recall_internal
+    from app.models.operative import OperativeRecallUI
+
+    v, r, rp, recall = _recall_internal_patches(OWNER, [{"id": "x"}])
+    with v, r, rp:
+        out = await recall_internal(OperativeRecallUI(context="q"), _request({"X-API-Key": "k", "X-Owner-User-Id": OTHER}))
+    assert out["count"] == 1
+    assert recall.await_args.kwargs["owner_user_id"] == OWNER
+
+
+@pytest.mark.asyncio
+async def test_recall_internal_admin_key_may_name_owner_in_header():
+    from app.api.operative import recall_internal
+    from app.models.operative import OperativeRecallUI
+
+    v, r, rp, recall = _recall_internal_patches(None)
+    with v, r, rp:
+        await recall_internal(OperativeRecallUI(context="q"), _request({"X-API-Key": "env", "X-Owner-User-Id": OTHER}))
+    assert recall.await_args.kwargs["owner_user_id"] == OTHER
+
+
+@pytest.mark.asyncio
+async def test_recall_internal_without_owner_400():
+    from app.api.operative import recall_internal
+    from app.models.operative import OperativeRecallUI
+
+    v, r, rp, recall = _recall_internal_patches(None)
+    with v, r, rp:
+        with pytest.raises(HTTPException) as ei:
+            await recall_internal(OperativeRecallUI(context="q"), _request({"X-API-Key": "env"}))
+    assert ei.value.status_code == 400
+    recall.assert_not_awaited()

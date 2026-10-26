@@ -284,15 +284,18 @@ async def recall_ui(body: OperativeRecallUI, request: Request):
 
 @router.post("/recall_internal")
 async def recall_internal(body: OperativeRecallUI, request: Request):
-    """Server-to-server recall for trusted internal callers (e.g. the orchestrator).
+    """Server-to-server recall for the host orchestrator (agent key required).
 
-    Auth: a valid agent API key (verify_api_key) PLUS an explicit X-Owner-User-Id
-    header naming whose memory to read. This is the same internal-trust header the
-    MCP dispatcher already uses; it is only reachable on the internal docker network
-    (never exposed publicly via nginx), so the caller must already hold an agent key.
+    Владелец берётся из ключа (resolve_owner_user_id): X-Owner-User-Id снаружи
+    больше не доверяется — до 2026-10-25 любой держатель ключа мог назвать в
+    заголовке чужой owner_user_id и прочитать чужую память (маршрут доступен
+    через nginx `location /`). Только admin-ключ из env без владельца
+    (COGCORE_ADMIN_OWNER_USER_ID не задан) может указать владельца заголовком.
     """
     await verify_api_key(request)
-    owner_user_id = request.headers.get("x-owner-user-id")
+    owner_user_id = await resolve_owner_user_id(request)
+    if not owner_user_id:
+        owner_user_id = request.headers.get("x-owner-user-id")
     if not owner_user_id:
         raise HTTPException(status_code=400, detail="X-Owner-User-Id required")
     top_k = body.top_k if isinstance(body.top_k, int) else 5
