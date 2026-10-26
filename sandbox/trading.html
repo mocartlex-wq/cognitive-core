@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cognitive Core — Trading</title>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0e14">
+<link rel="stylesheet" href="/static/shared.css?v=20260520j">
+<link rel="stylesheet" href="/static/glass.css?v=20260613">
+<style>
+  body { background:#0a0e14; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif; margin:0; }
+  main { max-width:1200px; margin:0 auto; padding:24px; }
+  h1 { font-size:24px; font-weight:700; margin:0 0 4px; letter-spacing:-.5px; }
+  .sub { color:rgba(230,237,243,.6); font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  @media(max-width:900px){.grid{grid-template-columns:1fr;}}
+  .card {
+    background:rgba(22,27,34,.7); border:1px solid rgba(240,246,252,.1);
+    border-radius:14px; padding:18px;
+    backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%);
+  }
+  .card h2 { margin:0 0 14px; font-size:15px; font-weight:600; color:#fff; letter-spacing:-.2px;
+             display:flex; justify-content:space-between; align-items:center; }
+  .badge { font-size:10px; padding:3px 8px; border-radius:6px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; }
+  .badge-paper { background:rgba(88,166,255,.15); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
+  .badge-live { background:rgba(248,81,73,.15); color:#f85149; border:1px solid rgba(248,81,73,.3); }
+  .badge-safe { background:rgba(63,185,80,.15); color:#3fb950; border:1px solid rgba(63,185,80,.3); }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+          color:rgba(230,237,243,.55); margin:8px 0 4px; }
+  input, select, button {
+    width:100%; background:rgba(13,17,23,.7); color:#e6edf3;
+    border:1px solid rgba(240,246,252,.1); border-radius:8px; padding:9px 12px;
+    font-size:14px; font-family:inherit; box-sizing:border-box;
+  }
+  input:focus, select:focus { outline:none; border-color:rgba(88,166,255,.5); }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+  button {
+    background:linear-gradient(135deg,#58a6ff,#bc8cff); color:#fff;
+    border:none; font-weight:600; cursor:pointer; margin-top:12px;
+    transition:transform .15s,opacity .15s;
+  }
+  button:hover { transform:translateY(-1px); }
+  button:active { transform:translateY(0); opacity:.85; }
+  button.sell { background:linear-gradient(135deg,#f85149,#da3633); }
+  button.ghost { background:rgba(255,255,255,.06); border:1px solid rgba(240,246,252,.1); margin-top:8px; }
+  .kv { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(240,246,252,.05); font-size:13.5px; }
+  .kv:last-child { border-bottom:none; }
+  .kv .v { font-family:'SF Mono',Menlo,Monaco,monospace; color:#fff; }
+  .pos-up { color:#3fb950; } .pos-down { color:#f85149; }
+  pre {
+    background:rgba(13,17,23,.7); color:#a8b3c2; padding:12px;
+    border-radius:8px; font-size:11.5px; max-height:200px; overflow:auto;
+    border:1px solid rgba(240,246,252,.08); margin:8px 0 0;
+    white-space:pre-wrap; word-break:break-word; font-family:'SF Mono',Menlo,monospace;
+  }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid rgba(240,246,252,.05); }
+  th { color:rgba(230,237,243,.5); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  td.right, th.right { text-align:right; font-family:'SF Mono',Menlo,monospace; }
+  .empty { text-align:center; color:rgba(230,237,243,.4); padding:18px; font-size:13px; }
+  .topbar {
+    display:flex; gap:10px; align-items:center; padding:10px 14px; margin-bottom:18px;
+    background:rgba(22,27,34,.6); border:1px solid rgba(240,246,252,.08); border-radius:12px;
+  }
+  .topbar input { width:auto; flex:1; }
+  .err { color:#f85149; font-size:12px; margin-top:6px; }
+  .ok  { color:#3fb950; font-size:12px; margin-top:6px; }
+  .warn-box {
+    background:rgba(248,81,73,.08); border:1px solid rgba(248,81,73,.25);
+    color:#ffb4ab; padding:10px 12px; border-radius:8px; font-size:12.5px;
+    margin-bottom:14px; line-height:1.5;
+  }
+</style>
+</head>
+<body>
+<!-- TOPNAV -->
+<main>
+  <h1>Trading</h1>
+  <div class="sub">Котировки · новости · риск · paper/реальные брокеры</div>
+
+  <div class="topbar">
+    <span style="font-size:12px;color:rgba(230,237,243,.6);">X-API-Key</span>
+    <input id="apiKey" placeholder="key-design-001" autocomplete="off">
+    <select id="market" style="width:auto;">
+      <option value="us">US</option>
+      <option value="ru">RU</option>
+      <option value="crypto">Crypto</option>
+    </select>
+    <span id="brokerBadge" class="badge badge-paper">paper</span>
+  </div>
+
+  <div id="liveWarn" class="warn-box" style="display:none;">
+    ⚠ LIVE-режим активен. Реальные деньги. Каждый ордер несёт необратимый риск.
+  </div>
+
+  <div class="grid">
+    <!-- Портфель -->
+    <div class="card">
+      <h2>Портфель <button class="ghost" style="width:auto;margin:0;padding:4px 10px;font-size:11px;" onclick="loadPortfolio()">↻</button></h2>
+      <div id="portfolio">
+        <div class="empty">Введите API-ключ и нажмите ↻</div>
+      </div>
+    </div>
+
+    <!-- Котировка + сентимент -->
+    <div class="card">
+      <h2>Котировка + новости</h2>
+      <div class="row">
+        <div>
+          <label>Тикер</label>
+          <input id="qSymbol" value="AAPL" autocomplete="off">
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button class="ghost" onclick="loadQuote()">Quote + Sentiment</button>
+        </div>
+      </div>
+      <div id="quoteOut"></div>
+    </div>
+
+    <!-- Ордер -->
+    <div class="card">
+      <h2>Новый ордер</h2>
+      <div class="row">
+        <div>
+          <label>Тикер</label>
+          <input id="oSymbol" value="AAPL" autocomplete="off">
+        </div>
+        <div>
+          <label>Количество</label>
+          <input id="oQty" type="number" step="any" value="1">
+        </div>
+      </div>
+      <label>Stop-loss (опц.)</label>
+      <input id="oStop" type="number" step="any" placeholder="например 185.00">
+      <div class="row" style="margin-top:6px;">
+        <button onclick="submitOrder('buy')">BUY</button>
+        <button class="sell" onclick="submitOrder('sell')">SELL</button>
+      </div>
+      <div id="orderOut"></div>
+    </div>
+
+    <!-- История ордеров -->
+    <div class="card">
+      <h2>Последние ордера <button class="ghost" style="width:auto;margin:0;padding:4px 10px;font-size:11px;" onclick="loadOrders()">↻</button></h2>
+      <div id="ordersOut"><div class="empty">Нет данных</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const KEY_STORAGE = 'trading_api_key';
+const apiKeyEl = document.getElementById('apiKey');
+const marketEl = document.getElementById('market');
+apiKeyEl.value = localStorage.getItem(KEY_STORAGE) || '';
+apiKeyEl.addEventListener('change', () => localStorage.setItem(KEY_STORAGE, apiKeyEl.value.trim()));
+marketEl.addEventListener('change', () => { loadPortfolio(); loadOrders(); });
+
+function headers() {
+  return {
+    'Content-Type': 'application/json',
+    'X-API-Key': apiKeyEl.value.trim(),
+  };
+}
+
+async function apiPost(path, body) {
+  const r = await fetch(path, { method:'POST', headers:headers(), body:JSON.stringify(body) });
+  const t = await r.text();
+  let data; try { data = JSON.parse(t); } catch { data = { _raw:t }; }
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { data });
+  return data;
+}
+
+async function apiGet(path) {
+  const r = await fetch(path, { headers: { 'X-API-Key': apiKeyEl.value.trim() } });
+  const t = await r.text();
+  let data; try { data = JSON.parse(t); } catch { data = { _raw:t }; }
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { data });
+  return data;
+}
+
+function fmt(n, dp=2) {
+  if (n == null || isNaN(n)) return '—';
+  return Number(n).toLocaleString('ru-RU', { minimumFractionDigits:dp, maximumFractionDigits:dp });
+}
+
+function setBroker(name) {
+  const b = document.getElementById('brokerBadge');
+  b.textContent = name || '—';
+  b.className = 'badge ' + (name === 'paper' ? 'badge-paper' : 'badge-live');
+}
+
+async function loadPortfolio() {
+  const out = document.getElementById('portfolio');
+  out.innerHTML = '<div class="empty">Загрузка…</div>';
+  try {
+    const m = marketEl.value;
+    const p = await apiGet(`/trading/portfolio?market=${m}`);
+    setBroker(p.broker);
+    document.getElementById('liveWarn').style.display = (p.broker !== 'paper') ? 'block' : 'none';
+    const pnlClass = p.day_pnl > 0 ? 'pos-up' : p.day_pnl < 0 ? 'pos-down' : '';
+    let html = `
+      <div class="kv"><span>Брокер</span><span class="v">${p.broker}</span></div>
+      <div class="kv"><span>Cash</span><span class="v">${fmt(p.cash)}</span></div>
+      <div class="kv"><span>Equity</span><span class="v">${fmt(p.equity)}</span></div>
+      <div class="kv"><span>P&L (день)</span><span class="v ${pnlClass}">${fmt(p.day_pnl)}</span></div>
+      <div class="kv"><span>Сделок сегодня</span><span class="v">${p.day_trades}</span></div>
+    `;
+    const positions = Object.entries(p.positions || {});
+    if (positions.length) {
+      html += '<table style="margin-top:10px;"><thead><tr><th>Символ</th><th class="right">Кол-во</th></tr></thead><tbody>';
+      for (const [sym, qty] of positions) {
+        html += `<tr><td>${sym}</td><td class="right">${fmt(qty, 4)}</td></tr>`;
+      }
+      html += '</tbody></table>';
+    } else {
+      html += '<div class="empty" style="padding:10px;">Открытых позиций нет</div>';
+    }
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = `<div class="err">${e.message}: ${JSON.stringify(e.data || {}).slice(0,200)}</div>`;
+  }
+}
+
+async function loadQuote() {
+  const out = document.getElementById('quoteOut');
+  out.innerHTML = '<div class="empty">Загрузка…</div>';
+  try {
+    const sym = document.getElementById('qSymbol').value.trim().toUpperCase();
+    const m = marketEl.value;
+    const [q, s] = await Promise.all([
+      apiPost('/trading/quote', { symbol:sym, market:m }),
+      apiPost('/trading/sentiment', { symbol:sym }),
+    ]);
+    const chg = q.change_pct;
+    const chgCls = chg > 0 ? 'pos-up' : chg < 0 ? 'pos-down' : '';
+    const sCls = s.sentiment === 'bullish' ? 'pos-up' : s.sentiment === 'bearish' ? 'pos-down' : '';
+    out.innerHTML = `
+      <div class="kv"><span>Цена</span><span class="v">${fmt(q.price, 4)} ${q.currency || ''}</span></div>
+      <div class="kv"><span>Изменение</span><span class="v ${chgCls}">${fmt(chg, 2)}%</span></div>
+      <div class="kv"><span>Источник</span><span class="v">${q.source}</span></div>
+      <div class="kv"><span>Сентимент</span><span class="v ${sCls}">${s.sentiment} (${fmt(s.score, 2)})</span></div>
+      <div class="kv"><span>Новости</span><span class="v">${s.headlines_count} шт.</span></div>
+      <pre>${(s.summary || '').replace(/</g,'&lt;')}</pre>
+    `;
+  } catch (e) {
+    out.innerHTML = `<div class="err">${e.message}: ${JSON.stringify(e.data || {}).slice(0,300)}</div>`;
+  }
+}
+
+async function submitOrder(side) {
+  const out = document.getElementById('orderOut');
+  const sym = document.getElementById('oSymbol').value.trim().toUpperCase();
+  const qty = parseFloat(document.getElementById('oQty').value);
+  const stopRaw = document.getElementById('oStop').value;
+  const stop = stopRaw ? parseFloat(stopRaw) : null;
+  if (!sym || !qty || qty <= 0) {
+    out.innerHTML = '<div class="err">Заполните тикер и количество</div>';
+    return;
+  }
+  // double-confirm для LIVE
+  const isLive = document.getElementById('liveWarn').style.display !== 'none';
+  if (isLive && !confirm(`LIVE ордер: ${side.toUpperCase()} ${qty} ${sym}. Уверены?`)) return;
+  out.innerHTML = '<div class="empty">Отправка…</div>';
+  try {
+    const body = { symbol:sym, market:marketEl.value, side, quantity:qty };
+    if (stop) body.stop_loss = stop;
+    const r = await apiPost('/trading/order', body);
+    const ok = r.status === 'filled' || r.status === 'accepted';
+    out.innerHTML = `<div class="${ok ? 'ok' : 'err'}">${r.status}: ${sym} ${qty}@${fmt(r.price, 4)} — ${r.risk_reason || ''}</div>`;
+    loadPortfolio(); loadOrders();
+  } catch (e) {
+    out.innerHTML = `<div class="err">${(e.data && e.data.detail) || e.message}</div>`;
+  }
+}
+
+async function loadOrders() {
+  const out = document.getElementById('ordersOut');
+  out.innerHTML = '<div class="empty">Загрузка…</div>';
+  try {
+    const m = marketEl.value;
+    const r = await apiGet(`/trading/orders?market=${m}&limit=20`);
+    if (!r.orders || !r.orders.length) {
+      out.innerHTML = '<div class="empty">Ордеров пока нет</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Время</th><th>Символ</th><th>Сторона</th><th class="right">Кол-во</th><th class="right">Цена</th><th>Статус</th></tr></thead><tbody>';
+    for (const o of r.orders) {
+      const sideCls = o.side === 'buy' ? 'pos-up' : 'pos-down';
+      const stCls = o.status === 'filled' ? 'pos-up' : o.status === 'rejected' ? 'pos-down' : '';
+      const ts = (o.ts || '').slice(11, 19);
+      html += `<tr>
+        <td>${ts}</td>
+        <td>${o.symbol}</td>
+        <td class="${sideCls}">${o.side}</td>
+        <td class="right">${fmt(o.quantity, 4)}</td>
+        <td class="right">${fmt(o.price, 4)}</td>
+        <td class="${stCls}">${o.status}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = `<div class="err">${e.message}</div>`;
+  }
+}
+
+// Авто-загрузка если ключ уже сохранён
+if (apiKeyEl.value) {
+  loadPortfolio();
+  loadOrders();
+}
+</script>
+</body>
+</html>
