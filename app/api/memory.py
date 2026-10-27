@@ -2,12 +2,14 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import settings
 from app.db.postgres import get_pool
 from app.db.s3 import get_s3
 from app.security.auth import verify_api_key
+from app.security.owner import resolve_owner_user_id
 from app.services.consolidator import (
     daily_consolidate,
     run_monthly_audit,
@@ -20,6 +22,72 @@ from app.services.operative import (
 )
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+
+
+class KnowledgeRetireInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[UUID] = Field(..., min_length=1, max_length=200)
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def nonblank_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("reason must not be blank")
+        return value.strip()
+
+
+@router.post("/knowledge/retire")
+async def retire_knowledge(body: KnowledgeRetireInput, request: Request):
+    """Снять только собственные активные знания, не раскрывая чужие записи."""
+    await verify_api_key(request)
+    owner = await resolve_owner_user_id(request)
+    if not owner:
+        raise HTTPException(status_code=403, detail="Owner required")
+    ids = list(dict.fromkeys(body.ids))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """UPDATE l3_master_knowledge
+                  SET retired_at = NOW(), retire_reason = $3, effective_to = NOW()
+                WHERE owner_user_id = $1::uuid AND id = ANY($2::uuid[])
+                  AND effective_to IS NULL AND retired_at IS NULL
+                RETURNING id""",
+            str(owner), ids, body.reason,
+        )
+    retired_ids = {str(row["id"]) for row in rows}
+    return {"retired": len(retired_ids),
+            "skipped": [str(rid) for rid in ids if str(rid) not in retired_ids]}
+
+
+@router.get("/knowledge/search")
+async def search_knowledge(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=2000),
+    domain: str | None = Query(None, min_length=1, max_length=120),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Поиск активных знаний владельца для адресного снятия."""
+    await verify_api_key(request)
+    owner = await resolve_owner_user_id(request)
+    if not owner:
+        raise HTTPException(status_code=403, detail="Owner required")
+    pattern = "%" + q.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, domain, created_at, left(content::text, 200) AS preview
+                 FROM l3_master_knowledge
+                WHERE owner_user_id = $1::uuid AND effective_to IS NULL
+                  AND retired_at IS NULL
+                  AND content::text ILIKE $2 ESCAPE '!'
+                  AND ($3::text IS NULL OR domain = $3)
+                ORDER BY created_at DESC, id DESC LIMIT $4""",
+            str(owner), pattern, domain, limit,
+        )
+    items = [{"id": str(r["id"]), "domain": r["domain"],
+              "created_at": r["created_at"].isoformat(), "preview": r["preview"]} for r in rows]
+    return {"count": len(items), "items": items}
 
 
 @router.post("/consolidate/daily")
