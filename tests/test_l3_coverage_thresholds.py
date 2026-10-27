@@ -13,6 +13,10 @@ l3_active=0 (~30 штук), а все домены с l2>=2 знание име�
 Правка: если в обычном окне буферов меньше, чем нужно на повтор, берём
 накопленный хвост (weekly_backfill_days). Ключевое требование — домены,
 которые уже проходят, обязаны работать в точности как раньше.
+
+Уточнение 27.10.2026 (диагностика Codex и DS): неизменным должен быть
+вход синтеза активного владельца, а не число SELECT. Широкий запрос нужен
+для обнаружения тихих владельцев, в том числе отсутствующих в окне 7 дней.
 """
 from __future__ import annotations
 
@@ -87,17 +91,33 @@ class TestDefaults:
 
 class TestPassingDomainsUnchanged:
     @pytest.mark.asyncio
-    async def test_enough_buffers_makes_only_one_query(self):
-        # Домен и так проходит → второго запроса быть не должно вообще.
-        res, calls = await _run({NARROW: [_buf(1), _buf(2)]})
-        assert calls == [settings.weekly_days]
+    async def test_enough_buffers_preserves_narrow_synthesis_input(self):
+        recent = [_buf(1, "active"), _buf(2, "active")]
+        pool, calls = _pool({NARROW: recent, WIDE: [*recent, _buf(3, "active")]})
+        synthesize = AsyncMock(return_value={"status": "consolidated", "new_items": 1})
+        with patch.object(consolidator, "get_pool", AsyncMock(return_value=pool)), \
+             patch.object(consolidator, "_weekly_for_owner", synthesize):
+            res = await consolidator._weekly_consolidate_impl("d")
+        synthesize.assert_awaited_once_with("d", "active", recent)
+        assert calls == [settings.weekly_days, settings.weekly_backfill_days]
         assert res["status"] == "consolidated"
 
     @pytest.mark.asyncio
     async def test_busy_domain_not_given_extra_history(self):
-        # Иначе активным доменам поменялся бы вход куратора — это уже другое поведение.
-        _, calls = await _run({NARROW: [_buf(i) for i in range(1, 6)], WIDE: [_buf(i) for i in range(1, 40)]})
-        assert len(calls) == 1
+        # Активному — только 7 дней, тихому соседу — его собственные 90 дней.
+        active = [_buf(i, "active") for i in range(1, 6)]
+        quiet = [_buf(41, "quiet"), _buf(42, "quiet")]
+        pool, calls = _pool({
+            NARROW: [*active, quiet[0]],
+            WIDE: [*[_buf(i, "active") for i in range(1, 40)], *quiet],
+        })
+        synthesize = AsyncMock(return_value={"status": "consolidated", "new_items": 1})
+        with patch.object(consolidator, "get_pool", AsyncMock(return_value=pool)), \
+             patch.object(consolidator, "_weekly_for_owner", synthesize):
+            await consolidator._weekly_consolidate_impl("d")
+        supplied = {call.args[1]: call.args[2] for call in synthesize.await_args_list}
+        assert supplied == {"active": active, "quiet": quiet}
+        assert calls == [settings.weekly_days, settings.weekly_backfill_days]
 
 
 class TestStuckDomainsGetHistory:
