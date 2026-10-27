@@ -131,7 +131,12 @@ async def run_weekly_cycle():
         try:
             result = await weekly_consolidate(domain)
             results.append({"domain": domain, "result": result})
-            if domain in retry_pending:
+            failed = result.get("status") in {"error", "partial_error"} or any(
+                owner.get("status") == "error" for owner in result.get("owners", [])
+            )
+            if failed:
+                await _retry_queue_add(RETRY_KEY_WEEKLY, domain)
+            elif domain in retry_pending:
                 await _retry_queue_remove(RETRY_KEY_WEEKLY, domain)
         except Exception as e:
             results.append({"domain": domain, "error": str(e)})

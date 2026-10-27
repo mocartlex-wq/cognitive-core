@@ -317,15 +317,28 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
         # 06.09 так застряли ~30 доменов из 51 (l2=1 при l3_active=0), из-за
         # чего l3_coverage_pct = 27.5. У daily догоняющий режим есть (backfill,
         # stale_tail_days), у weekly не было.
-        # Расширяем окно ТОЛЬКО когда материала не хватает на повтор: домены,
-        # которые и так проходят, второго запроса не делают и работают как раньше.
-        if _max_per_owner(all_buffers) < settings.min_l2_repetitions_for_l3:
+        # Окно выбирается отдельно для каждого владельца. Проверка широкого
+        # окна нужна даже при достаточном повторе у другого владельца домена.
+        # Проверяем и владельцев, которых вообще нет в коротком окне.
+        # max(count) на домен скрывал тихого владельца за активным соседом.
+        if settings.weekly_backfill_days > settings.weekly_days:
             wide = await _fetch_l2_window(conn, domain, settings.weekly_backfill_days)
-            if len(wide) > len(all_buffers):
-                log.info("weekly window widened domain=%s buffers %d->%d (%dd->%dd)",
-                         domain, len(all_buffers), len(wide),
-                         settings.weekly_days, settings.weekly_backfill_days)
-                all_buffers = wide
+            recent_by_owner: dict[str | None, list] = {}
+            wide_by_owner: dict[str | None, list] = {}
+            for b in all_buffers:
+                recent_by_owner.setdefault(b.get("owner_user_id"), []).append(b)
+            for b in wide:
+                wide_by_owner.setdefault(b.get("owner_user_id"), []).append(b)
+            for owner, recent in recent_by_owner.items():
+                if len(recent) >= settings.min_l2_repetitions_for_l3:
+                    wide_by_owner[owner] = recent
+            for owner, buffers in wide_by_owner.items():
+                recent_count = len(recent_by_owner.get(owner, []))
+                if len(buffers) > recent_count:
+                    log.info("weekly window widened domain=%s owner=%s buffers %d->%d (%dd->%dd)",
+                             domain, owner, recent_count, len(buffers),
+                             settings.weekly_days, settings.weekly_backfill_days)
+            all_buffers = [b for buffers in wide_by_owner.values() for b in buffers]
 
     if not all_buffers:
         return {"status": "no_buffers"}
@@ -359,8 +372,11 @@ async def _weekly_consolidate_impl(domain: str) -> dict:
     # «no_buffers», когда буферы были и мы их сознательно не понесли в LLM, —
     # это ложь в отчёте: ровно такой невнятный сигнал стоил сегодня разбора.
     insufficient = [r for r in per_owner if r.get("status") == "insufficient_repetition"]
+    failed = [r for r in per_owner if r.get("status") == "error"]
     return {
-        "status": "consolidated" if ok else ("insufficient_repetition" if insufficient else "no_buffers"),
+        "status": ("partial_error" if ok else "error") if failed else (
+            "consolidated" if ok else ("insufficient_repetition" if insufficient else "no_buffers")
+        ),
         "curator_errors": curator_errors,
         "owners": per_owner,
         "new_items": sum(r.get("new_items", 0) for r in ok),
