@@ -76,4 +76,6 @@ async def analyze_weekly(
             if attempt >= max_attempts - 1:
                 raise
 
-    return {"new_or_updated": [], "deprecated_l3_ids": [], "tools": []}
+    # Три отсутствующих ответа — сбой, а не успешный синтез без новых знаний.
+    # Исключение доедет до owner-result и persistent retry-очереди worker.
+    raise RuntimeError("weekly synthesis returned no response after 3 attempts")
