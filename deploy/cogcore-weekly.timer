@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger cogcore-weekly daily at 05:00 UTC (full run only if the in-app Monday run is >5 days old; otherwise retry drain)
+
+[Timer]
+# 05:00 — после daily (02:00 in-app, 04:00 nightly T8) и до backfill 06:00:
+# L2 за сутки уже собран, с backfill за advisory lock не спорим.
+OnCalendar=05:00 UTC
+Persistent=true
+Unit=cogcore-weekly.service
+
+[Install]
+WantedBy=timers.target

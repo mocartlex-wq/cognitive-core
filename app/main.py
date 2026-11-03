@@ -631,6 +631,11 @@ async def profile_aliases():
 # ─────────────────────────────────────────────────────────────────────────
 # Health
 # ─────────────────────────────────────────────────────────────────────────
+# Weekly идёт раз в 7 дней; 9 дней = один пропущенный прогон плюс запас на
+# понедельник, пришедшийся на выходные провайдера.
+L3_STALL_DAYS = 9
+
+
 def _coverage_pct(covered: int, total: int) -> float | None:
     """Доля доменов с живым знанием L3, в процентах. None — доменов ещё нет."""
     if not total:
@@ -770,6 +775,48 @@ async def health():
                     l1_unprocessed=deep["l1_unprocessed"],
                     min_events_for_daily=settings.min_events_for_daily,
                 )
+            # ── Застой L2→L3 ─────────────────────────────────────────────────
+            # Сигнал, которого не было 02.11.2026: weekly-куратор упал на всех
+            # доменах (DeepSeek недоступен), L3 не менялся 8 дней, а /health
+            # говорил consolidation_stalled=false — он смотрит только L1→L2.
+            # Застой = L3 старше порога И после него появились L2-буферы (есть
+            # что сворачивать); тихая неделя без буферов — не застой.
+            try:
+                l3_age_days = None
+                buffers_after_l3 = 0
+                if last_l3:
+                    l3_dt = last_l3 if last_l3.tzinfo else last_l3.replace(tzinfo=timezone.utc)
+                    l3_age_days = round(
+                        (datetime.now(timezone.utc) - l3_dt).total_seconds() / 86400, 1
+                    )
+                    buffers_after_l3 = await conn.fetchval(
+                        "SELECT COUNT(*) FROM l2_daily_buffers WHERE created_at > $1",
+                        l3_dt,
+                    ) or 0
+                deep["l3_staleness_days"] = l3_age_days
+                deep["l2_buffers_since_l3"] = buffers_after_l3
+                deep["l3_stalled"] = bool(
+                    l3_age_days is not None
+                    and l3_age_days > L3_STALL_DAYS
+                    and buffers_after_l3 >= settings.min_l2_repetitions_for_l3
+                )
+                try:
+                    from app.worker import RETRY_KEY_WEEKLY, _retry_queue_pending
+                    deep["weekly_retry_pending"] = sorted(
+                        await _retry_queue_pending(RETRY_KEY_WEEKLY)
+                    )
+                except Exception:  # noqa: BLE001
+                    deep["weekly_retry_pending"] = []
+                if deep["l3_stalled"]:
+                    log_event(
+                        "warning",
+                        "L3 stalled: weekly consolidation produced nothing while L2 buffers waited",
+                        l3_staleness_days=l3_age_days,
+                        l2_buffers_since_l3=buffers_after_l3,
+                        weekly_retry_pending=deep["weekly_retry_pending"],
+                    )
+            except Exception as e:  # noqa: BLE001 — метрика не должна ронять /health
+                log_event("debug", "l3 staleness probe failed", error=type(e).__name__)
             # Новое: счётчики аккаунтов/сессий (если таблицы созданы 0003-миграцией)
             try:
                 accs = await conn.fetchval("SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL")

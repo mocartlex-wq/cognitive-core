@@ -103,6 +103,22 @@ async def run_daily_cycle():
         return {"status": "error", "detail": str(e)}
 
 
+def _weekly_result_failed(result: dict | None) -> bool:
+    """Домен «упал», даже если weekly_consolidate не бросил исключение.
+
+    _weekly_consolidate_impl ловит сбой куратора ВНУТРИ владельца и отдаёт его
+    полем curator_errors / status=error — без исключения. 02.11.2026 DeepSeek
+    лежал весь понедельничный прогон: ~470 строк «weekly failed …
+    APIConnectionError», а retry-очередь осталась ПУСТОЙ, и L3 не обновлялся
+    8 дней без единого сигнала. Такой результат — тоже повод для повтора.
+    """
+    if not isinstance(result, dict):
+        return False
+    if result.get("curator_errors"):
+        return True
+    return any(o.get("status") == "error" for o in (result.get("owners") or []))
+
+
 async def run_weekly_cycle():
     """Еженедельная консолидация L2→L3."""
     pool = await get_pool()
@@ -126,17 +142,7 @@ async def run_weekly_cycle():
         log.info("weekly retry-queue domains=%s", sorted(retry_pending))
         domains |= retry_pending
 
-    results = []
-    for domain in sorted(domains):
-        try:
-            result = await weekly_consolidate(domain)
-            results.append({"domain": domain, "result": result})
-            if domain in retry_pending:
-                await _retry_queue_remove(RETRY_KEY_WEEKLY, domain)
-        except Exception as e:
-            results.append({"domain": domain, "error": str(e)})
-            await _retry_queue_add(RETRY_KEY_WEEKLY, domain)
-
+    results = await _weekly_over_domains(sorted(domains), retry_pending)
     await log_audit(
         agent_id="system",
         action="weekly_consolidate",
@@ -145,6 +151,74 @@ async def run_weekly_cycle():
         success=True,
     )
     return results
+
+
+async def _weekly_over_domains(domains: list[str], retry_pending: set[str]) -> list[dict]:
+    results = []
+    for domain in domains:
+        try:
+            result = await weekly_consolidate(domain)
+            results.append({"domain": domain, "result": result})
+            if _weekly_result_failed(result):
+                await _retry_queue_add(RETRY_KEY_WEEKLY, domain)
+            elif domain in retry_pending:
+                await _retry_queue_remove(RETRY_KEY_WEEKLY, domain)
+        except Exception as e:
+            results.append({"domain": domain, "error": str(e)})
+            await _retry_queue_add(RETRY_KEY_WEEKLY, domain)
+    return results
+
+
+async def run_weekly_retry_cycle() -> list[dict]:
+    """Добрать только упавшие домены weekly, не дожидаясь понедельника.
+
+    Запускается ежедневно из systemd (cogcore-weekly.timer). Пустая очередь —
+    ничего не делаем и не пишем аудит: тихий день не должен выглядеть как прогон.
+    """
+    retry_pending = await _retry_queue_pending(RETRY_KEY_WEEKLY)
+    if not retry_pending:
+        return []
+    log.info("weekly retry-queue drain domains=%s", sorted(retry_pending))
+    results = await _weekly_over_domains(sorted(retry_pending), retry_pending)
+    await log_audit(
+        agent_id="system",
+        action="weekly_consolidate",
+        target_table="l3_master_knowledge",
+        details={"results": results, "mode": "retry"},
+        success=True,
+    )
+    return results
+
+
+async def run_weekly_cycle_if_due(max_age_days: int = 5) -> dict:
+    """Weekly из systemd — страховка in-app планировщика.
+
+    scheduler_loop живёт внутри процесса api: рестарт в неудачный час — и
+    понедельник пропущен, следующий через неделю. Таймер зовёт нас каждый
+    день, но полный прогон делаем, только если последний полный
+    weekly_consolidate в аудите старше max_age_days: иначе одни и те же буферы
+    пошли бы в LLM дважды. Retry-прогоны (mode=retry) не считаются.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        last = await conn.fetchval(
+            """
+            SELECT MAX(event_time) FROM l5_audit_log
+             WHERE action = 'weekly_consolidate' AND success
+               AND COALESCE(details->>'mode', '') <> 'retry'
+            """
+        )
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age_days = (datetime.now(timezone.utc) - last).total_seconds() / 86400
+        if age_days < max_age_days:
+            return {"status": "skipped", "last_run": last.isoformat(),
+                    "age_days": round(age_days, 2)}
+    results = await run_weekly_cycle()
+    return {"status": "ran", "domains": len(results),
+            "failed": sum(1 for r in results
+                          if "error" in r or _weekly_result_failed(r.get("result")))}
 
 
 async def run_monthly_cycle():

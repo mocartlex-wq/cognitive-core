@@ -184,6 +184,26 @@ DAILY_OUT=$(sudo docker exec cognitive_api python -c \
   && pass T8 "daily consolidation triggered: ${DAILY_OUT:0:120}" \
   || warn T8 "daily consolidation trigger failed: ${DAILY_OUT:0:160}"
 
+# ─── T9: L2→L3 not stalled (2026-11-03) ──────────────────────────
+# Weekly-куратор упал на всех доменах 02.11 (DeepSeek), L3 стоял 8 дней,
+# а suite был зелёным: он смотрел только L1→L2. Читаем новые поля health.deep.
+L3_OUT=$(curl -fsS --max-time 20 "http://localhost:8000/health?deep=1" 2>/dev/null \
+  | python3 -c "
+import json,sys
+d=json.load(sys.stdin).get('deep',{})
+print(d.get('l3_stalled'), d.get('l3_staleness_days'), d.get('l2_buffers_since_l3'), ','.join(d.get('weekly_retry_pending') or []))
+" 2>/dev/null)
+set -- $L3_OUT
+if [ "${1:-}" = "True" ]; then
+  fail T9 "L3 stalled: ${2}d since last knowledge, ${3} L2 buffers waiting, retry=[${4:-}]"
+elif [ -n "${4:-}" ]; then
+  warn T9 "weekly retry-queue pending: [${4}] (l3 age ${2}d)"
+elif [ -z "${1:-}" ]; then
+  warn T9 "cannot read l3_stalled from /health?deep=1"
+else
+  pass T9 "L3 fresh: ${2}d since last knowledge, ${3} buffers since"
+fi
+
 # ─── Summary ────────────────────────────────────────────────────
 log "════════ nightly suite done: PASS=$PASS WARN=$WARN FAIL=$FAIL ════════"
 
