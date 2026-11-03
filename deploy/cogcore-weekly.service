@@ -1,0 +1,17 @@
+[Unit]
+Description=Cognitive Core L2→L3 weekly — systemd backstop for the in-app scheduler + retry drain
+Documentation=https://github.com/mocartlex-wq/cognitive-core
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/cognitive-core/scripts/weekly-consolidation.sh
+StandardOutput=append:/var/log/cogcore/weekly.log
+StandardError=append:/var/log/cogcore/weekly.log
+# Полный weekly — десятки доменов по 2 LLM-вызова (куратор + синтез);
+# в понедельник 02.11 прогон шёл 7 часов, пока DeepSeek отвечал ошибкой.
+# Бюджет на час: за это время retry-очередь либо дотаивает, либо остаётся
+# на завтра — таймер ежедневный.
+TimeoutStartSec=3600
