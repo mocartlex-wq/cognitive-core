@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -190,6 +191,21 @@ async def run_weekly_retry_cycle() -> list[dict]:
     return results
 
 
+def _weekly_run_produced(details) -> bool:
+    """Прогон считается состоявшимся, если хоть один домен дошёл до результата
+    (consolidated / insufficient_repetition / no_buffers), а не упал."""
+    if isinstance(details, str):
+        try:
+            details = json.loads(details)
+        except ValueError:
+            return True
+    results = (details or {}).get("results") if isinstance(details, dict) else None
+    if not results:
+        return True  # старый формат без results — не угадываем, считаем прогоном
+    return any("error" not in r and not _weekly_result_failed(r.get("result"))
+               for r in results if isinstance(r, dict))
+
+
 async def run_weekly_cycle_if_due(max_age_days: int = 5) -> dict:
     """Weekly из systemd — страховка in-app планировщика.
 
@@ -201,13 +217,23 @@ async def run_weekly_cycle_if_due(max_age_days: int = 5) -> dict:
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        last = await conn.fetchval(
+        rows = await conn.fetch(
             """
-            SELECT MAX(event_time) FROM l5_audit_log
+            SELECT event_time, details FROM l5_audit_log
              WHERE action = 'weekly_consolidate' AND success
                AND COALESCE(details->>'mode', '') <> 'retry'
+             ORDER BY event_time DESC LIMIT 10
             """
         )
+    # Прогон, в котором упал КАЖДЫЙ домен (02.11: DeepSeek лежал все 7 часов),
+    # в аудите выглядит как success=True — но буферы в LLM так и не попали.
+    # Такой прогон не считается: иначе страховка «ждёт 5 дней» после пустого
+    # понедельника, хотя ждать нечего.
+    last = None
+    for r0 in rows:
+        if _weekly_run_produced(r0["details"]):
+            last = r0["event_time"]
+            break
     if last is not None:
         if last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)

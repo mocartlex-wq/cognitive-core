@@ -11,6 +11,7 @@ retry-очередь осталась пустой, и L3 стоял 8 дней 
 from __future__ import annotations
 
 import inspect
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -143,12 +144,23 @@ async def test_retry_cycle_keeps_domain_when_curator_still_down(fake_redis):
     assert members == {"yurist"}
 
 
+GOOD_RUN = {"results": [{"domain": "a", "result": {"status": "consolidated"}}]}
+ALL_FAILED_RUN = {"results": [
+    {"domain": "a", "result": {"status": "no_buffers", "curator_errors": [{"owner": "o", "error": "APIConnectionError"}]}},
+    {"domain": "b", "error": "boom"},
+]}
+
+
+def _audit_rows(*pairs):
+    return [{"event_time": t, "details": d} for t, d in pairs]
+
+
 @pytest.mark.asyncio
 async def test_if_due_skips_when_recent_full_run_exists():
     recent = datetime.now(timezone.utc) - timedelta(days=2)
     run = AsyncMock()
     with (
-        patch.object(worker, "get_pool", new=AsyncMock(return_value=_pool(fetchval=recent))),
+        patch.object(worker, "get_pool", new=AsyncMock(return_value=_pool(fetch_rows=_audit_rows((recent, GOOD_RUN))))),
         patch.object(worker, "run_weekly_cycle", new=run),
     ):
         out = await worker.run_weekly_cycle_if_due(max_age_days=5)
@@ -159,16 +171,40 @@ async def test_if_due_skips_when_recent_full_run_exists():
 @pytest.mark.asyncio
 async def test_if_due_runs_when_last_full_run_is_old_or_missing():
     old = datetime.now(timezone.utc) - timedelta(days=8)
-    for last in (old, None):
+    for rows in (_audit_rows((old, GOOD_RUN)), []):
         run = AsyncMock(return_value=[{"domain": "a", "result": {"status": "consolidated"}},
                                       {"domain": "b", "error": "boom"}])
         with (
-            patch.object(worker, "get_pool", new=AsyncMock(return_value=_pool(fetchval=last))),
+            patch.object(worker, "get_pool", new=AsyncMock(return_value=_pool(fetch_rows=rows))),
             patch.object(worker, "run_weekly_cycle", new=run),
         ):
             out = await worker.run_weekly_cycle_if_due(max_age_days=5)
         assert out == {"status": "ran", "domains": 2, "failed": 1}
         run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_if_due_ignores_run_where_every_domain_failed():
+    # 02.11.2026: понедельничный прогон упал на всех доменах, но в аудите он
+    # success=True. Страховка не должна «ждать 5 дней» после такого прогона.
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    old = datetime.now(timezone.utc) - timedelta(days=8)
+    run = AsyncMock(return_value=[])
+    rows = _audit_rows((yesterday, ALL_FAILED_RUN), (old, GOOD_RUN))
+    with (
+        patch.object(worker, "get_pool", new=AsyncMock(return_value=_pool(fetch_rows=rows))),
+        patch.object(worker, "run_weekly_cycle", new=run),
+    ):
+        out = await worker.run_weekly_cycle_if_due(max_age_days=5)
+    assert out["status"] == "ran"
+    run.assert_awaited_once()
+
+
+def test_run_produced_accepts_json_string_and_legacy_details():
+    assert worker._weekly_run_produced(json.dumps(GOOD_RUN))
+    assert not worker._weekly_run_produced(json.dumps(ALL_FAILED_RUN))
+    assert worker._weekly_run_produced({})          # старый формат — считаем прогоном
+    assert worker._weekly_run_produced(None)
 
 
 def test_if_due_ignores_retry_runs_in_audit():
