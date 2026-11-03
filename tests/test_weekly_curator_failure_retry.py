@@ -148,7 +148,22 @@ GOOD_RUN = {"results": [{"domain": "a", "result": {"status": "consolidated"}}]}
 ALL_FAILED_RUN = {"results": [
     {"domain": "a", "result": {"status": "no_buffers", "curator_errors": [{"owner": "o", "error": "APIConnectionError"}]}},
     {"domain": "b", "error": "boom"},
+    # Домен с одним буфером: LLM не звали, ответ «мало повторов» — не признак
+    # живого куратора. Ровно так прогон 02.11 выглядел «состоявшимся».
+    {"domain": "quiet", "result": {"status": "insufficient_repetition", "owners": [{"status": "insufficient_repetition"}]}},
 ]}
+QUIET_RUN = {"results": [
+    {"domain": "quiet", "result": {"status": "insufficient_repetition"}},
+    {"domain": "empty", "result": {"status": "no_buffers", "owners": []}},
+]}
+
+
+def test_run_produced_quiet_week_without_failures_counts():
+    assert worker._weekly_run_produced(QUIET_RUN)
+
+
+def test_run_produced_failures_with_only_quiet_domains_does_not_count():
+    assert not worker._weekly_run_produced(ALL_FAILED_RUN)
 
 
 def _audit_rows(*pairs):

@@ -192,8 +192,14 @@ async def run_weekly_retry_cycle() -> list[dict]:
 
 
 def _weekly_run_produced(details) -> bool:
-    """Прогон считается состоявшимся, если хоть один домен дошёл до результата
-    (consolidated / insufficient_repetition / no_buffers), а не упал."""
+    """Прогон считается состоявшимся, если куратор работал.
+
+    Признак: были сбои И ни одного consolidated — куратор лежал. Домены с
+    одним буфером отвечают insufficient_repetition БЕЗ вызова LLM, поэтому
+    «хоть один домен без ошибки» (первая версия) считала прогон 02.11
+    состоявшимся: там 40 доменов упали, а десяток «тихих» прошёл мимо модели.
+    Прогон без сбоев вовсе — состоялся, даже если нечего было сворачивать.
+    """
     if isinstance(details, str):
         try:
             details = json.loads(details)
@@ -202,8 +208,10 @@ def _weekly_run_produced(details) -> bool:
     results = (details or {}).get("results") if isinstance(details, dict) else None
     if not results:
         return True  # старый формат без results — не угадываем, считаем прогоном
-    return any("error" not in r and not _weekly_result_failed(r.get("result"))
-               for r in results if isinstance(r, dict))
+    rows = [r for r in results if isinstance(r, dict)]
+    failed = any("error" in r or _weekly_result_failed(r.get("result")) for r in rows)
+    consolidated = any((r.get("result") or {}).get("status") == "consolidated" for r in rows)
+    return consolidated or not failed
 
 
 async def run_weekly_cycle_if_due(max_age_days: int = 5) -> dict:
