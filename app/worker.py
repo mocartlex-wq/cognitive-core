@@ -115,9 +115,14 @@ def _weekly_result_failed(result: dict | None) -> bool:
     """
     if not isinstance(result, dict):
         return False
-    if result.get("curator_errors"):
+    owners = result.get("owners") or []
+    if any(o.get("status") == "error" for o in owners):
         return True
-    return any(o.get("status") == "error" for o in (result.get("owners") or []))
+    # Сбой куратора качества при СОСТОЯВШЕМСЯ синтезе — не провал: L3 уже
+    # записан, повтор прогнал бы те же буферы через модель второй раз
+    # (04.11.2026: cognitive_core получил 34 знания и всё равно встал в очередь).
+    consolidated = any(o.get("status") == "consolidated" for o in owners)
+    return bool(result.get("curator_errors")) and not consolidated
 
 
 async def run_weekly_cycle():

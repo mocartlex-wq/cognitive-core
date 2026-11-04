@@ -283,13 +283,23 @@ QUALITY_PROMPTS = {
 4. Проверь CONFIDENCE: confidence < {min_confidence} → НЕ переносить в L3.
 5. Найди УСТАРЕВШЕЕ в L3 → deprecated.
 
-Ответь СТРОГО в JSON:
-{{"deduplicated_to_existing": [...], "conflicts": [...], "ready_for_l3": [...], "not_ready_for_l3": [...], "deprecated_l3": [...]}}""",
+Ответь СТРОГО в JSON. В ответе ТОЛЬКО идентификаторы и короткие причины (до 120 символов),
+НЕ повторяй тексты буферов и знаний — ответ длиннее лимита обрывается и пропадает целиком:
+{{"deduplicated_to_existing": [{{"buffer_id": "...", "l3_id": "...", "reason": "..."}}],
+ "conflicts": [{{"buffer_id": "...", "conflict_with_l3_id": "...", "reason": "..."}}],
+ "ready_for_l3": [{{"buffer_id": "...", "reason": "..."}}],
+ "not_ready_for_l3": [{{"buffer_id": "...", "reason": "..."}}],
+ "deprecated_l3": [{{"l3_id": "...", "reason": "..."}}]}}""",
 
     "en": """You are a long-term memory quality controller. Compare weekly buffers against reference L3 in the "{domain}" domain.
 Tasks: find semantic duplicates, find conflicts, check repetition, check confidence, find stale items.
-Answer STRICTLY in JSON:
-{{"deduplicated_to_existing": [...], "conflicts": [...], "ready_for_l3": [...], "not_ready_for_l3": [...], "deprecated_l3": [...]}}""",
+Answer STRICTLY in JSON. Return ONLY ids and short reasons (max 120 chars); do NOT echo buffer or
+knowledge texts — an answer longer than the output limit is cut and lost entirely:
+{{"deduplicated_to_existing": [{{"buffer_id": "...", "l3_id": "...", "reason": "..."}}],
+ "conflicts": [{{"buffer_id": "...", "conflict_with_l3_id": "...", "reason": "..."}}],
+ "ready_for_l3": [{{"buffer_id": "...", "reason": "..."}}],
+ "not_ready_for_l3": [{{"buffer_id": "...", "reason": "..."}}],
+ "deprecated_l3": [{{"l3_id": "...", "reason": "..."}}]}}""",
 
     "zh": """你是长期记忆质量控制员。在 "{domain}" 域比较周度缓冲区与参考L3。
 任务：查找语义重复、查找冲突、检查重复性、检查置信度、查找过时知识。

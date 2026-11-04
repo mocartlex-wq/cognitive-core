@@ -249,3 +249,13 @@ class TestHealthL3Stall:
         src = self._src()
         i = src.index('deep["l3_stalled"]')
         assert "try:" in src[:i]
+
+
+def test_curator_error_with_consolidated_owner_is_not_failure():
+    # 04.11.2026: куратор качества обрезан (22 тыс. символов), а синтез прошёл и
+    # записал L3 — повторять домен нельзя, иначе те же буферы уйдут в модель дважды.
+    assert not worker._weekly_result_failed({
+        "status": "consolidated",
+        "curator_errors": [{"owner": "o", "error": "LLMTruncatedError"}],
+        "owners": [{"owner": "o", "status": "consolidated", "curator_error": "LLMTruncatedError"}],
+    })
