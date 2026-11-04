@@ -16,6 +16,10 @@ _ab_stats: dict[str, dict[str, int]] = {}  # {function: {"a_success": N, "b_succ
 _AB_FIELDS = ("a_success", "b_success", "a_fail", "b_fail")
 
 
+class LLMTruncatedError(RuntimeError):
+    """Модель упёрлась в max_tokens: ответ неполный, разбирать его нельзя."""
+
+
 async def _redis_or_none():
     """Redis-клиент либо None — вызывающий код обязан уметь жить без него."""
     try:
@@ -264,15 +268,42 @@ class LLMClient:
 
     async def _try_call(self, config: dict, model: str, messages: list) -> dict | None:
         client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        response = await client.with_options(timeout=20.0).chat.completions.create(
+        kwargs = dict(
             model=model,
             messages=messages,
             temperature=self.temperature,
-            max_tokens=4096,
+            max_tokens=settings.llm_max_output_tokens,
         )
-        text = response.choices[0].message.content
+        if settings.llm_json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        timed = client.with_options(timeout=settings.llm_request_timeout)
+        try:
+            response = await timed.chat.completions.create(**kwargs)
+        except Exception as e:
+            # Провайдер без json_object (Ollama/старые прокси) отвечает 400 на
+            # сам параметр — повторяем без него, а не роняем вызов.
+            if "response_format" not in kwargs or "response_format" not in str(e):
+                raise
+            kwargs.pop("response_format")
+            response = await timed.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        text = choice.message.content
         if not text:
             return None
+        if getattr(choice, "finish_reason", None) == "length":
+            # Обрезанный ответ — не JSON. Раньше _parse_json срезал его до
+            # последней «}» и отдавал на разбор: JSONDecodeError без намёка на
+            # причину. Теперь причина в ошибке и в логе.
+            from app.services.metrics import log_event
+            log_event(
+                "warning", "LLM response truncated by max_tokens",
+                function=self.function_name, model=model,
+                max_tokens=settings.llm_max_output_tokens, chars=len(text),
+            )
+            raise LLMTruncatedError(
+                f"{self.function_name}/{model}: ответ обрезан на "
+                f"{settings.llm_max_output_tokens} токенах ({len(text)} символов)"
+            )
         return self._parse_json(text)
 
     @staticmethod

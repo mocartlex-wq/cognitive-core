@@ -104,6 +104,16 @@ class Settings(BaseSettings):
     # полной недоступности провайдеров). In-memory зеркало живёт до рестарта.
     llm_cache_ttl_days: int = 7
 
+    # Лимит ответа LLM. 4096 резало weekly-синтез больших доменов на ~12 тыс.
+    # символов кириллицы (03.11.2026: ai_crm, cognitive_core, frontend_errors,
+    # work_journal — JSONDecodeError, домены без L3). deepseek-chat отдаёт до 8К.
+    llm_max_output_tokens: int = 8192
+    # Таймаут одного вызова: 8К токенов ответа — это минуты, 20 с не хватало.
+    llm_request_timeout: float = 180.0
+    # response_format=json_object: провайдер сам не даст обрезанный/небрежный
+    # JSON. Провайдеру, который параметр не знает, повторяем вызов без него.
+    llm_json_mode: bool = True
+
     # Язык
     system_language: str = "ru"  # ru / en / zh
 
