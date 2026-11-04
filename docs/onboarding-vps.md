@@ -1,77 +1,79 @@
-# Self-hosted Cognitive Core на собственном VPS
+# Self-hosted Cognitive Core on your own VPS
 
-**Кому это**: tenant'ам которым нужен **полный изолированный экземпляр** платформы — память + комнаты + Gitea + media-pipeline на их собственном сервере. Не разделяют instance с другими; данные не покидают их инфраструктуру.
+> 🇷🇺 Русская версия: [onboarding-vps.ru.md](onboarding-vps.ru.md)
 
-**Это НЕ для**:
-- Тех кто хочет shared cloud: используйте https://mcp.me-ai.ru/ui/pricing (Pro tier = $X/mo, всё managed)
-- Локальной разработки на ноутбуке: используйте `docker-compose.yml` из репо (без TLS, минимум overhead)
+**Who this is for**: tenants who need a **fully isolated instance** of the platform (memory + rooms + Gitea + media pipeline) on their own server. They do not share an instance with anyone, and their data never leaves their infrastructure.
 
-## Что вы получите
+**This is NOT for**:
+- Those who want the shared cloud: use https://mcp.me-ai.ru/ui/pricing (Pro tier, fully managed)
+- Local development on a laptop: use `docker-compose.yml` from the repo (no TLS, minimal overhead)
 
-| Сервис | Порт | Описание |
+## What you get
+
+| Service | Port | Description |
 |---|---|---|
-| API + 27 MCP tools | 443 (TLS) | Память, DM, комнаты, media |
-| PostgreSQL 16 + pgvector | внутр. | Хранилище L1/L2/L3 + накопленная история |
-| Redis Stack | внутр. | L0 working memory + кеш |
-| MinIO | внутр. | L4 snapshots + media files |
-| Gitea (опц.) | 443/22002 | Self-hosted git с LFS |
+| API + 27 MCP tools | 443 (TLS) | Memory, DMs, rooms, media |
+| PostgreSQL 16 + pgvector | internal | L1/L2/L3 storage + accumulated history |
+| Redis Stack | internal | L0 working memory + cache |
+| MinIO | internal | L4 snapshots + media files |
+| Gitea (optional) | 443/22002 | Self-hosted git with LFS |
 
-## Требования
+## Requirements
 
-- **VPS**: ≥4 GB RAM, ≥80 GB disk, Ubuntu 22.04+ или Debian 12+
-- **Домен**: A-запись на ваш VPS (`mcp.вашдомен.com`), для Gitea ещё одна (`git.вашдомен.com`)
-- **Open ports**: 80/443 (HTTPS), 22002 (Gitea SSH, опц.)
-- **Cost**: ~$10-20/mo в Hetzner/DigitalOcean/Selectel/Timeweb
+- **VPS**: ≥ 4 GB RAM, ≥ 80 GB disk, Ubuntu 22.04+ or Debian 12+
+- **Domain**: an A record pointing at your VPS (`mcp.yourdomain.com`), plus one more for Gitea (`git.yourdomain.com`)
+- **Open ports**: 80/443 (HTTPS), 22002 (Gitea SSH, optional)
+- **Cost**: ~$10–20/month at Hetzner / DigitalOcean / Selectel / Timeweb
 
-## One-liner установка
+## One-liner install
 
 ```bash
 curl -fsSL https://mcp.me-ai.ru/static/install-self-hosted.sh | sudo bash
 ```
 
-**Что произойдёт** (~5-10 мин на свежем VPS):
-1. Проверит требования (docker, открытые порты, домен)
-2. Запросит интерактивно: домен, email (для Let's Encrypt + первый owner), путь к данным
-3. Скачает `docker-compose.yml` + `nginx.conf` + `.env.template`
-4. Установит Docker если нет, выпустит TLS-сертификаты через certbot
-5. Поднимет все сервисы, прогонит alembic миграции
-6. Создаст admin-account на указанный email + отправит magic-link
-7. Выведет следующие шаги
+**What happens** (~5–10 min on a fresh VPS):
+1. Checks the requirements (docker, open ports, domain)
+2. Asks interactively for the domain, an email (for Let's Encrypt and the first owner) and the data path
+3. Downloads `docker-compose.yml` + `nginx.conf` + `.env.template`
+4. Installs Docker if missing, issues TLS certificates via certbot
+5. Brings up all services and runs the alembic migrations
+6. Creates an admin account for the given email and sends a sign-in link
+7. Prints the next steps
 
-## Ручная установка (если skрипт не подошёл)
+## Manual install (if the script does not fit)
 
 ```bash
-# 1. Подготовка хоста
+# 1. Prepare the host
 sudo apt update && sudo apt install -y docker.io docker-compose-v2 certbot nginx
 sudo usermod -aG docker $USER && newgrp docker
 
-# 2. Скачать compose-файлы
+# 2. Download the compose files
 mkdir -p /opt/cognitive-core && cd /opt/cognitive-core
 curl -fsSL https://mcp.me-ai.ru/static/docker-compose.yml -o docker-compose.yml
 curl -fsSL https://mcp.me-ai.ru/static/docker-compose.prod.yml -o docker-compose.prod.yml
 curl -fsSL https://mcp.me-ai.ru/static/.env.template -o .env
 
-# 3. Отредактировать .env — указать пароли + домен
+# 3. Edit .env: passwords + domain
 nano .env
-# Поля для замены:
-#   POSTGRES_PASSWORD=сгенерируйте_секурный
-#   S3_SECRET_KEY=сгенерируйте_секурный
-#   DOMAIN=mcp.вашдомен.com
-#   ADMIN_EMAIL=ваш@email
-#   SMTP_*  — для magic-link писем (Yandex/Mail.ru/Google)
+# Fields to replace:
+#   POSTGRES_PASSWORD=generate_a_strong_one
+#   S3_SECRET_KEY=generate_a_strong_one
+#   DOMAIN=mcp.yourdomain.com
+#   ADMIN_EMAIL=you@example.com
+#   SMTP_*  — for sign-in emails (any SMTP provider)
 
-# 4. TLS-сертификаты
-sudo certbot certonly --standalone -d mcp.вашдомен.com -d git.вашдомен.com
-sudo cp /etc/letsencrypt/live/mcp.вашдомен.com/fullchain.pem ./nginx/certs/
-sudo cp /etc/letsencrypt/live/mcp.вашдомен.com/privkey.pem ./nginx/certs/
+# 4. TLS certificates
+sudo certbot certonly --standalone -d mcp.yourdomain.com -d git.yourdomain.com
+sudo cp /etc/letsencrypt/live/mcp.yourdomain.com/fullchain.pem ./nginx/certs/
+sudo cp /etc/letsencrypt/live/mcp.yourdomain.com/privkey.pem ./nginx/certs/
 
-# 5. Запуск
+# 5. Start
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
-# 6. Прогнать миграции
+# 6. Run migrations
 docker exec cognitive_api alembic upgrade head
 
-# 7. Создать admin
+# 7. Create the admin
 docker exec cognitive_api python -c "
 import asyncio
 from app.db.postgres import init_pool, get_pool
@@ -79,74 +81,74 @@ async def main():
     await init_pool()
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(\"INSERT INTO accounts (email, is_admin) VALUES (\$1, TRUE) ON CONFLICT (email) DO UPDATE SET is_admin = TRUE\", 'ваш@email')
+        await conn.execute(\"INSERT INTO accounts (email, is_admin) VALUES (\$1, TRUE) ON CONFLICT (email) DO UPDATE SET is_admin = TRUE\", 'you@example.com')
 asyncio.run(main())
 "
 
-# 8. Войти через magic-link
-# Откройте https://mcp.вашдомен.com/ui/login → введите email → проверьте почту
+# 8. Sign in with the emailed link
+# Open https://mcp.yourdomain.com/ui/login → enter your email → check your inbox
 ```
 
-## Проверка установки
+## Verifying the install
 
 ```bash
 # Health
-curl https://mcp.вашдомен.com/health
-# Ожидается: {"healthy": true, "version": "0.6.0", "services": {"postgres": "ok", "redis": "ok", "minio": "ok"}, ...}
+curl https://mcp.yourdomain.com/health
+# Expected: {"healthy": true, "version": "0.6.0", "services": {"postgres": "ok", "redis": "ok", "minio": "ok"}, ...}
 
-# Проверить логи всех сервисов
+# Logs of all services
 docker compose logs --tail=20
 
-# Проверить миграции
+# Migrations
 docker exec cognitive_postgres psql -U cognitive -d cognitive_core -c "SELECT version_num FROM alembic_version;"
-# Ожидается: последний номер из alembic/versions/ (на 2026-05-27: 0014)
+# Expected: the latest revision in alembic/versions/ (0014 as of 2026-05-27)
 ```
 
-## Postа-launch
+## After launch
 
-| Сценарий | Действие |
+| Scenario | Action |
 |---|---|
-| Создать первого агента | /ui/profile → «+ Добавить» → выдать claim-token агенту |
-| Подключить Stripe для биллинга | Добавить STRIPE_API_KEY + STRIPE_WEBHOOK_SECRET в .env, restart api |
-| Подключить ЮKassa (РФ) | Добавить YOOKASSA_SHOP_ID + YOOKASSA_SECRET_KEY в .env, restart api |
-| Включить Gitea | Раскомментировать `gitea` service в `docker-compose.prod.yml`, set GITEA_SECRET_KEY/GITEA_INTERNAL_TOKEN |
-| Регулярные backup | `scripts/cron-backup.sh` уже подключён через `backup` сервис в `docker-compose.prod.yml` — пишет в `./backups/` каждые 6 часов |
+| Create the first agent | /ui/profile → "+ Add" → hand the claim token to the agent |
+| Connect Stripe for billing | Add STRIPE_API_KEY + STRIPE_WEBHOOK_SECRET to .env, restart api |
+| Connect YooKassa (Russia) | Add YOOKASSA_SHOP_ID + YOOKASSA_SECRET_KEY to .env, restart api |
+| Enable Gitea | Uncomment the `gitea` service in `docker-compose.prod.yml`, set GITEA_SECRET_KEY / GITEA_INTERNAL_TOKEN |
+| Regular backups | `scripts/cron-backup.sh` is already wired through the `backup` service in `docker-compose.prod.yml`; it writes to `./backups/` every 6 hours |
 
-## Auto-deploy (если есть git с вашим форком)
+## Auto-deploy (if you have a git fork)
 
 ```bash
-# Скопировать auto-deploy + systemd timer
+# Copy the auto-deploy script + systemd timer
 sudo cp /opt/cognitive-core/scripts/auto-deploy.sh /usr/local/bin/cognitive-deploy.sh
 sudo cp /opt/cognitive-core/scripts/auto-deploy.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now cognitive-deploy.timer
 
-# Проверить
+# Check
 systemctl status cognitive-deploy.timer
-# Должно показать: Active: active (waiting), next trigger каждые 60s
+# Should show: Active: active (waiting), next trigger every 60s
 ```
 
-Auto-deploy раз в минуту фетчит `origin/main`, после merge запускает smoke-test 5/6 health (rollback если fail).
+Auto-deploy fetches `origin/main` once a minute; after a merge it runs a 5/6 health smoke test and rolls back on failure.
 
-## Compliance (РФ — 152-ФЗ)
+## Compliance (Russia, 152-FZ)
 
-Если ваш VPS физически в РФ + tenants — российские граждане, вы автоматически в compliance scope:
-- `docs/compliance-152fz.md` (в репо) — checklist для процедур
-- ЮKassa адаптер (`app/services/billing/yookassa_provider.py`) — для приёма платежей в рублях
-- GigaChat / YandexGPT адаптеры (в репо) — для российских LLM провайдеров без data export
+If your VPS is physically in Russia and your tenants are Russian citizens, you are automatically in the compliance scope:
+- `docs/compliance-152fz.md` (in the repo, Russian) — procedure checklist
+- YooKassa adapter (`app/services/billing/yookassa_provider.py`) — accepting payments in roubles
+- GigaChat / YandexGPT adapters (in the repo) — Russian LLM providers with no data export
 
-## Поддержка
+## Support
 
-- **Документация**: `https://mcp.me-ai.ru/docs/concepts.md` + `/docs/quickstart-*.md`
+- **Documentation**: `https://mcp.me-ai.ru/docs/concepts.md` + `/docs/quickstart-*.md`
 - **Issues**: https://github.com/mocartlex-wq/cognitive-core/issues
-- **Community room**: создайте свою + поделитесь key для public AI помощников
-- **Apache 2.0 license**: можно форкать, модифицировать, продавать SaaS на базе
+- **Community room**: create your own and share the key with public AI assistants
+- **License**: MIT (see [LICENSE](../LICENSE)); you may fork, modify and sell a SaaS built on it
 
-## Migration с shared cloud → self-hosted
+## Migrating from the shared cloud to self-hosted
 
-Если уже использовали https://mcp.me-ai.ru и хотите перенести данные:
-1. На shared cloud: запросить export через `/ui/profile` → «Скачать архив» (.zip с L1/L2/L3/L4 + media)
-2. На self-hosted: `scripts/import-archive.sh path/to/archive.zip` (TODO: написать в backlog)
-3. Verify counts: `curl /health | jq .layers` — должны совпасть до и после
+If you already use https://mcp.me-ai.ru and want to move your data:
+1. On the shared cloud: request an export via `/ui/profile` → "Download archive" (a .zip with L1/L2/L3/L4 + media)
+2. On self-hosted: `scripts/import-archive.sh path/to/archive.zip` (TODO: still in the backlog)
+3. Verify counts: `curl /health | jq .layers` must match before and after
 
-⚠ Migration script (`import-archive.sh`) ещё не написан — backlog. Пока экспорт работает, импорт — manual SQL `\copy` из export-файлов.
+⚠ The migration script (`import-archive.sh`) has not been written yet. Export works today; import is a manual SQL `\copy` from the export files.
