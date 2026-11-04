@@ -623,6 +623,59 @@ async def _maybe_snapshot(domain: str) -> _uuid.UUID | None:
     return snapshot_id
 
 
+def _pick_duplicate_losers(l3_knowledge: list[dict], pairs: list) -> list[_uuid.UUID]:
+    """Кого снять из каждой пары дублей, найденной аудитором.
+
+    Модель только указывает на пару; кто остаётся — решают данные: большая
+    confidence, при равенстве — старшая запись (она уже прошла больше
+    прогонов). Пара засчитывается, только если ОБА id — действующие знания
+    этого домена из переданного списка: инструменты, чужие домены и
+    выдуманные id (модель их умеет) молча пропускаются. Запись, уже снятая
+    одной парой, не участвует в следующей — иначе цепочка a~b, b~c сняла бы всё.
+    """
+    by_id: dict[_uuid.UUID, dict] = {}
+    for k in l3_knowledge:
+        try:
+            by_id[_to_uuid(k["id"])] = k
+        except (KeyError, ValueError, TypeError):
+            continue
+
+    def _conf(k: dict) -> float:
+        content = k.get("content") or {}
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                content = {}
+        try:
+            return float(content.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _since(k: dict):
+        return k.get("effective_from") or datetime.min.replace(tzinfo=timezone.utc)
+
+    losers: list[_uuid.UUID] = []
+    gone: set[_uuid.UUID] = set()
+    for pair in pairs:
+        ids = pair.get("ids") if isinstance(pair, dict) else pair
+        if not isinstance(ids, (list, tuple)) or len(ids) != 2:
+            continue
+        try:
+            a, b = _to_uuid(ids[0]), _to_uuid(ids[1])
+        except (ValueError, TypeError):
+            continue
+        if a == b or a not in by_id or b not in by_id or a in gone or b in gone:
+            continue
+        ka, kb = by_id[a], by_id[b]
+        # Остаётся: выше confidence; при равенстве — старшая (раньше effective_from).
+        keep_a = (_conf(ka), -_since(ka).timestamp()) >= (_conf(kb), -_since(kb).timestamp())
+        loser = b if keep_a else a
+        losers.append(loser)
+        gone.add(loser)
+    return losers
+
+
 async def run_monthly_audit(domain: str) -> dict:
     """Ежемесячная ревизия L3."""
     pool = await get_pool()
@@ -650,6 +703,13 @@ async def run_monthly_audit(domain: str) -> dict:
 
     result = await monthly_audit(domain, l3_knowledge, l3_tools)
 
+    # Дубли: аудитор их находил всегда (duplicate_pairs в схеме с v0.1), но
+    # код применял только stale/dead — пары уходили в отчёт и там умирали.
+    # 04.11.2026 cognitive_core после повторного синтеза: 8 пар на 67 записей,
+    # health 0.62. Снимаем проигравшего в паре по данным, не по мнению модели.
+    losers = _pick_duplicate_losers(l3_knowledge, result.get("duplicate_pairs") or [])
+    result["duplicates_retired"] = [str(x) for x in losers]
+
     # Применяем рекомендации
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
@@ -657,6 +717,12 @@ async def run_monthly_audit(domain: str) -> dict:
             await conn.execute(
                 "UPDATE l3_master_knowledge SET effective_to = $1 WHERE id = $2",
                 now, _to_uuid(stale_id),
+            )
+        for dup_id in losers:
+            await conn.execute(
+                "UPDATE l3_master_knowledge SET effective_to = $1 "
+                "WHERE id = $2 AND domain = $3 AND effective_to IS NULL",
+                now, dup_id, domain,
             )
         for dead_id in result.get("dead_tool_ids", []):
             await conn.execute(
@@ -668,7 +734,7 @@ async def run_monthly_audit(domain: str) -> dict:
     from app.services.operative import _remove_indexed_vectors
     stale_strs = [str(s) for s in result.get("stale_knowledge_ids", [])]
     dead_strs = [str(d) for d in result.get("dead_tool_ids", [])]
-    await _remove_indexed_vectors(stale_strs + dead_strs)
+    await _remove_indexed_vectors(stale_strs + dead_strs + result["duplicates_retired"])
     index_result = await index_domain_vectors(domain)
     result["vectors_indexed"] = index_result["total"]
 
