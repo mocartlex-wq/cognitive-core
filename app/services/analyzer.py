@@ -63,11 +63,20 @@ async def analyze_weekly(
 
     client = get_llm_client("weekly_consolidator")
     max_attempts = 3
+    user = get_user_weekly(l)
     for attempt in range(max_attempts):
-        raw = await client._try_call(client.primary_config, client.primary_model, [
-            {"role": "system", "content": system},
-            {"role": "user", "content": get_user_weekly(l)},
-        ])
+        try:
+            raw = await client._try_call(client.primary_config, client.primary_model, [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ])
+        except json.JSONDecodeError:
+            # Битый JSON от модели — повод попросить ещё раз, а не ронять домен
+            # с первой попытки (03.11.2026 так остались без L3 четыре домена).
+            if attempt >= max_attempts - 1:
+                raise
+            user = f"{get_user_weekly(l)}\n\n{get_user_retry(l)}"
+            continue
         if raw is None:
             continue
         try:
@@ -75,5 +84,6 @@ async def analyze_weekly(
         except ValueError:
             if attempt >= max_attempts - 1:
                 raise
+            user = f"{get_user_weekly(l)}\n\n{get_user_retry(l)}"
 
     return {"new_or_updated": [], "deprecated_l3_ids": [], "tools": []}
