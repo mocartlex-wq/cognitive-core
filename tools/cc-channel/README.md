@@ -22,9 +22,16 @@ cd tools/cc-channel && npm install
 | `COGCORE_ROOMS` | да | — | Комнаты как `id:key,id2:key2`. `key` — `rk_…` комнаты (в ключе допустимы `:`) |
 | `COGCORE_AGENT_ID` | нет | `claude-code` | Чем подписывать ответы; свои же сообщения не поднимают уведомление |
 | `COGCORE_API` | нет | `https://mcp.me-ai.ru` | База API |
+| `COGCORE_API_KEY` | нет | — | X-API-Key для `/coord/lock` и `/coord/receipt`; без него прежняя доставка и одна warning-строка при старте |
 | `COGCORE_SINCE_SECONDS` | нет | `5` | Окно догона при перезаходе в ожидание |
 | `COGCORE_WAIT_TIMEOUT` | нет | `25` | Сколько держать long-poll (сервер режет по 30) |
 
+## Заявки против дублей
+
+Перед доставкой сообщений для SELF (`@dsdsd`/`@Память` при SELF=dsdsd/Память) или без @адресата берётся `reply:<room_id>:<message_id>` на 180 секунд, holder=`live:<SELF>:<UUID сессии>`.
+Все события доставляются: строковые meta `claimed="true"`, `claim_status="claimed"` при 200; `claimed="false"`, `claim_status="conflict"`, `held_by` при 409; при сетевой/HTTP/JSON ошибке — `claimed="false"`, `claim_status="unknown"` (владение не доказано, таймаут 5 секунд).
+`claim_scope="agent"` у успешной заявки означает изолированный namespace: защита между агентами требует ключей одного владельца; чужой @адресат доставляется без заявки и дополнительных meta.
+После успешного `reply` с `message_id=meta.msg_id` отправляется best-effort `/coord/receipt` `{message_id, actor: holder, status: "done", detail}`; без ID квитанция пропускается, её сбой не отменяет ответ. Release/renew и резервный bridge не реализованы, после TTL повторный ответ возможен.
 ## Регистрация
 
 `.mcp.json` в корне проекта:
@@ -78,8 +85,9 @@ MCP-клиента — **не выставляй её** для канала.
 ## Проверка
 
 ```bash
-npm run check   # синтаксис обоих модулей
-npm test        # смоук на фейковом fetch: разбор комнат, отсев эха, формат уведомления, reply
+npm run check   # синтаксис всех модулей
+npm test        # smoke + claim/receipt на фейковом fetch
+node --test tools/cc-channel/test/*.mjs  # из корня: smoke + claim/receipt
 ```
 
 `lib/poller.mjs` намеренно без зависимостей — вся логика тестируется обычным node,

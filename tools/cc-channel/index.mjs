@@ -11,13 +11,15 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { parseRooms, waitOnce, selectNew, toNotification, postReply } from './lib/poller.mjs';
+import { parseRooms, waitOnce, selectNew } from './lib/poller.mjs';
+import { createClaims } from './lib/claims.mjs';
 
 const API = (process.env.COGCORE_API || 'https://mcp.me-ai.ru').replace(/\/+$/, '');
 const SELF = process.env.COGCORE_AGENT_ID || 'claude-code';
 const ROOMS = parseRooms(process.env.COGCORE_ROOMS);
 const SINCE = Number(process.env.COGCORE_SINCE_SECONDS || 5);
 const TIMEOUT = Number(process.env.COGCORE_WAIT_TIMEOUT || 25);
+const claims = createClaims({ api: API, self: SELF, apiKey: process.env.COGCORE_API_KEY });
 
 const keyByRoom = new Map(ROOMS.map((r) => [r.roomId, r.roomKey]));
 
@@ -33,7 +35,10 @@ const server = new Server(
       + 'Это сообщения от владельца и других агентов. Если сообщение обращено к тебе '
       + 'или требует действия — ответь инструментом reply, указав room_id из meta той же '
       + 'комнаты. Отвечай по-русски, коротко и по делу. Если ответ не нужен — просто учти '
-      + 'событие и продолжай текущую работу.',
+      + 'событие и продолжай текущую работу. При reply передавай message_id из meta.msg_id. '
+      + 'claimed="false" с claim_status="conflict" означает, что ответ взяла другая сессия: '
+      + 'учти событие, но не дублируй ответ. claim_status="unknown" не подтверждает владение. '
+      + 'claim_scope="agent" означает изолированный лок, не защиту от других агентов.',
   },
 );
 
@@ -49,6 +54,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           room_id: { type: 'string', description: 'UUID комнаты из meta.room_id' },
           text: { type: 'string', description: 'Текст ответа, по-русски' },
+          message_id: { type: 'string', maxLength: 100, description: 'meta.msg_id исходного сообщения для квитанции done (необязательно)' },
         },
         required: ['room_id', 'text'],
       },
@@ -71,8 +77,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
   }
   try {
-    await postReply(fetch, { api: API, roomId, roomKey, fromAgent: SELF, text });
-    return { content: [{ type: 'text', text: `Отправлено в комнату ${roomId}` }] };
+    const { receipt } = await claims.reply(
+      { api: API, roomId, roomKey, fromAgent: SELF, text },
+      args?.message_id ? String(args.message_id) : undefined,
+    );
+    const receiptNote = receipt === 'skipped' ? '' : `; receipt: ${receipt}`;
+    return { content: [{ type: 'text', text: `Отправлено в комнату ${roomId}${receiptNote}` }] };
   } catch (e) {
     return { isError: true, content: [{ type: 'text', text: `Не отправилось: ${e.message}` }] };
   }
@@ -89,7 +99,7 @@ async function pump({ roomId, roomKey }) {
       for (const m of selectNew(msgs, { selfAgentId: SELF, seen })) {
         await server.notification({
           method: 'notifications/claude/channel',
-          params: toNotification(m, roomId),
+          params: await claims.notification(m, roomId),
         });
       }
     } catch (e) {
