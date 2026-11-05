@@ -82,6 +82,31 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "cognitive_knowledge_retire",
+        "description": "Снять устаревшее знание владельца из выдачи recall. Возвращает retired и skipped.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "maxItems": 200},
+                "reason": {"type": "string", "minLength": 1, "maxLength": 2000},
+            },
+            "required": ["ids", "reason"],
+        },
+    },
+    {
+        "name": "cognitive_knowledge_search",
+        "description": "Найти активные знания владельца по тексту: id, домен, дата и первые 200 символов.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "domain": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+            "required": ["q"],
+        },
+    },
+    {
         "name": "cognitive_recall",
         "description": (
             "Найти релевантные знания по запросу через KNN-поиск (L3 + tools). "
@@ -1086,6 +1111,16 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         }
         body = {"source_agent": agent_id, "domain": domain, "payload": payload}
         return await _call_self(request, "POST", "/events", json_body=body, timeout_s=6.0)
+
+    if name == "cognitive_knowledge_retire":
+        return await _call_self(request, "POST", "/memory/knowledge/retire",
+                                json_body={"ids": a.get("ids", []), "reason": a.get("reason", "")}, timeout_s=6.0)
+
+    if name == "cognitive_knowledge_search":
+        params = {"q": a.get("q", ""), "limit": a.get("limit", 20)}
+        if a.get("domain"):
+            params["domain"] = a["domain"]
+        return await _call_self(request, "GET", "/memory/knowledge/search", params=params, timeout_s=6.0)
 
     if name == "cognitive_recall":
         # Пустая строка — это «домен не указан», а не домен с пустым именем.
