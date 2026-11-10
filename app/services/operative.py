@@ -494,6 +494,16 @@ async def recent_events(
              WHERE owner_user_id = $1::uuid
                AND timestamp >= NOW() - ($2::int * INTERVAL '1 day')
                AND ($3::text IS NULL OR domain = $3::text)
+               AND (left(raw_payload->>'task', length('CHECKPOINT ' || domain))
+                        IS DISTINCT FROM 'CHECKPOINT ' || domain
+                    OR NOT EXISTS (
+                        SELECT 1 FROM l1_raw_events newer
+                         WHERE newer.owner_user_id = $1::uuid
+                           AND newer.domain = l1_raw_events.domain
+                           AND left(newer.raw_payload->>'task', length('CHECKPOINT ' || newer.domain))
+                               = 'CHECKPOINT ' || newer.domain
+                           AND (newer.timestamp, newer.id) > (l1_raw_events.timestamp, l1_raw_events.id)
+                    ))
                AND ($4::text = ''
                     OR to_tsvector('simple', raw_payload::text) @@ plainto_tsquery('simple', $4::text)
                     OR raw_payload::text ILIKE $6 ESCAPE '!')
@@ -525,6 +535,45 @@ async def recent_events(
             "content": content,
         })
     return out
+
+
+async def latest_checkpoint(domain: str, owner_user_id: str | None) -> dict | None:
+    """Полная последняя точка за 30 дней, строго в пределах владельца."""
+    if not owner_user_id:
+        return None
+    prefix = ('CHECKPOINT ' + domain).replace('!', '!!').replace('%', '!%').replace('_', '!_')
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, domain, source_agent, timestamp, raw_payload
+              FROM l1_raw_events
+             WHERE owner_user_id = $1::uuid AND domain = $2::text
+               AND timestamp >= NOW() - INTERVAL '30 days'
+               AND raw_payload->>'task' LIKE $3 ESCAPE '!'
+             ORDER BY timestamp DESC, id DESC
+            """,
+            owner_user_id, domain, prefix + '%',
+        )
+    if not rows:
+        return None
+    row = rows[0]
+    payload = _parse_jsonb(row['raw_payload'])
+    task = payload.get('task', '')
+    ts = row['timestamp']
+    checkpoint = {
+        'id': str(row['id']), 'domain': row['domain'],
+        'task': task, 'result': payload.get('result', ''),
+        'source_agent': row['source_agent'],
+        'timestamp': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts),
+        'superseded_ids': [str(older['id']) for older in rows[1:]],
+    }
+    # Формат task: CHECKPOINT domain [branch@sha]. Не угадываем отсутствующие поля.
+    if isinstance(task, str) and '[' in task and ']' in task:
+        ref = task.split('[', 1)[1].split(']', 1)[0]
+        if '@' in ref:
+            checkpoint['branch'], checkpoint['sha'] = ref.rsplit('@', 1)
+    return checkpoint
 
 
 async def recall_any_domain(

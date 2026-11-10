@@ -16,6 +16,7 @@ from app.services.operative import (
     close_session,
     create_session,
     feedback_record,
+    latest_checkpoint,
     recall_any_domain,
     recall_path,
     recent_events,
@@ -27,6 +28,15 @@ log = logging.getLogger(__name__)
 RECENT_TIMEOUT_S = float(os.environ.get("COGCORE_RECALL_RECENT_TIMEOUT_S", "2.5"))
 
 router = APIRouter(prefix="/operative", tags=["operative"])
+
+
+@router.get("/checkpoint")
+async def checkpoint(request: Request, domain: str = Query(..., min_length=1, max_length=120)):
+    await verify_api_key(request)
+    owner_user_id = await resolve_owner_user_id(request)
+    if not owner_user_id:
+        raise HTTPException(status_code=403, detail="Owner required")
+    return await latest_checkpoint(domain, owner_user_id)
 
 
 async def _observe_recall(*, request: Request, body: OperativeQuery, results: list,
