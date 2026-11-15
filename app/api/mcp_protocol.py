@@ -59,6 +59,7 @@ GLOBAL_HARD_CAP_S = 35.0
 # ─────────────────────────────────────────────────────────────────
 # Tool schemas — registered with MCP `tools/list`
 # ─────────────────────────────────────────────────────────────────
+from app.models.coordination import TaskAction, TaskCreate
 from app.models.event import TaskCheckpoint
 
 TOOLS: list[dict[str, Any]] = [
@@ -547,6 +548,30 @@ TOOLS: list[dict[str, Any]] = [
 
 
 # ─────────────────────────────────────────────────────────────────
+# Shared task ledger schemas reuse the HTTP contracts, including required CAS
+# version and idempotency key. A successful submission means review, not done.
+_coord_action_schema = TaskAction.model_json_schema()
+_coord_action_schema["properties"]["task_id"] = {"type": "string", "format": "uuid"}
+_coord_action_schema["required"].append("task_id")
+_coord_task_id_schema = {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"}},
+                         "required": ["task_id"], "additionalProperties": False}
+TOOLS.extend([
+    {"name": "coord_task_create", "description": "Поставить задачу в общую очередь владельца с критериями приёмки и конкретным сеансом координатора. Повтор с тем же ключом не создаёт дубль.",
+     "inputSchema": TaskCreate.model_json_schema(), "annotations": {"readOnlyHint": False, "idempotentHint": True}},
+    {"name": "coord_task_list", "description": "Прочитать общую очередь задач. При next_cursor продолжить обход. Статус review ожидает независимой проверки.",
+     "inputSchema": {"type": "object", "properties": {"project": {"type": "string"}, "status": {"type": "string"},
+                      "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 200}}, "additionalProperties": False},
+     "annotations": {"readOnlyHint": True}},
+    {"name": "coord_task_get", "description": "Получить актуальную задачу, версию, исполнителя, срок владения, следующий шаг и доказательства.",
+     "inputSchema": _coord_task_id_schema, "annotations": {"readOnlyHint": True}},
+    {"name": "coord_task_history", "description": "Получить журнал переходов, причины восстановления и доказательства старых попыток. next_cursor передать как before_version для более ранней страницы.",
+     "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"},
+                      "before_version": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}},
+                      "required": ["task_id"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
+    {"name": "coord_task_action", "description": "Взять задачу, продлить/восстановить собственную попытку, представить результат или независимо проверить. При 409 перечитать состояние. Не принимать свою работу и не менять чужую попытку.",
+     "inputSchema": _coord_action_schema, "annotations": {"readOnlyHint": False, "idempotentHint": True}},
+])
+
 # JSON-RPC envelope models
 # ─────────────────────────────────────────────────────────────────
 class JsonRpcRequest(BaseModel):
@@ -1104,6 +1129,21 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         if a.get("idempotency_key") is not None:
             body["idempotency_key"] = a["idempotency_key"]
         return await _call_self(request, "POST", "/events", json_body=body, timeout_s=6.0)
+
+    if name == "coord_task_create":
+        return await _call_self(request, "POST", "/coord/tasks", json_body=a, timeout_s=6.0)
+    if name == "coord_task_list":
+        return await _call_self(request, "GET", "/coord/tasks", params={k: v for k, v in a.items() if v is not None}, timeout_s=6.0)
+    if name in {"coord_task_get", "coord_task_history", "coord_task_action"}:
+        from uuid import UUID
+        task_id = str(UUID(str(a.get("task_id", ""))))
+        suffix = {"coord_task_get": "", "coord_task_history": "/history", "coord_task_action": "/actions"}[name]
+        path = f"/coord/tasks/{task_id}{suffix}"
+        if name == "coord_task_action":
+            return await _call_self(request, "POST", path, json_body={k: v for k, v in a.items() if k != "task_id"}, timeout_s=6.0)
+        if name == "coord_task_history":
+            return await _call_self(request, "GET", path, params={k: v for k, v in a.items() if k != "task_id" and v is not None}, timeout_s=6.0)
+        return await _call_self(request, "GET", path, timeout_s=6.0)
 
     if name == "cognitive_read_record":
         from uuid import UUID

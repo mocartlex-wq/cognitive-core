@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Очередь задач — Cognitive Core</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --page: #f3f6fa;
+      --paper: #fff;
+      --ink: #24364a;
+      --muted: #617288;
+      --line: #d8e2ed;
+      --blue: #24678a;
+      --blue-soft: #eaf3fa;
+      --green: #246743;
+      --green-soft: #eaf5ee;
+      --amber: #825711;
+      --amber-soft: #fff5df;
+      --red: #a33e40;
+      --red-soft: #fbeff0;
+      --radius: 12px;
+      font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--page);
+      font-synthesis: none;
+      font-size: 15px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input, select, textarea { font: inherit; }
+    button, select { cursor: pointer; }
+    button { color: inherit; }
+    button:disabled { cursor: default; opacity: .55; }
+    button, a, input, textarea, select, summary { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid #5199c4; outline-offset: 3px; }
+    [hidden] { display: none !important; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(27px, 3vw, 34px); line-height: 1.2; letter-spacing: -.8px; font-weight: 650; }
+    h2 { font-size: 21px; line-height: 1.35; font-weight: 650; letter-spacing: -.35px; }
+    h3 { font-size: 15px; font-weight: 650; }
+    .topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
+    .topbar-inner { max-width: 1480px; padding: 18px 32px; margin: auto; display: flex; align-items: center; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.3px; }
+    .brand-mark { display: grid; grid-template-columns: repeat(2, 7px); gap: 3px; transform: rotate(-9deg); }
+    .brand-mark i { display: block; width: 7px; height: 7px; border-radius: 2px; background: var(--blue); }
+    .brand-mark i:last-child { opacity: .35; }
+    .topbar-label { font-size: 13px; color: var(--muted); padding-left: 16px; border-left: 1px solid var(--line); }
+    .connection { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+    .connection-dot { width: 7px; height: 7px; background: #8996a6; border-radius: 50%; flex-shrink: 0; }
+    .connection[data-state="ok"] .connection-dot { background: #3d8b66; }
+    .connection[data-state="error"] .connection-dot { background: #bb7c20; }
+    .shell { max-width: 1480px; padding: 34px 32px 42px; margin: auto; }
+    .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+    .subtitle { color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 60ch; }
+    .btn { border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; background: var(--paper); font-weight: 600; display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 42px; text-decoration: none; white-space: nowrap; }
+    .btn:hover:not(:disabled) { background: #f0f5f9; border-color: #b7cbdc; }
+    .btn-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1c5573; border-color: #1c5573; }
+    .btn-quiet { background: transparent; border-color: transparent; color: var(--muted); }
+    .btn-small { min-height: 34px; padding: 6px 10px; font-size: 13px; }
+    .btn svg { width: 17px; height: 17px; flex-shrink: 0; }
+    .banner { border: 1px solid #e8c992; background: var(--amber-soft); color: #694a17; border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; margin-bottom: 18px; line-height: 1.5; }
+    .banner p { flex: 1; }
+    .banner a { color: #5c4217; }
+    .toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 20px; }
+    .field { display: grid; gap: 7px; min-width: 0; }
+    .field label, .field-label { font-size: 13px; font-weight: 600; }
+    input, select, textarea { width: 100%; min-width: 0; background: var(--paper); color: var(--ink); border: 1px solid #c6d4e1; border-radius: 8px; padding: 10px 12px; min-height: 42px; }
+    input::placeholder, textarea::placeholder { color: #738296; }
+    textarea { min-height: 90px; resize: vertical; line-height: 1.5; }
+    .search-field { flex: 1; }
+    .search-wrap { position: relative; }
+    .search-wrap svg { position: absolute; top: 12px; left: 12px; width: 18px; height: 18px; color: var(--muted); pointer-events: none; }
+    .search-wrap input { padding-left: 39px; }
+    .project-field { width: 220px; }
+    .filters { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 22px; }
+    .filter { display: inline-flex; gap: 9px; align-items: center; padding: 8px 11px; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 13px; white-space: nowrap; min-height: 35px; }
+    .filter:hover { background: #e9eff6; }
+    .filter[aria-pressed="true"] { border-color: #aac7dc; background: var(--paper); color: var(--blue); font-weight: 650; }
+    .filter-count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; background: #e6edf4; border-radius: 4px; min-width: 20px; padding: 1px 5px; }
+    .filter[aria-pressed="true"] .filter-count { color: var(--blue); background: var(--blue-soft); }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(390px, 1fr); gap: 22px; align-items: start; }
+    .queue { min-width: 0; }
+    .list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 0 2px; }
+    .list-heading h2 { font-size: 14px; letter-spacing: 0; }
+    .list-count { color: var(--muted); font-size: 12px; }
+    .task-list { display: grid; gap: 10px; }
+    .task-card { text-align: left; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); padding: 17px 18px 15px; cursor: pointer; position: relative; }
+    .task-card:hover { border-color: #98b8ce; }
+    .task-card[aria-pressed="true"] { border-color: #5c90b1; box-shadow: inset 3px 0 var(--blue); background: #fbfdff; }
+    .card-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .project-label { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { font-size: 11px; font-weight: 650; background: #edf1f5; color: #57697f; border-radius: 5px; padding: 4px 7px; display: inline-flex; align-items: center; white-space: nowrap; }
+    .badge-running { background: var(--blue-soft); color: #225f86; }
+    .badge-review { background: #eef0fc; color: #575f9c; }
+    .badge-verified_done { background: var(--green-soft); color: var(--green); }
+    .badge-blocked { background: var(--amber-soft); color: var(--amber); }
+    .badge-failed { background: var(--red-soft); color: var(--red); }
+    .card-title { display: block; font-size: 16px; line-height: 1.42; font-weight: 650; margin-top: 11px; overflow-wrap: anywhere; }
+    .card-next { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 7px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card-next strong { color: #4b6076; font-weight: 600; }
+    .card-warning { display: block; font-size: 12px; color: var(--amber); margin-top: 9px; line-height: 1.4; }
+    .card-stages { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px solid #e4ebf2; margin-top: 13px; padding-top: 11px; }
+    .stage { min-width: 0; }
+    .stage-label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+    .stage-value { display: flex; gap: 6px; align-items: start; font-size: 12px; font-weight: 600; line-height: 1.4; }
+    .stage-value::before { content: ""; width: 6px; height: 6px; background: #a8b6c5; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+    .stage-value.ready::before { background: #398660; }
+    .stage-value.waiting::before { background: #7579ad; }
+    .stage-value.attention::before { background: #b28532; }
+    .card-worker { display: block; font-size: 11px; color: var(--muted); margin-top: 10px; overflow-wrap: anywhere; }
+    .empty { padding: 48px 24px; text-align: center; border: 1px dashed #bfcfdf; border-radius: var(--radius); color: var(--muted); line-height: 1.6; }
+    .empty strong { color: var(--ink); font-weight: 600; display: block; margin-bottom: 5px; }
+    .empty button { margin-top: 16px; }
+    .limit-note { color: var(--amber); font-size: 12px; line-height: 1.5; margin-top: 12px; }
+    .detail { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; position: sticky; top: 18px; max-height: calc(100dvh - 36px); overflow-y: auto; scrollbar-gutter: stable; }
+    .detail-empty { min-height: 340px; display: flex; align-items: center; justify-content: center; padding: 32px; color: var(--muted); line-height: 1.6; text-align: center; }
+    .detail-content { padding: 23px; }
+    .detail-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+    .detail-time { color: var(--muted); font-size: 11px; text-align: right; }
+    .detail-title { overflow-wrap: anywhere; }
+    .detail-project { margin-top: 10px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+    .detail-next { margin: 21px 0; padding: 14px 16px; border-left: 3px solid #4d89b0; background: #f0f6fb; border-radius: 0 7px 7px 0; }
+    .detail-next h3 { font-size: 12px; color: #47687f; margin-bottom: 6px; }
+    .prose { font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .muted { color: var(--muted); }
+    .detail-warning { padding: 12px 14px; background: var(--amber-soft); border-radius: 7px; font-size: 13px; line-height: 1.5; color: var(--amber); margin: 16px 0; overflow-wrap: anywhere; }
+    .detail-warning strong { display: block; margin-bottom: 4px; }
+    .people { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0; }
+    .people dt { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+    .people dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+    .session { display: block; font-size: 11px; color: var(--muted); line-height: 1.4; margin-top: 4px; overflow-wrap: anywhere; }
+    .section { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .section-label { font-size: 11px; color: var(--muted); }
+    .result-track { border-left: 2px solid #c2d1df; padding-left: 14px; }
+    .review-track { border-left: 2px solid #aeb2d8; padding-left: 14px; }
+    .review-track[data-verdict="approve"] { border-color: #6caa85; }
+    .review-track[data-verdict="reject"] { border-color: #c79a4b; }
+    .evidence-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+    .evidence-item { font-size: 12px; line-height: 1.5; min-width: 0; }
+    .evidence-item a, .evidence-item span { overflow-wrap: anywhere; }
+    .evidence-uri { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .evidence-hash { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+    .review-meta { font-size: 11px; color: var(--muted); margin-top: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+    .review-button { width: 100%; margin-top: 16px; }
+    details.section { padding-bottom: 2px; }
+    summary { font-size: 13px; font-weight: 600; cursor: pointer; }
+    details > .prose { margin-top: 12px; }
+    .technical { margin-top: 14px; display: grid; gap: 10px; }
+    .technical div { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+    .technical dt { margin-bottom: 3px; }
+    .technical dd { margin: 0; color: var(--ink); }
+    .history { list-style: none; padding: 0; margin: 15px 0 0; display: grid; gap: 14px; }
+    .history > li { padding-left: 12px; border-left: 2px solid #d8e2ec; font-size: 12px; line-height: 1.5; }
+    .history strong { display: block; font-weight: 600; }
+    .history small { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .history-state { margin-top: 13px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .history-field { margin-top: 9px; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .history-field strong { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+    .history-event-details { margin-top: 10px; }
+    .history-event-details > summary { color: var(--blue); font-size: 12px; }
+    .history-review { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .history-more { margin-top: 16px; white-space: normal; }
+    .source-note { color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 22px; }
+    .mobile-back { display: none; }
+    dialog { border: 1px solid var(--line); border-radius: 16px; padding: 0; width: min(620px, calc(100% - 32px)); max-height: calc(100dvh - 40px); color: var(--ink); background: var(--paper); box-shadow: 0 20px 80px #20364b30; }
+    dialog::backdrop { background: #1e344d65; }
+    .dialog-header { display: flex; align-items: start; justify-content: space-between; gap: 20px; padding: 23px 26px 17px; }
+    .dialog-header p { margin-top: 7px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+    .close-button { border: 0; background: transparent; color: var(--muted); border-radius: 6px; min-width: 34px; height: 34px; font-size: 25px; line-height: 1; }
+    .close-button:hover { background: var(--page); }
+    .dialog-body { padding: 0 26px 23px; display: grid; gap: 16px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .help { font-size: 11px; line-height: 1.5; color: var(--muted); }
+    .dialog-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 26px; background: #f6f8fb; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
+    .form-error { font-size: 13px; padding: 12px; border-radius: 8px; background: var(--red-soft); color: var(--red); line-height: 1.5; overflow-wrap: anywhere; }
+    .form-error .btn { margin-top: 10px; }
+    .form-notice { font-size: 12px; padding: 11px 12px; border-radius: 8px; background: var(--amber-soft); color: var(--amber); line-height: 1.5; }
+    fieldset.verdicts { border: 0; padding: 0; margin: 0; }
+    .verdicts legend { font-size: 13px; font-weight: 600; margin-bottom: 8px; padding: 0; }
+    .verdict-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .verdict-choice { display: flex; align-items: start; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; cursor: pointer; }
+    .verdict-choice:has(input:checked) { background: var(--blue-soft); border-color: #79a3bf; }
+    .verdict-choice input { min-height: 0; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--blue); flex-shrink: 0; }
+    .verdict-choice strong { display: block; font-size: 13px; font-weight: 600; }
+    .verdict-choice small { display: block; font-size: 11px; margin-top: 5px; color: var(--muted); line-height: 1.4; }
+    .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #264b60; color: #fff; padding: 12px 20px; border-radius: 9px; font-size: 13px; line-height: 1.5; max-width: calc(100% - 32px); z-index: 20; box-shadow: 0 4px 20px #20364b25; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+    @media (max-width: 999px) {
+      .shell { padding: 28px 24px; }
+      .topbar-inner { padding: 16px 24px; }
+      .workspace { display: block; }
+      .detail { display: none; position: static; max-height: none; overflow: visible; }
+      body.detail-open .detail { display: block; }
+      body.detail-open .queue, body.detail-open .toolbar, body.detail-open .filters, body.detail-open .page-heading { display: none; }
+      .mobile-back { display: inline-flex; margin: 0 0 16px -8px; }
+      .detail-content { padding: 24px; }
+      .detail-title { font-size: 25px; }
+    }
+    @media (max-width: 559px) {
+      .topbar-inner { padding: 15px 18px; gap: 10px; }
+      .topbar-label { display: none; }
+      .connection { font-size: 11px; gap: 6px; }
+      .shell { padding: 25px 16px; }
+      .page-heading { display: block; margin-bottom: 24px; }
+      .subtitle { font-size: 13px; max-width: 33ch; margin-top: 9px; }
+      .page-heading > .btn { margin-top: 18px; }
+      .toolbar { flex-wrap: wrap; gap: 12px; margin-bottom: 15px; }
+      .search-field { flex-basis: 100%; }
+      .project-field { width: auto; flex: 1; }
+      .toolbar > .btn { margin-bottom: 1px; }
+      .filters { gap: 5px; margin-bottom: 20px; }
+      .filter { padding: 7px 8px; font-size: 12px; gap: 6px; }
+      .task-card { padding: 15px 15px 13px; }
+      .card-title { font-size: 15px; }
+      .card-stages { gap: 14px; }
+      .detail-content { padding: 19px; }
+      .detail-title { font-size: 22px; }
+      .detail-top { align-items: start; }
+      .detail-time { max-width: 130px; line-height: 1.5; }
+      .people { gap: 12px; }
+      .banner { flex-wrap: wrap; gap: 10px; }
+      .banner p { flex-basis: 100%; }
+      .dialog-header { padding: 20px 20px 16px; }
+      .dialog-body { padding: 0 20px 20px; }
+      .dialog-footer { padding: 15px 20px; }
+      .form-row { grid-template-columns: 1fr; }
+      .verdict-options { gap: 8px; }
+      .verdict-choice { padding: 10px; }
+      .source-note { font-size: 10px; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      dialog[open] { animation: dialog-in .14s ease-out; }
+      @keyframes dialog-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Cognitive Core</div>
+      <span class="topbar-label">Координация работы</span>
+      <div class="connection" id="connection" role="status" data-state="loading"><span class="connection-dot" aria-hidden="true"></span><span id="connectionText">Подключение</span></div>
+    </div>
+  </header>
+  <main class="shell">
+    <div class="page-heading">
+      <div><h1>Очередь задач</h1><p class="subtitle">От следующего шага до проверенного результата.</p></div>
+      <button class="btn btn-primary" id="newTaskButton" type="button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Новая задача</button>
+    </div>
+    <div class="banner" id="globalBanner" role="alert" hidden><p id="globalMessage"></p><a class="btn btn-small" href="/ui/login" id="loginLink" target="_blank" rel="noopener noreferrer" aria-label="Войти в Core в новой вкладке" hidden>Войти в Core</a><button type="button" class="btn btn-small" id="bannerRefresh">Обновить данные</button></div>
+    <div class="toolbar">
+      <div class="field search-field"><label for="search">Найти задачу</label><div class="search-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input type="search" id="search" placeholder="Название, следующий шаг или исполнитель" autocomplete="off"></div></div>
+      <div class="field project-field"><label for="projectFilter">Проект</label><select id="projectFilter"><option value="">Все проекты</option></select></div>
+      <button class="btn" id="refreshButton" type="button" aria-label="Обновить очередь"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M16.4 8a6.7 6.7 0 1 0 .2 3.5M16.4 3.5V8H12"/></svg><span id="refreshLabel">Обновить</span></button>
+    </div>
+    <nav class="filters" id="filters" aria-label="Фильтр по статусу"></nav>
+    <div class="workspace">
+      <section class="queue" aria-labelledby="queueHeading">
+        <div class="list-heading"><h2 id="queueHeading">Работа по задачам</h2><span id="listCount" class="list-count"></span></div>
+        <div id="taskList" class="task-list" aria-busy="true"><div class="empty"><strong>Загружаем очередь</strong>Получаем текущее состояние задач.</div></div>
+        <p class="limit-note" id="limitNote" hidden>В очереди есть ещё задачи. Счётчики, поиск и статусы относятся к загруженным задачам.</p>
+        <button class="btn review-button" type="button" id="loadMoreButton" hidden>Загрузить ещё задачи</button>
+      </section>
+      <aside class="detail" id="detailPane" aria-label="Детали задачи">
+        <div class="detail-empty" id="detailEmpty">Выберите задачу, чтобы увидеть следующий шаг,<br>результат исполнителя и приёмку.</div>
+        <div class="detail-content" id="detailContent" hidden>
+          <button class="btn btn-quiet mobile-back" type="button" id="backToList">‹ К очереди</button>
+          <div class="detail-top"><span class="badge" id="detailStatus"></span><span class="detail-time" id="detailTime"></span></div>
+          <h2 class="detail-title" id="detailTitle" tabindex="-1"></h2>
+          <p class="detail-project" id="detailProject"></p>
+          <div class="detail-next"><h3>Следующий шаг</h3><p class="prose" id="detailNext"></p></div>
+          <div class="detail-warning" id="leaseWarning" hidden><strong>Исполнитель давно не подтверждал работу</strong>Срок подтверждения истёк. Перед продолжением нужно сверить состояние попытки и её результат.</div>
+          <div class="detail-warning" id="blockerBox" hidden><strong>Что мешает продолжить</strong><span id="detailBlocker"></span></div>
+          <dl class="people"><div><dt>Исполнитель</dt><dd id="detailWorker"></dd></div><div><dt>Координатор</dt><dd id="detailCoordinator"></dd></div></dl>
+          <section class="section"><div class="section-title"><h3>Критерий готовности</h3></div><p class="prose" id="detailAcceptance"></p></section>
+          <details class="section" id="descriptionSection"><summary>Описание задачи</summary><p class="prose" id="detailDescription"></p></details>
+          <section class="section"><div class="result-track"><div class="section-title"><h3>Результат исполнителя</h3><span class="section-label" id="resultLabel"></span></div><p class="prose" id="detailResult"></p><ul class="evidence-list" id="resultEvidence"></ul></div></section>
+          <section class="section"><div class="review-track" id="reviewTrack"><div class="section-title"><h3>Независимая приёмка</h3></div><p class="prose" id="detailReview"></p><ul class="evidence-list" id="reviewEvidence"></ul><p class="review-meta" id="reviewMeta" hidden></p></div><button class="btn btn-primary review-button" id="openReview" type="button" hidden>Проверить результат</button></section>
+          <details class="section" id="historySection"><summary>История задачи</summary><p class="history-state" id="historyState"></p><button type="button" class="btn btn-small" id="retryHistory" hidden>Загрузить историю</button><ol class="history" id="historyList"></ol><button type="button" class="btn btn-small history-more" id="moreHistory" hidden>Показать более ранние события</button></details>
+          <details class="section" id="technicalSection"><summary>Идентификаторы и попытка</summary><dl class="technical"><div><dt>Задача</dt><dd id="technicalId"></dd></div><div><dt>Версия и попытка</dt><dd id="technicalVersion"></dd></div><div><dt>Подтверждение исполнителя действует до</dt><dd id="technicalLease"></dd></div><div><dt>Рабочая папка</dt><dd id="technicalWorktree"></dd></div><div><dt>Зависимости</dt><dd id="technicalDependencies"></dd></div></dl></details>
+        </div>
+      </aside>
+    </div>
+    <p class="source-note" id="sourceNote">Единая очередь Cognitive Core. Обновляется каждые 12 секунд при активной вкладке.</p>
+  </main>
+
+  <dialog id="createDialog" aria-labelledby="createHeading">
+    <form id="createForm">
+      <div class="dialog-header"><div><h2 id="createHeading">Новая задача</h2><p>Опишите результат и проверку, по которой работу можно принять.</p></div><button class="close-button" type="button" data-close="createDialog" aria-label="Закрыть создание задачи">×</button></div>
+      <div class="dialog-body">
+        <div class="form-error" id="createError" role="alert" hidden></div>
+        <div class="field"><label for="createTitle">Что нужно сделать</label><input id="createTitle" name="title" required maxlength="300" placeholder="Например, проверить восстановление после перезапуска"></div>
+        <div class="form-row"><div class="field"><label for="createProject">Проект</label><input id="createProject" name="project" required maxlength="160" list="projectOptions" placeholder="cognitive_core"><datalist id="projectOptions"></datalist></div><div class="field"><label for="createAgent">Исполнитель <span class="muted">(необязательно)</span></label><input id="createAgent" name="assigned_agent_id" maxlength="200" placeholder="Идентификатор агента"></div></div>
+        <div class="field"><label for="createAcceptance">Критерий готовности</label><textarea id="createAcceptance" name="acceptance" required maxlength="6000" placeholder="Какой результат должен увидеть независимый проверяющий"></textarea></div>
+        <div class="field"><label for="createNext">Первый шаг</label><textarea id="createNext" name="next_step" required maxlength="2000" placeholder="Конкретное действие, с которого начнётся работа"></textarea></div>
+        <div class="field"><label for="createDescription">Контекст <span class="muted">(необязательно)</span></label><textarea id="createDescription" name="description" maxlength="12000" placeholder="Исходные данные, ограничения и ссылки"></textarea></div>
+        <p class="help">Задача появится в общей очереди. Назначение исполнителя само по себе не означает, что работа уже началась.</p>
+      </div>
+      <div class="dialog-footer"><button type="button" class="btn" data-close="createDialog">Отмена</button><button type="submit" class="btn btn-primary" id="createSubmit">Создать задачу</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="reviewDialog" aria-labelledby="reviewHeading">
+    <form id="reviewForm">
+      <div class="dialog-header"><div><h2 id="reviewHeading">Проверка результата</h2><p id="reviewTaskTitle"></p></div><button class="close-button" type="button" data-close="reviewDialog" aria-label="Закрыть проверку результата">×</button></div>
+      <div class="dialog-body">
+        <div class="form-error" id="reviewError" role="alert" hidden><p id="reviewErrorMessage"></p><button type="button" class="btn btn-small" id="reviewReload" hidden>Обновить данные задачи</button></div>
+        <div class="form-notice" id="reviewChanged" hidden>Состояние задачи обновилось. Перечитайте его перед отправкой приёмки. Ваш ввод сохранён.</div>
+        <p class="help">Проверьте результат по критерию готовности. Ссылка ниже должна подтверждать вашу проверку.</p>
+        <fieldset class="verdicts"><legend>Решение</legend><div class="verdict-options"><label class="verdict-choice"><input type="radio" name="verdict" value="approve" checked><span><strong>Принять</strong><small>Результат проверен</small></span></label><label class="verdict-choice"><input type="radio" name="verdict" value="reject"><span><strong>На доработку</strong><small>Есть замечания</small></span></label></div></fieldset>
+        <div class="field"><label for="reviewComment">Комментарий к проверке</label><textarea id="reviewComment" name="detail" required maxlength="4000" placeholder="Что вы проверили и почему принимаете результат или возвращаете его"></textarea></div>
+        <div class="field"><label for="reviewUrl">Ссылка на подтверждение проверки</label><input id="reviewUrl" name="evidence_uri" type="url" required maxlength="2048" placeholder="https://…"><p class="help">Веб-ссылка на протокол, проверенный результат или отчёт.</p></div>
+        <div class="field"><label for="reviewEvidenceDescription">Что подтверждает ссылка</label><input id="reviewEvidenceDescription" name="evidence_description" required maxlength="1000" placeholder="Например, результаты повторного запуска и сравнения"></div>
+        <div class="field" id="reviewNextField" hidden><label for="reviewNext">Следующий шаг после замечаний</label><textarea id="reviewNext" name="next_step" maxlength="2000" placeholder="Что исправить перед повторной проверкой"></textarea></div>
+      </div>
+      <div class="dialog-footer"><button type="button" class="btn" data-close="reviewDialog">Отмена</button><button type="submit" class="btn btn-primary" id="reviewSubmit">Принять результат</button></div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script>
+    'use strict';
+    (() => {
+      const $ = id => document.getElementById(id);
+      const statuses = {
+        queued: 'В очереди', running: 'В работе', blocked: 'Заблокировано',
+        review: 'На проверке', verified_done: 'Принято', failed: 'Ошибка', cancelled: 'Отменено'
+      };
+      const actionNames = {
+        create: 'Задача создана', claim: 'Исполнитель начал работу', heartbeat: 'Работа подтверждена',
+        recover: 'Попытка восстановлена', submit: 'Результат передан на проверку', review: 'Проверка результата',
+        block: 'Работа заблокирована', fail: 'Попытка завершилась ошибкой', retry: 'Назначена повторная попытка',
+        cancel: 'Задача отменена', assign: 'Исполнитель назначен'
+      };
+      const state = {
+        tasks: [], selected: null, status: '', query: '', project: '', projects: new Set(),
+        hasLoaded: false, loading: false, authRequired: false, loadSerial: 0, historySerial: 0,
+        listController: null, renderedTask: '', historyKey: '', lastSync: null, limit: 200, nextCursor: null, pagesLoaded: 1,
+        historyEvents: [], historyCursor: null, historyPagesLoaded: 1, historyLoading: false, historyRetryMore: false,
+        reviewBase: null, reviewDraftTask: null, createReceipt: null, reviewReceipt: null,
+        creating: false, reviewing: false, reviewConflict: false, toastTimer: null
+      };
+
+      function uuid() {
+        if (crypto.randomUUID) return crypto.randomUUID();
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        bytes[6] = (bytes[6] & 15) | 64;
+        bytes[8] = (bytes[8] & 63) | 128;
+        const hex = Array.from(bytes, n => n.toString(16).padStart(2, '0')).join('');
+        return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
+      }
+      function browserSession() {
+        try {
+          let value = sessionStorage.getItem('core.coordination.browser-session');
+          if (!value) {
+            value = 'browser:' + uuid();
+            sessionStorage.setItem('core.coordination.browser-session', value);
+          }
+          return value;
+        } catch (_) { return 'browser:' + uuid(); }
+      }
+      const sessionId = browserSession();
+      function node(tag, className, text) {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (text !== undefined && text !== null) element.textContent = String(text);
+        return element;
+      }
+      function text(id, value) { $(id).textContent = value || ''; }
+      function date(value, full = false) {
+        const parsed = new Date(value);
+        if (!value || Number.isNaN(parsed.getTime())) return 'Не указано';
+        return new Intl.DateTimeFormat('ru-RU', full
+          ? { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }
+          : { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(parsed);
+      }
+      function safeWebUrl(value) {
+        if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())) return null;
+        try {
+          const url = new URL(value.trim());
+          return (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password ? url.href : null;
+        } catch (_) { return null; }
+      }
+      function badge(status) { return node('span', 'badge badge-' + (statuses[status] ? status : 'queued'), statuses[status] || 'Неизвестный статус'); }
+      function actorName(actor) { return actor && actor.agent_id ? actor.agent_id : 'Не назначен'; }
+      function expired(task) { return task.status === 'running' && (task.lease_expired || (task.lease_until && new Date(task.lease_until).getTime() <= Date.now())); }
+      function resultState(task) {
+        if (task.result) return ['Результат передан', 'ready'];
+        if (task.status === 'running') return [expired(task) ? 'Нужна сверка' : 'В работе', expired(task) ? 'attention' : 'waiting'];
+        if (task.status === 'failed') return ['Ошибка исполнения', 'attention'];
+        if (task.status === 'cancelled') return ['Остановлено', ''];
+        return ['Результата пока нет', ''];
+      }
+      function reviewState(task) {
+        if (task.review && task.review.verdict === 'approve') return ['Принято проверкой', 'ready'];
+        if (task.review && task.review.verdict === 'reject') return ['На доработку', 'attention'];
+        if (task.status === 'verified_done') return ['Принято', 'ready'];
+        if (task.status === 'review') return ['Ожидает проверки', 'waiting'];
+        return ['Ещё не принято', ''];
+      }
+      function connection(mode, message) {
+        $('connection').dataset.state = mode;
+        text('connectionText', message);
+      }
+      function showBanner(message, auth = false) {
+        text('globalMessage', message);
+        $('globalBanner').hidden = false;
+        $('loginLink').hidden = !auth;
+        connection('error', auth ? 'Нужен вход' : 'Нет свежих данных');
+      }
+      function authRequired() {
+        state.authRequired = true;
+        showBanner('Сеанс входа закончился. Войдите в Core в новой вкладке, затем обновите очередь. Введённые данные сохранены в открытых формах.', true);
+        $('newTaskButton').disabled = true;
+        $('openReview').disabled = true;
+      }
+      function errorMessage(error) {
+        if (error.status === 401) return 'Нужно войти в Core. Ваша форма сохранена. После входа повторите отправку.';
+        if (error.status === 409) return 'Задача изменилась или действие уже не соответствует её состоянию. Обновите данные и проверьте результат перед отправкой.';
+        if (error.status === 403) {
+          if (String(error.detail).includes('independent_session_required')) return 'Исполнитель не может принять собственную работу. Проверку должен выполнить другой сеанс.';
+          return 'У этого сеанса нет права выполнить действие. Проверьте, что вошли под нужной учётной записью.';
+        }
+        if (error.status === 404) return 'Задача не найдена или больше недоступна. Обновите очередь.';
+        if (error.status === 422) return 'Сервер не принял заполненные поля. Проверьте комментарий, ссылку и обязательные значения.';
+        if (error.name === 'AbortError') return 'Сервер не ответил вовремя. Данные формы сохранены. Обновите очередь перед повторной отправкой.';
+        return error.message || 'Не удалось связаться с Core. Проверьте подключение и обновите данные.';
+      }
+      async function request(path, options = {}) {
+        const ownController = options.signal ? null : new AbortController();
+        const timer = ownController ? setTimeout(() => ownController.abort(), 12000) : null;
+        try {
+          const response = await fetch(path, {
+            credentials: 'same-origin', cache: 'no-store', ...options,
+            signal: options.signal || ownController.signal,
+            headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }
+          });
+          let data = null;
+          try { data = await response.json(); } catch (_) { /* A non-JSON error must still end the loading state. */ }
+          if (!response.ok) {
+            if (response.status === 401) authRequired();
+            const error = new Error(response.status >= 500 ? 'Core временно недоступен. Попробуйте обновить данные позже.' : 'Не удалось выполнить действие.');
+            error.status = response.status;
+            error.detail = data && data.detail;
+            throw error;
+          }
+          if (!data || typeof data !== 'object') throw new Error('Core вернул неожиданный ответ. Обновите данные позже.');
+          return data;
+        } catch (error) {
+          if (error instanceof TypeError) throw new Error('Не удалось связаться с Core. Проверьте подключение и обновите данные.');
+          throw error;
+        } finally { if (timer) clearTimeout(timer); }
+      }
+      function renderFilters() {
+        const counts = Object.fromEntries(Object.keys(statuses).map(key => [key, 0]));
+        state.tasks.forEach(task => { if (counts[task.status] !== undefined) counts[task.status]++; });
+        const fragment = document.createDocumentFragment();
+        [['', 'Все'], ...Object.entries(statuses)].forEach(([key, label]) => {
+          const button = node('button', 'filter');
+          button.type = 'button';
+          button.dataset.status = key;
+          button.setAttribute('aria-pressed', String(state.status === key));
+          button.append(node('span', '', label), node('span', 'filter-count', key ? counts[key] : state.tasks.length));
+          button.addEventListener('click', () => { state.status = key; renderFilters(); renderList(); });
+          fragment.append(button);
+        });
+        const focused = document.activeElement && document.activeElement.closest('#filters button');
+        const focusKey = focused ? focused.dataset.status : null;
+        $('filters').replaceChildren(fragment);
+        if (focusKey !== null) Array.from($('filters').children).find(button => button.dataset.status === focusKey)?.focus({ preventScroll: true });
+      }
+      function renderProjects() {
+        state.tasks.forEach(task => { if (task.project) state.projects.add(task.project); });
+        if (state.project) state.projects.add(state.project);
+        const list = Array.from(state.projects).sort((a, b) => a.localeCompare(b, 'ru'));
+        const currentOptions = Array.from($('projectFilter').options).slice(1).map(option => option.value);
+        if (JSON.stringify(list) === JSON.stringify(currentOptions)) return;
+        $('projectFilter').replaceChildren(new Option('Все проекты', ''), ...list.map(project => new Option(project, project)));
+        $('projectFilter').value = state.project;
+        $('projectOptions').replaceChildren(...list.map(project => new Option(project, project)));
+      }
+      function visibleTasks() {
+        const query = state.query.trim().toLocaleLowerCase('ru');
+        return state.tasks.filter(task => {
+          if (state.status && task.status !== state.status) return false;
+          const haystack = [task.title, task.project, task.next_step, task.task_id, actorName(task.worker), task.assigned_agent_id].join(' ').toLocaleLowerCase('ru');
+          return !query || haystack.includes(query);
+        });
+      }
+      function renderList() {
+        const tasks = visibleTasks();
+        text('listCount', state.hasLoaded ? tasks.length + ' из ' + state.tasks.length + ' загруженных' : '');
+        $('taskList').setAttribute('aria-busy', String(state.loading));
+        $('limitNote').hidden = !state.hasLoaded || !state.nextCursor;
+        $('loadMoreButton').hidden = !state.nextCursor;
+        $('loadMoreButton').disabled = state.loading || state.authRequired;
+        const fragment = document.createDocumentFragment();
+        if (!tasks.length) {
+          const empty = node('div', 'empty');
+          let title = 'В очереди пока нет задач';
+          let description = 'Добавьте первую задачу с конкретным результатом и критерием готовности.';
+          if (!state.hasLoaded) { title = state.loading ? 'Загружаем очередь' : 'Очередь не загружена'; description = state.loading ? 'Получаем текущее состояние задач.' : 'Восстановите подключение или войдите в Core и обновите данные.'; }
+          else if (state.query || state.status) { title = 'Ничего не найдено'; description = 'Измените запрос или выберите другой статус.'; }
+          empty.append(node('strong', '', title), node('p', '', description));
+          if (state.hasLoaded && (state.query || state.status)) {
+            const clear = node('button', 'btn btn-small', 'Сбросить поиск и статус');
+            clear.type = 'button';
+            clear.addEventListener('click', () => { state.query = ''; state.status = ''; $('search').value = ''; renderFilters(); renderList(); });
+            empty.append(clear);
+          }
+          fragment.append(empty);
+        }
+        tasks.forEach(task => {
+          const card = node('button', 'task-card');
+          card.type = 'button';
+          card.dataset.taskId = task.task_id;
+          card.setAttribute('aria-pressed', String(state.selected?.task_id === task.task_id));
+          const top = node('span', 'card-top');
+          top.append(node('span', 'project-label', task.project), badge(task.status));
+          const next = node('span', 'card-next');
+          next.append(node('strong', '', 'Далее: '), node('span', '', task.next_step || 'Следующий шаг не указан'));
+          const stages = node('span', 'card-stages');
+          [['Исполнение', resultState(task)], ['Приёмка', reviewState(task)]].forEach(([label, [value, tone]]) => {
+            const stage = node('span', 'stage');
+            stage.append(node('span', 'stage-label', label), node('span', 'stage-value ' + tone, value));
+            stages.append(stage);
+          });
+          card.append(top, node('span', 'card-title', task.title), next);
+          if (expired(task)) card.append(node('span', 'card-warning', 'Истёк срок подтверждения исполнителя'));
+          card.append(stages, node('span', 'card-worker', 'Исполнитель: ' + (task.worker ? actorName(task.worker) : task.assigned_agent_id || 'не назначен')));
+          card.addEventListener('click', () => selectTask(task));
+          fragment.append(card);
+        });
+        const focusId = document.activeElement?.closest('.task-card')?.dataset.taskId;
+        $('taskList').replaceChildren(fragment);
+        if (focusId) Array.from($('taskList').children).find(card => card.dataset.taskId === focusId)?.focus({ preventScroll: true });
+      }
+      function renderActor(id, actor, assigned) {
+        const target = $(id);
+        target.replaceChildren(node('span', '', actor ? actorName(actor) : assigned || 'Не назначен'));
+        if (actor?.session_id) {
+          const session = node('span', 'session', 'Сеанс ' + actor.session_id);
+          target.append(session);
+        } else if (assigned) target.append(node('span', 'session', 'Назначен, работа ещё не подтверждена'));
+      }
+      function renderEvidence(target, evidence) {
+        const items = Array.isArray(evidence) ? evidence : [];
+        (typeof target === 'string' ? $(target) : target).replaceChildren(...items.map(item => {
+          const row = node('li', 'evidence-item');
+          const url = safeWebUrl(item.uri);
+          if (url) {
+            const link = node('a', '', item.description || 'Открыть подтверждение');
+            link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.referrerPolicy = 'no-referrer';
+            row.append(link);
+          } else row.append(node('span', '', item.description || 'Подтверждение'));
+          row.append(node('span', 'evidence-uri', item.uri || 'Адрес не указан'));
+          if (item.sha256) row.append(node('span', 'evidence-hash', 'SHA-256: ' + item.sha256));
+          return row;
+        }));
+      }
+      function renderDetail(force = false) {
+        const task = state.selected;
+        $('detailEmpty').hidden = !!task;
+        $('detailContent').hidden = !task;
+        if (!task) return;
+        const key = JSON.stringify(task) + ':' + Boolean(expired(task));
+        if (key === state.renderedTask && !force) return;
+        state.renderedTask = key;
+        text('detailTitle', task.title);
+        text('detailProject', task.project);
+        text('detailTime', 'Обновлено ' + date(task.updated_at));
+        $('detailTime').title = date(task.updated_at, true);
+        const status = badge(task.status);
+        $('detailStatus').className = status.className;
+        text('detailStatus', status.textContent);
+        text('detailNext', task.next_step || 'Следующий шаг не указан');
+        text('detailAcceptance', task.acceptance || 'Критерий не указан');
+        text('detailDescription', task.description || 'Дополнительного описания нет.');
+        $('descriptionSection').hidden = !task.description;
+        $('leaseWarning').hidden = !expired(task);
+        $('blockerBox').hidden = !task.blocker;
+        text('detailBlocker', task.blocker);
+        renderActor('detailWorker', task.worker, task.assigned_agent_id);
+        renderActor('detailCoordinator', task.coordinator);
+        text('resultLabel', task.result ? 'Передан' : 'Ожидается');
+        text('detailResult', task.result || 'Исполнитель ещё не передал результат.');
+        $('detailResult').classList.toggle('muted', !task.result);
+        renderEvidence('resultEvidence', task.evidence);
+        const review = task.review;
+        const reviewCopy = review ? (review.verdict === 'approve' ? 'Принято. ' : 'Возвращено на доработку. ') + (review.detail || '')
+          : task.status === 'review' ? 'Результат ожидает независимой проверки по критерию готовности.'
+          : task.status === 'verified_done' ? 'Задача помечена принятой, но сведения о проверке не получены.' : 'Результат ещё не принят независимым проверяющим.';
+        text('detailReview', reviewCopy);
+        $('detailReview').classList.toggle('muted', !review);
+        $('reviewTrack').dataset.verdict = review?.verdict || '';
+        renderEvidence('reviewEvidence', review?.evidence);
+        $('reviewMeta').hidden = !review;
+        text('reviewMeta', review ? 'Проверил ' + actorName(review.actor) + ' • ' + date(review.observed_at, true) : '');
+        $('openReview').hidden = task.status !== 'review';
+        $('openReview').disabled = state.authRequired;
+        text('technicalId', task.task_id);
+        text('technicalVersion', 'Версия ' + task.version + ', попытка ' + (task.attempt_no || 0) + (task.attempt_id ? '\n' + task.attempt_id : ''));
+        text('technicalLease', task.lease_until ? date(task.lease_until, true) : 'Нет активного срока');
+        text('technicalWorktree', task.worktree || 'Не указана');
+        text('technicalDependencies', task.depends_on?.length ? task.depends_on.join('\n') : 'Нет зависимостей');
+        if ($('historySection').open) loadHistory();
+        syncReviewState();
+      }
+      function selectTask(task, openMobile = true) {
+        const different = state.selected?.task_id !== task.task_id;
+        state.selected = task;
+        if (different) {
+          state.historyKey = '';
+          state.historySerial++;
+          state.historyEvents = []; state.historyCursor = null; state.historyPagesLoaded = 1;
+          state.historyLoading = false; state.historyRetryMore = false;
+          $('moreHistory').hidden = true; $('retryHistory').hidden = true;
+          $('historyList').replaceChildren();
+          text('historyState', 'Откройте историю, чтобы увидеть изменения задачи.');
+          $('historySection').open = false;
+          $('descriptionSection').open = false;
+          $('technicalSection').open = false;
+          $('detailPane').scrollTop = 0;
+        }
+        if (openMobile) document.body.classList.add('detail-open');
+        renderList(); renderDetail();
+        if (openMobile && matchMedia('(max-width: 999px)').matches) {
+          $('detailTitle').focus({ preventScroll: true });
+          window.scrollTo({ top: 0, behavior: 'instant' });
+        }
+      }
+      function upsertTask(task) {
+        const index = state.tasks.findIndex(item => item.task_id === task.task_id);
+        if (index >= 0) state.tasks[index] = task;
+        else if (!state.project || state.project === task.project) state.tasks.unshift(task);
+        if (state.selected?.task_id === task.task_id) state.selected = task;
+        renderProjects(); renderFilters(); renderList(); renderDetail();
+      }
+      async function loadTasks(manual = false, more = false) {
+        if (more && (!state.nextCursor || state.loading)) return;
+        if (!manual && (state.loading || state.authRequired || document.hidden)) return;
+        if (manual) state.authRequired = false;
+        const serial = ++state.loadSerial;
+        state.listController?.abort();
+        const controller = new AbortController();
+        state.listController = controller;
+        const timer = setTimeout(() => controller.abort(), 12000);
+        state.loading = true;
+        $('refreshButton').disabled = true;
+        text('refreshLabel', 'Обновляем');
+        $('taskList').setAttribute('aria-busy', 'true');
+        try {
+          const collected = more ? state.tasks.slice() : [];
+          let cursor = more ? state.nextCursor : null;
+          let pageCount = more ? state.pagesLoaded : 0;
+          const targetPages = more ? 1 : state.pagesLoaded;
+          for (let page = 0; page < targetPages; page++) {
+            const params = new URLSearchParams({ limit: '200' });
+            if (state.project) params.set('project', state.project);
+            if (cursor) params.set('cursor', cursor);
+            const data = await request('/coord/tasks?' + params, { signal: controller.signal });
+            if (serial !== state.loadSerial) return;
+            if (!Array.isArray(data.tasks) || data.tasks.some(task => !task || typeof task.task_id !== 'string' || typeof task.version !== 'number')) throw new Error('Core вернул неполную очередь. Обновите данные позже.');
+            collected.push(...data.tasks);
+            state.limit = Number(data.limit) || 200;
+            cursor = typeof data.next_cursor === 'string' && data.next_cursor ? data.next_cursor : null;
+            pageCount++;
+            if (!cursor) break;
+          }
+          const current = new Map(state.tasks.map(task => [task.task_id, task]));
+          state.tasks = Array.from(new Map(collected.map(task => [task.task_id, current.get(task.task_id)?.version > task.version ? current.get(task.task_id) : task])).values());
+          state.nextCursor = cursor;
+          state.pagesLoaded = pageCount;
+          state.hasLoaded = true;
+          state.lastSync = new Date();
+          state.authRequired = false;
+          $('globalBanner').hidden = true;
+          $('newTaskButton').disabled = false;
+          $('openReview').disabled = false;
+          connection('ok', 'Обновлено ' + state.lastSync.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }));
+          if (state.selected) {
+            const latest = state.tasks.find(task => task.task_id === state.selected.task_id);
+            if (latest) state.selected = latest;
+            else {
+              const selectedId = state.selected.task_id;
+              const latestSelected = await request('/coord/tasks/' + encodeURIComponent(selectedId));
+              if (serial !== state.loadSerial) return;
+              if (state.selected?.task_id === selectedId) state.selected = latestSelected;
+            }
+          } else if (state.tasks.length) selectTask(state.tasks[0], false);
+          renderProjects(); renderFilters(); renderDetail();
+          syncReviewState();
+        } catch (error) {
+          if (serial !== state.loadSerial) return;
+          if (error.status !== 401) showBanner(errorMessage(error) + (state.hasLoaded ? ' На экране остаются последние полученные данные.' : ''));
+        } finally {
+          clearTimeout(timer);
+          if (serial === state.loadSerial) {
+            state.loading = false;
+            $('refreshButton').disabled = false;
+            text('refreshLabel', 'Обновить');
+            renderList();
+          }
+        }
+      }
+      function historyField(label, value) {
+        const field = node('p', 'history-field');
+        field.append(node('strong', '', label), node('span', '', value));
+        return field;
+      }
+      function renderHistory() {
+        const expanded = new Set(Array.from($('historyList').querySelectorAll('details[open]')).map(item => item.dataset.version));
+        $('historyList').replaceChildren(...state.historyEvents.map(event => {
+          const row = node('li');
+          row.dataset.version = String(event.version);
+          row.append(node('strong', '', actionNames[event.action] || event.action), node('span', '', statuses[event.status] || event.status), node('small', '', actorName(event.actor) + ' • ' + date(event.at) + ' • версия ' + event.version));
+          if (event.detail) row.append(historyField(['block', 'fail', 'cancel'].includes(event.action) ? 'Причина' : 'Комментарий', event.detail));
+          if (event.reconciliation) row.append(historyField('Сверка состояния перед продолжением', event.reconciliation));
+          const hasDetails = event.next_step || event.result || event.evidence?.length || event.review || event.attempt_id || event.worker;
+          if (hasDetails) {
+            const detail = node('details', 'history-event-details');
+            detail.dataset.version = String(event.version);
+            detail.open = expanded.has(String(event.version));
+            detail.append(node('summary', '', 'Подробности и доказательства'));
+            if (event.next_step) detail.append(historyField('Следующий шаг после события', event.next_step));
+            if (event.result && event.result !== event.detail) detail.append(historyField('Результат исполнителя', event.result));
+            const reviewEvidence = Array.isArray(event.review?.evidence) ? event.review.evidence : [];
+            const eventEvidence = Array.isArray(event.evidence) ? event.evidence.filter(item => !reviewEvidence.some(reviewItem => reviewItem.uri === item.uri && reviewItem.description === item.description && reviewItem.sha256 === item.sha256)) : [];
+            if (eventEvidence.length) {
+              detail.append(historyField('Подтверждения события', ''));
+              const evidence = node('ul', 'evidence-list'); renderEvidence(evidence, eventEvidence); detail.append(evidence);
+            }
+            if (event.review) {
+              const review = event.review;
+              const reviewBlock = node('div', 'history-review');
+              reviewBlock.append(node('strong', '', 'Независимая приёмка'), node('span', '', review.verdict === 'approve' ? 'Результат принят' : review.verdict === 'reject' ? 'Возвращено на доработку' : 'Решение не указано'));
+              if (review.detail) reviewBlock.append(historyField('Комментарий проверяющего', review.detail));
+              reviewBlock.append(node('small', '', 'Проверил ' + actorName(review.actor) + ' • ' + date(review.observed_at)));
+              if (review.evidence?.length) {
+                const evidence = node('ul', 'evidence-list'); renderEvidence(evidence, review.evidence); reviewBlock.append(evidence);
+              }
+              detail.append(reviewBlock);
+            }
+            if (event.worker) detail.append(historyField('Исполнитель в этой попытке', actorName(event.worker) + (event.worker.session_id ? '\nСеанс ' + event.worker.session_id : '')));
+            if (event.attempt_id) detail.append(historyField('Попытка', event.attempt_id));
+            row.append(detail);
+          }
+          return row;
+        }));
+        $('moreHistory').hidden = state.historyCursor === null;
+        $('moreHistory').disabled = state.historyLoading || state.authRequired;
+      }
+      async function loadHistory(force = false, more = false) {
+        const task = state.selected;
+        if (!task) return;
+        if (more && (state.historyCursor === null || state.historyLoading)) return;
+        const key = task.task_id + ':' + task.version;
+        if (!more && !force && state.historyKey === key) return;
+        state.historyKey = key;
+        const serial = ++state.historySerial;
+        state.historyLoading = true;
+        text('historyState', more ? 'Загружаем более ранние события…' : 'Обновляем историю…');
+        $('retryHistory').hidden = true;
+        $('moreHistory').disabled = true;
+        try {
+          const events = state.historyEvents.slice();
+          let cursor = more ? state.historyCursor : null;
+          let pageCount = more ? state.historyPagesLoaded : 0;
+          const targetPages = more ? 1 : state.historyPagesLoaded;
+          for (let page = 0; page < targetPages; page++) {
+            const params = new URLSearchParams({ limit: '200' });
+            if (cursor !== null) params.set('before_version', String(cursor));
+            const data = await request('/coord/tasks/' + encodeURIComponent(task.task_id) + '/history?' + params);
+            if (serial !== state.historySerial || task.task_id !== state.selected?.task_id) return;
+            if (!Array.isArray(data.events) || data.events.some(event => !event || !Number.isInteger(event.version))) throw new Error('Core вернул неполную историю. Повторите загрузку.');
+            events.push(...data.events);
+            cursor = Number.isInteger(data.next_cursor) && data.next_cursor >= 0 ? data.next_cursor : null;
+            pageCount++;
+            if (cursor === null) break;
+          }
+          state.historyEvents = Array.from(new Map(events.map(event => [event.version, event])).values()).sort((a, b) => b.version - a.version);
+          state.historyCursor = cursor; state.historyPagesLoaded = pageCount; state.historyRetryMore = false;
+          renderHistory();
+          text('historyState', state.historyEvents.length ? 'Загружено событий: ' + state.historyEvents.length + '. Сначала новые.' : 'Изменений пока нет.');
+        } catch (error) {
+          if (serial !== state.historySerial) return;
+          state.historyKey = '';
+          state.historyRetryMore = more;
+          text('historyState', errorMessage(error));
+          $('retryHistory').hidden = false;
+        } finally {
+          if (serial === state.historySerial) {
+            state.historyLoading = false;
+            $('moreHistory').disabled = state.authRequired;
+          }
+        }
+      }
+      function receipt(kind, payload) {
+        const signature = JSON.stringify(payload);
+        const field = kind + 'Receipt';
+        if (state[field]?.signature !== signature) state[field] = { signature, key: uuid() };
+        return { ...payload, idempotency_key: state[field].key };
+      }
+      function toast(message) {
+        clearTimeout(state.toastTimer);
+        text('toast', message); $('toast').hidden = false;
+        state.toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6000);
+      }
+      function trimField(id) { return $(id).value.trim(); }
+      function requiredText(ids) {
+        ids.forEach(id => $(id).setCustomValidity($(id).value.trim() ? '' : 'Заполните поле содержательным текстом.'));
+      }
+      async function createTask(event) {
+        event.preventDefault();
+        if (state.creating) return;
+        requiredText(['createTitle', 'createProject', 'createAcceptance', 'createNext']);
+        if (!$('createForm').reportValidity()) return;
+        const payload = {
+          session_id: sessionId, title: trimField('createTitle'), project: trimField('createProject'),
+          acceptance: trimField('createAcceptance'), next_step: trimField('createNext'), description: trimField('createDescription')
+        };
+        if (trimField('createAgent')) payload.assigned_agent_id = trimField('createAgent');
+        state.creating = true; $('createSubmit').disabled = true; text('createSubmit', 'Создаём…'); $('createError').hidden = true;
+        try {
+          const task = await request('/coord/tasks', { method: 'POST', body: JSON.stringify(receipt('create', payload)) });
+          if (!task.task_id || typeof task.version !== 'number') throw new Error('Задача отправлена, но подтверждение неполное. Обновите очередь перед повтором.');
+          state.createReceipt = null;
+          $('createForm').reset(); $('createDialog').close();
+          state.status = ''; state.query = ''; $('search').value = '';
+          if (state.project && state.project !== task.project) { state.project = task.project; $('projectFilter').value = task.project; }
+          upsertTask(task); selectTask(task);
+          toast('Задача создана и добавлена в общую очередь.');
+          await loadTasks(true);
+        } catch (error) { text('createError', errorMessage(error)); $('createError').hidden = false; }
+        finally { state.creating = false; $('createSubmit').disabled = false; text('createSubmit', 'Создать задачу'); }
+      }
+      function openReview() {
+        const task = state.selected;
+        if (!task || task.status !== 'review') return;
+        if (state.reviewDraftTask !== task.task_id) { $('reviewForm').reset(); state.reviewReceipt = null; }
+        state.reviewDraftTask = task.task_id;
+        state.reviewConflict = false;
+        state.reviewBase = { task_id: task.task_id, version: task.version, status: task.status };
+        text('reviewTaskTitle', task.title);
+        $('reviewError').hidden = true; $('reviewChanged').hidden = true; $('reviewReload').hidden = true;
+        updateVerdict(); syncReviewState(); $('reviewDialog').showModal();
+      }
+      function updateVerdict() {
+        const reject = $('reviewForm').elements.verdict.value === 'reject';
+        $('reviewNextField').hidden = !reject;
+        text('reviewSubmit', reject ? 'Вернуть на доработку' : 'Принять результат');
+      }
+      function syncReviewState() {
+        if (!state.reviewBase) return;
+        const task = state.tasks.find(item => item.task_id === state.reviewBase.task_id) || (state.selected?.task_id === state.reviewBase.task_id ? state.selected : null);
+        const changed = !!task && task.version !== state.reviewBase.version;
+        const unavailable = !!task && task.status !== 'review';
+        $('reviewChanged').hidden = !changed;
+        $('reviewSubmit').disabled = state.reviewing || unavailable || changed || state.authRequired || state.reviewConflict;
+        if (changed || unavailable) {
+          text('reviewErrorMessage', unavailable ? 'Задача уже вышла из статуса «На проверке». Перечитайте её актуальное состояние. Ваш ввод сохранён.' : 'Пока вы заполняли проверку, задача изменилась. Обновите её данные перед отправкой.');
+          $('reviewError').hidden = false; $('reviewReload').hidden = false;
+        }
+      }
+      async function reloadReview() {
+        if (!state.reviewBase) return;
+        $('reviewReload').disabled = true;
+        try {
+          const task = await request('/coord/tasks/' + encodeURIComponent(state.reviewBase.task_id));
+          state.reviewBase = { task_id: task.task_id, version: task.version, status: task.status };
+          state.reviewConflict = false;
+          upsertTask(task);
+          if (task.status !== 'review') {
+            text('reviewErrorMessage', 'Текущий статус: «' + (statuses[task.status] || task.status) + '». Приёмка сейчас недоступна. Закройте форму и посмотрите задачу.');
+            $('reviewError').hidden = false; $('reviewSubmit').disabled = true;
+          } else { $('reviewError').hidden = true; $('reviewSubmit').disabled = false; }
+          $('reviewChanged').hidden = true; $('reviewReload').hidden = true;
+          toast('Данные задачи обновлены. Проверьте их перед отправкой.');
+        } catch (error) { text('reviewErrorMessage', errorMessage(error)); $('reviewError').hidden = false; }
+        finally { $('reviewReload').disabled = false; }
+      }
+      async function reviewTask(event) {
+        event.preventDefault();
+        if (state.reviewing || !state.reviewBase) return;
+        requiredText(['reviewComment', 'reviewEvidenceDescription']);
+        const uri = safeWebUrl(trimField('reviewUrl'));
+        $('reviewUrl').setCustomValidity(uri ? '' : 'Укажите полную ссылку http:// или https:// без логина и пароля.');
+        if (!$('reviewForm').reportValidity()) return;
+        const payload = {
+          session_id: sessionId, expected_version: state.reviewBase.version, action: 'review',
+          verdict: $('reviewForm').elements.verdict.value, detail: trimField('reviewComment'),
+          evidence: [{ uri, description: trimField('reviewEvidenceDescription') }]
+        };
+        if (payload.verdict === 'reject' && trimField('reviewNext')) payload.next_step = trimField('reviewNext');
+        state.reviewing = true; $('reviewSubmit').disabled = true; text('reviewSubmit', 'Сохраняем…'); $('reviewError').hidden = true;
+        try {
+          const task = await request('/coord/tasks/' + encodeURIComponent(state.reviewBase.task_id) + '/actions', { method: 'POST', body: JSON.stringify(receipt('review', payload)) });
+          if (!task.task_id || typeof task.version !== 'number') throw new Error('Проверка отправлена, но подтверждение неполное. Обновите задачу перед повтором.');
+          state.reviewBase = null; state.reviewDraftTask = null; state.reviewReceipt = null;
+          $('reviewDialog').close(); $('reviewForm').reset();
+          upsertTask(task);
+          toast(payload.verdict === 'approve' ? 'Результат принят после проверки.' : 'Задача возвращена на доработку с замечаниями.');
+          await loadTasks(true);
+        } catch (error) {
+          text('reviewErrorMessage', errorMessage(error)); $('reviewError').hidden = false;
+          state.reviewConflict = error.status === 409;
+          $('reviewReload').hidden = !state.reviewConflict;
+        } finally {
+          state.reviewing = false; updateVerdict();
+          $('reviewSubmit').disabled = false; syncReviewState();
+        }
+      }
+
+      $('refreshButton').addEventListener('click', () => loadTasks(true));
+      $('bannerRefresh').addEventListener('click', () => loadTasks(true));
+      $('loadMoreButton').addEventListener('click', () => loadTasks(true, true));
+      $('projectFilter').addEventListener('change', () => { state.project = $('projectFilter').value; state.pagesLoaded = 1; state.nextCursor = null; loadTasks(true); });
+      $('search').addEventListener('input', () => { state.query = $('search').value; renderList(); });
+      $('newTaskButton').addEventListener('click', () => {
+        if (!trimField('createProject') && state.project) $('createProject').value = state.project;
+        $('createError').hidden = true; $('createDialog').showModal();
+      });
+      document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
+      document.querySelectorAll('input, textarea').forEach(input => input.addEventListener('input', () => input.setCustomValidity('')));
+      $('createForm').addEventListener('submit', createTask);
+      $('openReview').addEventListener('click', openReview);
+      $('reviewForm').addEventListener('submit', reviewTask);
+      $('reviewForm').elements.verdict.forEach(input => input.addEventListener('change', updateVerdict));
+      $('reviewReload').addEventListener('click', reloadReview);
+      $('historySection').addEventListener('toggle', () => { if ($('historySection').open) loadHistory(); });
+      $('retryHistory').addEventListener('click', () => loadHistory(true, state.historyRetryMore));
+      $('moreHistory').addEventListener('click', () => loadHistory(false, true));
+      $('backToList').addEventListener('click', () => {
+        document.body.classList.remove('detail-open');
+        Array.from($('taskList').children).find(card => card.dataset.taskId === state.selected?.task_id)?.focus({ preventScroll: true });
+      });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) loadTasks(); });
+      window.addEventListener('online', () => loadTasks());
+      setInterval(() => { if (!document.hidden) loadTasks(); }, 12000);
+      renderFilters();
+      loadTasks();
+    })();
+  </script>
+</body>
+</html>

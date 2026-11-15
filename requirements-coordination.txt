@@ -1,0 +1,2 @@
+# Isolated durable worker only. Do not add these to the Core API environment.
+dbos==3.5.0
