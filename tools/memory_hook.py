@@ -101,10 +101,17 @@ def enqueue_note(box: MemoryOutbox, event: dict, project: dict, agent_id: str) -
 
 def memory_file_paths(event: dict) -> list[Path]:
     data = event.get("tool_input") or {}
-    paths = [data.get("file_path")] if isinstance(data, dict) and data.get("file_path") else []
-    patch = data if isinstance(data, str) else (data.get("patch") or data.get("input") or "")
+    paths = []
+    patch = data if isinstance(data, str) else ""
+    if isinstance(data, dict):
+        if isinstance(data.get("file_path"), str):
+            paths.append(data["file_path"])
+        patch = data.get("patch") or data.get("input") or ""
+        # Codex sends apply_patch in command; shell commands share that field.
+        if event.get("tool_name") == "apply_patch":
+            patch = data.get("command") or patch
     if isinstance(patch, str):
-        paths.extend(re.findall(r"^\*\*\* (?:Add|Update) File: (.+)$", patch, re.MULTILINE))
+        paths.extend(re.findall(r"^\*\*\* (?:Add|Update) File: ([^\r\n]+)", patch, re.MULTILINE))
     found = []
     for value in paths[:10]:
         path = Path(value)

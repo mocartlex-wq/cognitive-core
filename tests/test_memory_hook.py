@@ -1,5 +1,69 @@
+import hashlib
+import json
+
+import pytest
+
 from tools.memory_client import MemoryOutbox
 from tools.memory_hook import enqueue_note, project_for, resume_context
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_codex_apply_patch_command_queues_full_memory_source(tmp_path, monkeypatch, newline):
+    from tools import memory_hook
+
+    path = tmp_path / ".claude" / "memory" / "work.md"
+    path.parent.mkdir(parents=True)
+    raw = "Последнее состояние. Доказательство и следующий шаг.\n".encode()
+    path.write_bytes(raw)
+    event = {
+        "hook_event_name": "PostToolUse", "tool_name": "apply_patch",
+        "cwd": str(tmp_path), "session_id": "codex-session",
+        "tool_input": {"command": newline.join([
+            "*** Begin Patch", "*** Update File: .claude/memory/work.md",
+            "@@", "+Последнее состояние. Доказательство и следующий шаг.", "*** End Patch",
+        ])},
+    }
+    monkeypatch.setattr(memory_hook, "credential", lambda agent: "test-only")
+    monkeypatch.setattr(MemoryOutbox, "drain", lambda self, **kwargs: self.status())
+    config = {
+        "state_dir": str(tmp_path / "queue"), "endpoint": "https://example.invalid",
+        "agents": {"codex-desktop": {}},
+        "projects": [{"path": str(tmp_path), "domain": "cognitive_core"}],
+    }
+    output = memory_hook.run_hook(config, "codex-desktop", event)
+    assert "systemMessage" in output
+    box = MemoryOutbox(tmp_path / "queue" / "outbox.sqlite3", config["endpoint"], "test-only")
+    with box.connect() as db:
+        rows = db.execute("SELECT body FROM deliveries").fetchall()
+    assert len(rows) == 1
+    body = json.loads(rows[0][0])
+    assert body["domain"] == "cognitive_core"
+    payload = body["payload"]
+    assert payload["kind"] == "memory_document"
+    assert payload["result"] == raw.decode()
+    assert payload["source_path"] == str(path)
+    assert payload["source_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert payload["session_id"] == "codex-session"
+    assert "checkpoint" not in payload
+
+
+@pytest.mark.parametrize("tool_input", [True, ["not a patch"], {"file_path": 42}])
+def test_memory_paths_ignore_malformed_tool_input(tool_input):
+    from tools.memory_hook import memory_file_paths
+
+    assert memory_file_paths({"tool_name": "apply_patch", "tool_input": tool_input}) == []
+
+
+def test_shell_command_is_not_interpreted_as_apply_patch(tmp_path):
+    from tools.memory_hook import memory_file_paths
+
+    path = tmp_path / ".claude" / "memory" / "work.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("Existing source", encoding="utf-8")
+    event = {"cwd": str(tmp_path), "tool_name": "Bash", "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: .claude/memory/work.md\n*** End Patch",
+    }}
+    assert memory_file_paths(event) == []
 
 
 def test_memory_file_full_body_and_provenance(tmp_path):
