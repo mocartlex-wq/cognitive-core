@@ -457,74 +457,14 @@ async def recent_events(
     domain: str | None = None,
     days: int = 7,
     limit: int = 5,
+    workspace: str | None = None,
 ) -> list[dict]:
-    """Свежие L1-события владельца, ещё не поднятые в L3.
-
-    Зачем (25.10.2026, совместная проверка Codex↔Claude): recall читал только
-    l3_master_knowledge / l3_tools_registry. Факт, записанный одним агентом через
-    cognitive_remember, другой агент не находил до недельной консолидации L2→L3
-    (а она требует ≥2 дневных буферов в домене). Для работы в тандеме это
-    слишком долго: записал утром — нужно найти через минуту.
-
-    Только owner-scoped: без владельца (env-ключ в admin-режиме) — пусто, чтобы
-    не смешивать L1 разных арендаторов. Поиск — FTS 'simple' по тексту
-    payload (слова запроса как есть, без морфологии) с запасным ILIKE по
-    первому слову; пустой запрос — просто последние события.
-    """
+    """Recent owner records and latest task heads, matched by meaningful words."""
+    from app.services.memory_records import search_records
     if not owner_user_id:
         return []
-    q = (query or "").strip()
-    days = max(1, min(int(days), 30))
-    limit = max(1, min(int(limit), 20))
-    # Ревью Codex 25.10: (1) полные совпадения (все слова, FTS) идут раньше
-    # частичных (одно первое слово), иначе пять свежих событий со словом «канал»
-    # вытесняли бы нужную запись; (2) в запасном ILIKE экранируем % и _ символом
-    # '!' — иначе слово запроса работало бы как шаблон.
-    first = q.split(" ", 1)[0] if q else ""
-    first_like = "%" + first.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, domain, source_agent, timestamp, raw_payload,
-                   CASE WHEN $4::text = '' THEN 0
-                        WHEN to_tsvector('simple', raw_payload::text) @@ plainto_tsquery('simple', $4::text) THEN 0
-                        ELSE 1 END AS rank
-              FROM l1_raw_events
-             WHERE owner_user_id = $1::uuid
-               AND timestamp >= NOW() - ($2::int * INTERVAL '1 day')
-               AND ($3::text IS NULL OR domain = $3::text)
-               AND ($4::text = ''
-                    OR to_tsvector('simple', raw_payload::text) @@ plainto_tsquery('simple', $4::text)
-                    OR raw_payload::text ILIKE $6 ESCAPE '!')
-             ORDER BY rank, timestamp DESC
-             LIMIT $5
-            """,
-            owner_user_id, days, domain, q, limit, first_like,
-        )
-    out = []
-    for r in rows:
-        payload = r["raw_payload"]
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except Exception:
-                payload = {"text": payload}
-        if not isinstance(payload, dict):
-            payload = {"text": str(payload)}
-        content = {k: str(payload.get(k))[:400] for k in ("task", "result", "lessons") if payload.get(k)}
-        if not content:
-            content = {"text": json.dumps(payload, ensure_ascii=False)[:400]}
-        ts = r["timestamp"]
-        out.append({
-            "id": str(r["id"]),
-            "record_type": "recent",
-            "domain": r["domain"],
-            "source_agent": r["source_agent"],
-            "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
-            "content": content,
-        })
-    return out
+    return await search_records(pool, query, owner_user_id, domain, days, limit, workspace)
 
 
 async def recall_any_domain(

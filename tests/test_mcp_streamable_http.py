@@ -17,6 +17,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+
+
+@pytest.mark.asyncio
+async def test_memory_http_rejection_is_not_reported_as_mcp_success(client):
+    from unittest.mock import AsyncMock, patch
+
+    from app.api import mcp_protocol
+    with patch.object(mcp_protocol, "_dispatch_tool", AsyncMock(return_value={"_error": "HTTP 409", "_status": 409})), \
+            patch.object(mcp_protocol, "_rate_limit_ok", AsyncMock(return_value=True)):
+        response = await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                    "params": {"name": "cognitive_remember", "arguments": {}}})
+    assert response.json()["result"]["isError"] is True
+
+
+def test_full_record_text_survives_legacy_mcp_text_limit():
+    from app.api.mcp_protocol import _format_text
+    value = {"result": "доказательство" * 2000 + "FINAL_NEXT_STEP"}
+    assert "FINAL_NEXT_STEP" in _format_text(value, full=True)
+    assert "Preview truncated" in _format_text(value)
 from fastapi import FastAPI
 
 from app.api import mcp_protocol

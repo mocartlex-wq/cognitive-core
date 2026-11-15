@@ -59,6 +59,8 @@ GLOBAL_HARD_CAP_S = 35.0
 # ─────────────────────────────────────────────────────────────────
 # Tool schemas — registered with MCP `tools/list`
 # ─────────────────────────────────────────────────────────────────
+from app.models.event import TaskCheckpoint
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "cognitive_remember",
@@ -77,6 +79,8 @@ TOOLS: list[dict[str, Any]] = [
                 "feedback": {"type": "string", "description": "positive / negative / neutral", "default": ""},
                 "lessons": {"type": "string", "description": "Какие уроки извлечены", "default": ""},
                 "tools_used": {"type": "array", "items": {"type": "string"}, "default": []},
+                "idempotency_key": {"type": "string", "maxLength": 160, "description": "Stable delivery ID; reuse only for an identical retry."},
+                "checkpoint": TaskCheckpoint.model_json_schema(),
             },
             "required": ["domain", "task"],
         },
@@ -86,8 +90,9 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Найти релевантные знания по запросу через KNN-поиск (L3 + tools). "
             "Возвращает frame с patterns / mistakes / rules / tools и recent — "
-            "свежие записи владельца за 7 дней (cognitive_remember других агентов), "
-            "ещё не поднятые в L3. "
+            "свежие записи владельца и последние контрольные точки задач независимо от возраста. "
+            "Для статуса задачи учитывайте task_state и дату наблюдения; L3 — общий опыт, не текущий статус. "
+            "Полный источник и его преемник доступны через cognitive_read_record по id. "
             "domain НЕОБЯЗАТЕЛЕН: без него поиск идёт по доменам знаний "
             "(work_journal, infra_lessons, skills, setup_log, deploy) — там "
             "выводы, а не переписка. Указывайте домен, только если точно знаете "
@@ -98,6 +103,7 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
+                "workspace": {"type": "string", "maxLength": 1000, "description": "Optional explicit workspace to prefer matching task heads, especially when restoring a session with an empty query."},
                 "domain": {"type": "string", "description": "Необязательно. Пусто или отсутствует — поиск по доменам знаний."},
                 "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
                 "include_tools": {"type": "boolean", "default": True},
@@ -109,6 +115,11 @@ TOOLS: list[dict[str, Any]] = [
             # пустоту; domain="" вешал вызов на 300 с.
             "required": ["query"],
         },
+    },
+    {
+        "name": "cognitive_read_record",
+        "description": "Получить полный L1 источник владельца по ID, включая доказательства, следующий шаг и указатель на более новое состояние. Историческая запись не подтверждает текущую готовность.",
+        "inputSchema": {"type": "object", "properties": {"record_id": {"type": "string", "format": "uuid"}}, "required": ["record_id"]},
     },
     {
         "name": "cognitive_list",
@@ -608,7 +619,10 @@ async def _call_self(
         except Exception as e:
             return {"_error": f"{type(e).__name__}: {e}", "_path": path, "_method": method}
         try:
-            return resp.json()
+            data = resp.json()
+            if resp.status_code >= 400:
+                return {"_error": f"HTTP {resp.status_code}", "_status": resp.status_code, "detail": data}
+            return data
         except Exception:
             return {"_status": resp.status_code, "_text": resp.text[:500]}
 
@@ -1085,7 +1099,16 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             "tools_used": a.get("tools_used", []),
         }
         body = {"source_agent": agent_id, "domain": domain, "payload": payload}
+        if a.get("checkpoint") is not None:
+            payload["checkpoint"] = a["checkpoint"]
+        if a.get("idempotency_key") is not None:
+            body["idempotency_key"] = a["idempotency_key"]
         return await _call_self(request, "POST", "/events", json_body=body, timeout_s=6.0)
+
+    if name == "cognitive_read_record":
+        from uuid import UUID
+        record_id = str(UUID(str(a.get("record_id", ""))))
+        return await _call_self(request, "GET", f"/events/{record_id}", timeout_s=6.0)
 
     if name == "cognitive_recall":
         # Пустая строка — это «домен не указан», а не домен с пустым именем.
@@ -1096,6 +1119,7 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             "context": a.get("query"),
             "top_k": min(max(int(a.get("top_k", 5)), 1), 20),
             "include_tools": bool(a.get("include_tools", True)),
+            "workspace": a.get("workspace"),
         }
         params = {"grouped": "true"} if a.get("grouped", True) else None
         return await _call_self(request, "POST", "/operative/query", json_body=body, params=params, timeout_s=18.0)
@@ -1694,9 +1718,9 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
                 _dispatch_tool(request, tool_name, tool_args), timeout=wait_for_to,
             )
             return _ok(req_id, {
-                "content": [{"type": "text", "text": _format_text(result)}],
+                "content": [{"type": "text", "text": _format_text(result, full=tool_name == "cognitive_read_record")}],
                 "structuredContent": result,
-                "isError": False,
+                "isError": isinstance(result, dict) and "_error" in result,
             })
         except ValueError as e:
             log.info("tool %s rejected request_id=%s: %s", tool_name, rid, e)
@@ -1827,11 +1851,14 @@ async def mcp_streamable_http_delete() -> JSONResponse:
     return JSONResponse({"ok": True, "stateless": True})
 
 
-def _format_text(data: Any) -> str:
+def _format_text(data: Any, *, full: bool = False) -> str:
     try:
-        return json.dumps(data, ensure_ascii=False, indent=2)[:8000]
+        text = json.dumps(data, ensure_ascii=False, indent=2)
     except Exception:
-        return str(data)[:8000]
+        text = str(data)
+    if full or len(text) <= 8000:
+        return text
+    return text[:8000] + "\n[Preview truncated. Full response is in structuredContent; read a source by ID with cognitive_read_record.]"
 
 
 async def _mark_mcp_connected(request: Request) -> None:
