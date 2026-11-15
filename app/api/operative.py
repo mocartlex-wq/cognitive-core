@@ -226,19 +226,27 @@ async def query_operative(
         # (проверка 25.10.2026). Сбой этой ветки не роняет основной поиск.
         # Свой дедлайн (ревью Codex 25.10): L3-результаты уже есть, и зависший
         # запрос к L1 не должен утащить весь recall за общий таймаут MCP.
+        recent_error = None
         try:
             recent = await asyncio.wait_for(
-                recent_events(query=body.context or "", owner_user_id=owner_user_id, domain=body.domain),
+                recent_events(query=body.context or "", owner_user_id=owner_user_id, domain=body.domain, limit=body.top_k, workspace=body.workspace),
                 timeout=RECENT_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
             log.warning("recent events timed out after %.1fs", RECENT_TIMEOUT_S)
             recent = []
+            recent_error = "Task state lookup timed out; do not infer current status from L3."
         except Exception as e:  # pragma: no cover — наблюдение, не поиск
             log.warning("recent events failed: %s", e)
             recent = []
+            recent_error = "Task state lookup failed; do not infer current status from L3."
         frame = _group_results_for_agent(results)
         frame["recent"] = recent
+        frame["current"] = [item for item in recent if item.get("task_state")]
+        frame["task_state_found"] = bool(frame["current"])
+        frame["state_policy"] = "Task states are dated reports, not live verification. Use latest reported state per task; L3 is general experience. Read truncated/historical sources with cognitive_read_record."
+        if recent_error:
+            frame["state_warning"] = recent_error
         # Заменяем плоский results на семантический frame
         return {
             "session_id": session["session_id"],

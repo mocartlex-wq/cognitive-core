@@ -1,15 +1,18 @@
 import logging
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
 
 from app.db.postgres import get_pool
-from app.models.event import EventResponse, RawEventInput
+from app.models.event import EventResponse, RawEventInput, validate_checkpoint
 from app.security.audit import log_audit
 from app.security.auth import check_rate_limit, verify_api_key
 from app.security.owner import resolve_owner_user_id
 from app.security.sanitizer import sanitize_payload
-from app.services.ingestor import save_raw_event
+from app.services.ingestor import save_idempotent_event, save_raw_event
+from app.services.memory_records import read_record
 from app.services.quota_enforcer import enforce_event_quota
 
 logger = logging.getLogger(__name__)
@@ -39,18 +42,34 @@ async def ingest_event(payload: RawEventInput, request: Request):
     # Шаг 3: Валидация схемы — уже выполнена Pydantic (RawEventInput)
 
     # Шаг 4: Санитизация payload
-    sanitized = sanitize_payload(payload.payload)
+    try:
+        sanitized = sanitize_payload(validate_checkpoint(payload.payload))
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Шаг 5: Сохранение в L1 — с owner_user_id для tenant-isolation
     now = datetime.now(timezone.utc)
     owner_uid = await resolve_owner_user_id(request)
-    event_id = await save_raw_event(
-        agent_id, payload.domain, sanitized.payload,
-        owner_user_id=owner_uid,
-    )
+    created = True
+    if payload.idempotency_key or sanitized.payload.get("checkpoint"):
+        if not owner_uid:
+            raise HTTPException(403, "Idempotent memory requires an owner-scoped key")
+        try:
+            event_id, now, created = await save_idempotent_event(
+                agent_id, payload.domain, sanitized.payload, owner_uid, payload.idempotency_key or str(uuid4()),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    else:
+        event_id = await save_raw_event(
+            agent_id, payload.domain, sanitized.payload,
+            owner_user_id=owner_uid,
+        )
 
     # Шаг 5b: Replication outbox — failure не блокирует основной flow
     try:
+        if not created:
+            return EventResponse(id=event_id, status="accepted", timestamp=now)
         from app.replication import write_outbox_event
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -80,3 +99,13 @@ async def ingest_event(payload: RawEventInput, request: Request):
     )
 
     return EventResponse(id=event_id, status="accepted", timestamp=now)
+
+
+@router.get("/{record_id}")
+async def get_record(record_id: UUID, request: Request):
+    await verify_api_key(request)
+    owner = await resolve_owner_user_id(request)
+    record = await read_record(await get_pool(), str(record_id), owner)
+    if record is None:
+        raise HTTPException(404, "Memory record not found")
+    return record

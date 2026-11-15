@@ -44,6 +44,67 @@ async def save_raw_event(
     return event_id
 
 
+async def save_idempotent_event(agent_id: str, domain: str, payload: dict,
+                                owner_user_id: str, idempotency_key: str):
+    """Atomically deduplicate retries, including a lost HTTP acknowledgement."""
+    from uuid import NAMESPACE_URL, uuid5
+    event_id = uuid5(NAMESPACE_URL, json.dumps(
+        ["cognitive-core:l1:v1", owner_user_id, agent_id, domain, idempotency_key],
+        ensure_ascii=False, separators=(",", ":"),
+    ))
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        point = payload.get("checkpoint")
+        if point:
+            # Serialize updates to this task only. Two concurrent agents cannot
+            # both replace the same head and silently declare their work current.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                               json.dumps([owner_user_id, domain, point["task_id"]]))
+        existing = await conn.fetchrow(
+            "SELECT raw_payload, timestamp FROM l1_raw_events WHERE id=$1 AND owner_user_id=$2::uuid",
+            event_id, owner_user_id,
+        )
+        if existing:
+            prior = existing["raw_payload"]
+            if isinstance(prior, str):
+                prior = json.loads(prior)
+            if prior != payload:
+                raise ValueError("idempotency_key was already used with different content")
+            return event_id, existing["timestamp"], False
+        if point:
+            previous = await conn.fetchrow(
+                "SELECT id, raw_payload #>> '{checkpoint,observed_at}' AS observed_at FROM l1_raw_events "
+                "WHERE owner_user_id=$1::uuid AND domain=$2 AND raw_payload #>> '{checkpoint,task_id}'=$3 "
+                "ORDER BY raw_payload #>> '{checkpoint,observed_at}' DESC, timestamp DESC, id DESC LIMIT 1",
+                owner_user_id, domain, point["task_id"],
+            )
+            expected = str(previous["id"]) if previous else None
+            if point.get("supersedes") != expected:
+                raise ValueError(f"Checkpoint conflict: supersedes must be {expected or 'null'}")
+            if previous and point["observed_at"] < previous["observed_at"]:
+                raise ValueError("Checkpoint observation predates the current task head")
+        # Timestamp after the task lock, so equal observation dates keep the
+        # same order as the accepted predecessor chain.
+        now = datetime.now(timezone.utc)
+        inserted = await conn.fetchval(
+            "INSERT INTO l1_raw_events (id, timestamp, source_agent, owner_user_id, domain, raw_payload, created_at) "
+            "VALUES ($1, $2, $3, $4::uuid, $5, $6::jsonb, $2) ON CONFLICT (id) DO NOTHING RETURNING id",
+            event_id, now, agent_id, owner_user_id, domain, json.dumps(payload, ensure_ascii=False),
+        )
+        if inserted:
+            return event_id, now, True
+        existing = await conn.fetchrow(
+            "SELECT raw_payload, timestamp FROM l1_raw_events WHERE id=$1 AND owner_user_id=$2::uuid",
+            event_id, owner_user_id,
+        )
+        prior = existing["raw_payload"] if existing else None
+        if isinstance(prior, str):
+            prior = json.loads(prior)
+        if prior != payload:
+            raise ValueError("idempotency_key was already used with different content")
+        return event_id, existing["timestamp"], False
+
+
 async def get_unprocessed_events(
     since_hours: int,
     domain: str | None = None,

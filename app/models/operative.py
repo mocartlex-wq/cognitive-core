@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OperativeRule(BaseModel):
@@ -28,6 +28,7 @@ class OperativeQuery(BaseModel):
     context: str | None = None
     top_k: int = 5
     include_tools: bool = True
+    workspace: str | None = Field(default=None, max_length=1000)
 
 
 class OperativeRecallUI(BaseModel):

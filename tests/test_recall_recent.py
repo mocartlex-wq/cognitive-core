@@ -57,14 +57,13 @@ async def test_recent_sql_filters_owner_window_domain_and_query():
         out = await svc.recent_events("канал Codex", owner_user_id=OWNER, domain="cognitive_core", days=99, limit=99)
     sql, args = conn.fetch.call_args[0][0], conn.fetch.call_args[0][1:]
     assert "owner_user_id = $1::uuid" in sql and "l1_raw_events" in sql
-    assert "INTERVAL '1 day'" in sql and "plainto_tsquery" in sql and "ILIKE $6 ESCAPE '!'" in sql
-    # Ревью Codex: полные совпадения (FTS по всем словам) раньше частичных.
-    assert "ORDER BY rank, timestamp DESC" in sql and "ELSE 1 END AS rank" in sql
-    assert args == (OWNER, 30, "cognitive_core", "канал Codex", 20, "%канал%"), "окно и лимит зажаты, ILIKE по первому слову"
+    assert "INTERVAL '1 day'" in sql and "plainto_tsquery" in sql
+    assert args == (OWNER, "cognitive_core", 30, ["канал", "codex"], 20, None)
     assert out == [{
         "id": "e9a89bbc", "record_type": "recent", "domain": "cognitive_core",
         "source_agent": "claude-8d5b07", "timestamp": ts.isoformat(),
         "content": {"task": "Проверка тандема", "result": "канал заработал"},
+        "truncated": False, "read_tool": "cognitive_read_record",
     }]
 
 
@@ -81,12 +80,12 @@ async def test_recent_payload_as_string_and_without_known_keys():
 
 
 @pytest.mark.asyncio
-async def test_recent_escapes_like_wildcards_in_fallback():
-    """Слово запроса со спецсимволами ILIKE не должно превращаться в шаблон."""
+async def test_recent_treats_query_syntax_as_literal_tokens():
+    """Wildcard and tsquery operators do not become executable query syntax."""
     pool, conn = _pool([])
     with patch.object(svc, "get_pool", AsyncMock(return_value=pool)):
         await svc.recent_events("100%_готово! остальное", owner_user_id=OWNER)
-    assert conn.fetch.call_args[0][1:][5] == "%100!%!_готово!!%"
+    assert conn.fetch.call_args[0][1:][3] == ["100", "готово", "остальное"]
 
 
 # ─── API ─────────────────────────────────────────────────────────────────────
@@ -116,7 +115,7 @@ async def test_grouped_query_carries_recent_section(client):
     assert body["frame"]["recent"] == recent
     assert body["frame"]["rules"] == knowledge and body["frame"]["all"] == knowledge
     assert body["counts"]["recent"] == 1 and body["counts"]["total"] == 1
-    rec.assert_awaited_once_with(query="канал Codex", owner_user_id=OWNER, domain="cognitive_core")
+    rec.assert_awaited_once_with(query="канал Codex", owner_user_id=OWNER, domain="cognitive_core", limit=5, workspace=None)
 
 
 @pytest.mark.asyncio
