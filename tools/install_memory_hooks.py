@@ -22,6 +22,15 @@ except ModuleNotFoundError:
 MANAGED = ("memory_hook.py", "cogcore_checkpoint.py", "cogcore_resume.py", "cogcore_memory_sync.py")
 
 
+def hook_command(python: str, script: Path, config: Path, agent: str) -> str:
+    # Claude's Windows hooks can run through Git Bash. Unquoted backslashes
+    # lose their separators there, even though the same argv works in cmd.exe.
+    paths = [str(p).replace("\\", "/") for p in (python, script, config)]
+    if any(any(char in value for char in '$`\r\n') for value in [*paths, agent]):
+        raise ValueError("Hook paths must not contain shell expansion characters")
+    return subprocess.list2cmdline([paths[0], "-X", "utf8", paths[1], "--config", paths[2], "--agent", agent])
+
+
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
 
@@ -88,7 +97,7 @@ def main() -> int:
     script = args.destination.resolve() / "memory_hook.py"
     plans = []
     for path, name in ((args.codex_settings, "codex-desktop"), (args.claude_settings, "claude-code")):
-        command = subprocess.list2cmdline([args.python, "-X", "utf8", str(script), "--config", str(args.config.resolve()), "--agent", name])
+        command = hook_command(args.python, script, args.config.resolve(), name)
         plans.append((path, merge_hooks(read_json(path), command)))
     for path in args.legacy_settings:
         if path.exists() and path not in (args.codex_settings, args.claude_settings):
