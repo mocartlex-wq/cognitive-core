@@ -16,6 +16,8 @@ nats/
 
 # Local dev artifacts
 .venv/
+.venv-coordination/
+.serena/
 __pycache__/
 *.pyc
 *.pyo

@@ -70,6 +70,22 @@ while IFS= read -r f; do
             sudo install -m 0755 "$REPO_DIR/scripts/cognitive-rooms.py" /usr/local/lib/cognitive-rooms.py
             sudo systemctl restart cognitive-rooms || true
             worth_logging=1 ;;
+        scripts/cognitive-orchestrator.py)
+            # Install the ownership fence before rebuilding the API. Updating
+            # only the Git checkout leaves the host daemon on the old code.
+            NEW_FILE="$REPO_DIR/scripts/cognitive-orchestrator.py"
+            LIVE_FILE=/usr/local/lib/cognitive-orchestrator.py
+            if systemctl cat cognitive-orchestrator >/dev/null 2>&1; then
+                python3 -c "import ast,sys; ast.parse(open(sys.argv[1],encoding='utf-8').read())" "$NEW_FILE"
+                if ! cmp -s "$NEW_FILE" "$LIVE_FILE"; then
+                    sudo install -m 0755 "$NEW_FILE" "$LIVE_FILE"
+                fi
+                # Equal files do not prove that the running process loaded them:
+                # a previous rollout may have failed between install and restart.
+                sudo systemctl restart cognitive-orchestrator
+                sudo systemctl is-active --quiet cognitive-orchestrator
+            fi
+            worth_logging=1 ;;
         scripts/cognitive-agent-runtime.py)
             # Демон заместителей — такой же systemd-сервис на хосте, но до
             # 2026-08-11 его здесь не было вовсе: правки доезжали в git-checkout

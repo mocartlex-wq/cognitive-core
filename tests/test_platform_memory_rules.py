@@ -97,9 +97,9 @@ class TestAlembicChainStaysLinear:
         dupes = {d for d in downs if downs.count(d) > 1}
         assert not dupes, f"цепочка раздвоилась на: {dupes}"
 
-    def test_0026_is_the_only_head(self):
+    def test_0027_is_the_only_head(self):
         revs = self._revisions()
         all_revs = {r for _, r, _ in revs}
         downs = {d for _, _, d in revs}
         heads = all_revs - downs
-        assert heads == {"0026"}, f"ожидали единственную голову 0026, получили {heads}"
+        assert heads == {"0027"}, f"ожидали единственную голову 0027, получили {heads}"

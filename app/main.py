@@ -411,6 +411,9 @@ app.include_router(demo_router)
 app.include_router(agents_router)
 app.include_router(agents_collab_router)
 app.include_router(coord_router)
+from app.api.coord_tasks import router as coord_tasks_router
+
+app.include_router(coord_tasks_router)
 app.include_router(onboard_router)
 app.include_router(rules_router)
 from app.api.replication import router as replication_router
@@ -491,6 +494,12 @@ app.include_router(user_settings_router)
 async def dashboard_page():
     """Web-дашборд: live-метрики, обозреватель слоёв, графики."""
     return _html("dashboard.html")
+
+
+@app.get("/coordination")
+async def coordination_page():
+    """The shared task ledger; default nginx route, outside the rooms /ui proxy."""
+    return _html("coordination.html")
 
 
 @app.get("/ui/login")

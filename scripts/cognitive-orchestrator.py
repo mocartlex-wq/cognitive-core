@@ -81,6 +81,15 @@ def db():
     return psycopg.connect(DB_DSN, row_factory=dict_row)
 
 
+def _is_coordination_task(context: Any) -> bool:
+    """The coordination service owns these rows in the shared task table."""
+    if not isinstance(context, dict):
+        return False
+    marker = context.get("coordination_v1")
+    # Match PostgreSQL's context->>'coordination_v1' check in legacy history.
+    return marker is True or marker == "true"
+
+
 # ─── SSE event bus (in-process pub/sub for task updates) ──────────────────
 _subs_lock = threading.Lock()
 _subscribers: dict[str, list[queue.Queue]] = {}  # task_id -> [queue, ...]
@@ -493,11 +502,10 @@ def display_name_for(agent_id: str) -> str:
 def synthesize(request_text: str, responses: dict[str, dict], proxy_fallback: bool = False, memory_context: str = "") -> str:
     """Merge executor responses into one user-friendly answer."""
     if not responses:
-        # No executor answered (they may be offline) → answer the user directly
-        # via DeepSeek so the chat is always useful instead of a dead end.
+        # Keep a useful consultation, but it is not evidence of task execution.
         direct = deepseek_chat(
             [
-                {"role": "system", "content": "Ты — полезный ассистент Cognitive Core. Отвечай кратко, по делу, на грамотном русском языке." + (("\n\nСОХРАНЁННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ (используй как факты):\n" + memory_context) if memory_context else "")},
+                {"role": "system", "content": "Ты — полезный ассистент Cognitive Core. Помощники не прислали результат выполнения задачи. Дай только консультацию на грамотном русском языке. Не утверждай, что выполнил задачу, проверил результат или изменил внешние данные. Сохранённая память не подтверждает выполнение текущей задачи." + (("\n\nСОХРАНЁННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:\n" + memory_context) if memory_context else "")},
                 {"role": "user", "content": request_text[:2000]},
             ],
             max_tokens=1000,
@@ -556,6 +564,9 @@ def run_orchestration(task_id: str) -> None:
 
         request_text = row["request_text"]
         context = row["context"] or {}
+        if _is_coordination_task(context):
+            log.info(f"task {task_id} is owned by coordination, skipping legacy orchestration")
+            return
         depth = row["cascading_depth"] or 0
         task_user_id = row["user_id"]
 
@@ -572,7 +583,7 @@ def run_orchestration(task_id: str) -> None:
         })
 
         if not executors:
-            _complete(task_id, "Не удалось определить подходящих помощников.", proxy=True)
+            _complete(task_id, "Задача не выполнена: не удалось определить подходящих помощников.", proxy=True, status="failed")
             return
 
         # Save assignment
@@ -594,16 +605,20 @@ def run_orchestration(task_id: str) -> None:
                 publish_event(task_id, {"type": "dispatch_failed", "agent": exec_id})
 
         if not parent_ids:
-            _complete(task_id, "Не удалось доставить задачу помощникам. Попробуйте позже.", proxy=True)
+            _complete(task_id, "Задача не выполнена: не удалось доставить задачу помощникам. Попробуйте позже.", proxy=True, status="failed")
             return
 
         # 3) Collect responses (timeout aware)
         deadline = time.time() + EXECUTOR_TIMEOUT_S
         responses = collect_responses(task_id, list(parent_ids.keys()), parent_ids, deadline)
 
-        proxy_used = len(responses) == 0
+        usable_responses = {
+            agent_id: response for agent_id, response in responses.items()
+            if sanitize_response(response.get("text", ""))
+        }
+        proxy_used = not usable_responses
         if proxy_used:
-            publish_event(task_id, {"type": "proxy_fallback", "reason": "no executor responded"})
+            publish_event(task_id, {"type": "proxy_fallback", "reason": "no meaningful executor response"})
 
         # Save responses to DB
         with db() as conn:
@@ -614,14 +629,20 @@ def run_orchestration(task_id: str) -> None:
             conn.commit()
 
         # 4) Synthesize
-        publish_event(task_id, {"type": "synthesizing", "response_count": len(responses)})
+        publish_event(task_id, {"type": "synthesizing", "response_count": len(usable_responses)})
         memory_context = _recall_for_user(task_user_id, request_text)
         if memory_context:
             publish_event(task_id, {"type": "memory_injected", "chars": len(memory_context)})
-        final = synthesize(request_text, responses, proxy_fallback=proxy_used, memory_context=memory_context)
+        final = synthesize(request_text, usable_responses, proxy_fallback=proxy_used, memory_context=memory_context)
+        if proxy_used:
+            final = (
+                "Выполнение задачи не подтверждено: помощники не прислали содержательного ответа "
+                "за отведённое время. Ниже — только консультация сервера, не результат выполнения.\n\n"
+                + final
+            )
 
         # 5) Complete
-        _complete(task_id, final, proxy=proxy_used)
+        _complete(task_id, final, proxy=proxy_used, status="failed" if proxy_used else "completed")
 
     except Exception as e:
         log.exception(f"orchestration failed for {task_id}")
@@ -646,7 +667,8 @@ def _complete(task_id: str, final: str, proxy: bool = False, status: str = "comp
             (status, final, proxy, task_id),
         )
         conn.commit()
-    publish_event(task_id, {"type": "completed", "preview": final[:120], "proxy": proxy})
+    # Keep the terminal event name for existing SSE clients; status is the outcome.
+    publish_event(task_id, {"type": "completed", "status": status, "preview": final[:120], "proxy": proxy})
 
 
 # ─── Stage 3.3: Voting (consensus from multiple responses) ────────────────
@@ -672,10 +694,10 @@ def create_child_task(parent_task_id: str, child_request: str, executor: str | N
     """Create a child orchestrator task spawned by an executor. Returns task_id."""
     with db() as conn:
         parent = conn.execute(
-            "SELECT user_id, cascading_depth FROM orchestrator_tasks WHERE task_id = %s",
+            "SELECT user_id, cascading_depth, context FROM orchestrator_tasks WHERE task_id = %s",
             (parent_task_id,),
         ).fetchone()
-    if not parent:
+    if not parent or _is_coordination_task(parent.get("context")):
         return None
     new_depth = (parent["cascading_depth"] or 0) + 1
     if new_depth > MAX_CASCADE_DEPTH:
@@ -863,7 +885,9 @@ class OrchHandler(BaseHTTPRequestHandler):
                 with db() as conn:
                     rows = conn.execute(
                         "SELECT task_id, status, request_text, assigned_agents, final_answer, proxy_used, created_at, completed_at "
-                        "FROM orchestrator_tasks WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+                        "FROM orchestrator_tasks WHERE user_id = %s "
+                        "AND (context->>'coordination_v1') IS DISTINCT FROM 'true' "
+                        "ORDER BY created_at DESC LIMIT %s",
                         (user_id, limit),
                     ).fetchall()
                 # convert UUID & datetime to str
@@ -884,7 +908,7 @@ class OrchHandler(BaseHTTPRequestHandler):
                         "SELECT * FROM orchestrator_tasks WHERE task_id = %s",
                         (task_id,),
                     ).fetchone()
-                if not row:
+                if not row or _is_coordination_task(row.get("context")):
                     return json_response(self, 404, {"error": "not found"})
                 row["task_id"] = str(row["task_id"])
                 if row.get("parent_task_id"):
@@ -969,13 +993,18 @@ class OrchHandler(BaseHTTPRequestHandler):
                 request_text = (body.get("request") or "").strip()
                 if not request_text:
                     return json_response(self, 400, {"error": "request required"})
+                context = body.get("context") or {}
+                if not isinstance(context, dict):
+                    return json_response(self, 400, {"error": "context must be an object"})
+                if _is_coordination_task(context):
+                    return json_response(self, 400, {"error": "coordination tasks must use the coordination API"})
 
                 task_id = str(uuid.uuid4())
                 with db() as conn:
                     conn.execute(
                         "INSERT INTO orchestrator_tasks(task_id, user_id, request_text, context) "
                         "VALUES (%s, %s, %s, %s)",
-                        (task_id, user_id, request_text, json.dumps(body.get("context") or {})),
+                        (task_id, user_id, request_text, json.dumps(context)),
                     )
                     conn.commit()
                 threading.Thread(target=run_orchestration, args=(task_id,), daemon=True).start()
@@ -1020,6 +1049,18 @@ class OrchHandler(BaseHTTPRequestHandler):
 
     def sse_stream(self, task_id: str) -> None:
         """SSE stream for task updates."""
+        # Check ownership before sending headers or subscribing to another service's task.
+        try:
+            with db() as conn:
+                row = conn.execute(
+                    "SELECT status, trace_events, final_answer, context FROM orchestrator_tasks WHERE task_id = %s",
+                    (task_id,),
+                ).fetchone()
+        except Exception:
+            return json_response(self, 503, {"error": "task state unavailable"})
+        if not row or _is_coordination_task(row.get("context")):
+            return json_response(self, 404, {"error": "not found"})
+
         # Send headers
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -1029,21 +1070,12 @@ class OrchHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         # Initial state: replay trace_events
-        try:
-            with db() as conn:
-                row = conn.execute(
-                    "SELECT status, trace_events, final_answer FROM orchestrator_tasks WHERE task_id = %s",
-                    (task_id,),
-                ).fetchone()
-        except Exception:
-            row = None
-        if row:
-            for ev in (row["trace_events"] or []):
-                self._write_sse(ev)
-            if row["status"] in ("completed", "failed"):
-                # Already done, send final and exit
-                self._write_sse({"type": "completed", "preview": (row["final_answer"] or "")[:120]})
-                return
+        for ev in (row["trace_events"] or []):
+            self._write_sse(ev)
+        if row["status"] in ("completed", "failed"):
+            # Already done, send final and exit.
+            self._write_sse({"type": "completed", "status": row["status"], "preview": (row["final_answer"] or "")[:120]})
+            return
 
         q = subscribe(task_id)
         try:
@@ -1405,7 +1437,7 @@ async function sendMessage() {
     } else if (d.type === 'synthesizing') {
       traceLines.push('Собираю единый ответ...');
     } else if (d.type === 'proxy_fallback') {
-      traceLines.push('Помощники не отвечают — отвечу сам.');
+      traceLines.push('Помощники не ответили — доступна только консультация.');
     } else if (d.type === 'completed') {
       evtSrc.close();
       // Fetch final
