@@ -575,3 +575,232 @@ def test_postgres_dbos_process_crash_recovery(workspace, tmp_path, crash_stage):
         server.shutdown()
         server.server_close()
         server_thread.join(timeout=5)
+
+
+class PostgresWorkerCase:
+    """Two-process/version acceptance harness; its HTTP ledger survives worker deaths."""
+
+    def __init__(self, repo, artifacts, settings, tmp_path, psycopg):
+        self.repo, self.artifacts, self.settings, self.directory = repo, artifacts, settings, tmp_path
+        self.ledger = Ledger(repo, settings)
+        self.key = "isolated-key-" + uuid4().hex
+        self.processes, self.handles, self.live_workers = [], [], []
+        self.claim_barrier = None
+        self.claim_requests = []
+        self.list_reads = 0
+        self.connection = psycopg.connect(settings.database_url.replace("postgresql+psycopg://", "postgresql://"), autocommit=True)
+        case = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.dispatch()
+
+            def do_POST(self):
+                self.dispatch()
+
+            def dispatch(self):
+                try:
+                    if self.headers.get("X-API-Key") != case.key:
+                        raise cli.CoordinationError("invalid_key", 401)
+                    parsed = urlsplit(self.path)
+                    task_id = case.ledger.task["task_id"]
+                    if parsed.path == "/coord/tasks":
+                        with case.ledger.lock:
+                            case.list_reads += 1
+                        params = parse_qs(parsed.query)
+                        result = {"tasks": list(case.ledger.iter_tasks(status=params.get("status", [None])[0])), "next_cursor": None}
+                    elif parsed.path == "/coord/tasks/" + task_id:
+                        result = case.ledger.get(task_id)
+                    elif parsed.path == "/coord/tasks/" + task_id + "/actions":
+                        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                        if body["action"] == "claim":
+                            with case.ledger.lock:
+                                case.claim_requests.append(copy.deepcopy(body))
+                            if case.claim_barrier is not None:
+                                try:
+                                    case.claim_barrier.wait(timeout=15)
+                                except threading.BrokenBarrierError:
+                                    raise cli.CoordinationError("claim_race_barrier_failed", 503) from None
+                        result = case.ledger.action(task_id, body)
+                    else:
+                        raise cli.CoordinationError("not_found", 404)
+                    code = 200
+                except cli.CoordinationError as exc:
+                    code, result = exc.status or 503, {"detail": str(exc)}
+                data = json.dumps(result).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *_args):
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.server_thread.start()
+
+    def environment(self, settings, fault=None):
+        environment = dict(os.environ)
+        environment.update(COGCORE_COORD_DB_URL=settings.database_url,
+                           COGCORE_COORD_API_URL=f"http://127.0.0.1:{self.server.server_port}",
+                           COGCORE_COORD_API_KEY=self.key, COGCORE_COORD_AGENT_ID=settings.agent_id,
+                           COGCORE_COORD_SESSION_ID=settings.session_id, COGCORE_COORD_EXECUTOR_ID=settings.executor_id,
+                           COGCORE_COORD_ALLOWED_ROOTS=json.dumps([str(self.repo)]), COGCORE_COORD_ARTIFACTS_DIR=str(self.artifacts),
+                           COGCORE_COORD_APP_NAME=settings.application_name, COGCORE_COORD_APP_VERSION=settings.application_version,
+                           COGCORE_COORD_CONCURRENCY="1", COGCORE_COORD_RECONCILE_SECONDS="1", COGCORE_COORD_TEST_MODE="1",
+                           PYTHONIOENCODING="utf-8")
+        environment.pop("COGCORE_COORD_PROJECT", None)
+        environment.pop("COGCORE_COORD_TEST_CRASH", None)
+        if fault:
+            environment["COGCORE_COORD_TEST_CRASH"] = fault
+        return environment
+
+    def spawn(self, command, label, settings=None, fault=None):
+        settings = settings or self.settings
+        logfile = self.directory / (label + ".log")
+        handle = logfile.open("wb")
+        self.handles.append(handle)
+        arguments = [sys.executable, "-m", "tools.coordination_worker", command]
+        if command == "enqueue":
+            arguments.append(self.ledger.task["task_id"])
+        process = subprocess.Popen(arguments, cwd=Path(__file__).resolve().parents[1], env=self.environment(settings, fault),
+                                   stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT)
+        self.processes.append(process)
+        return process, logfile
+
+    def start(self, label, settings=None, fault=None):
+        settings = settings or self.settings
+        identity = (settings.session_id, settings.executor_id)
+        assert all(process.poll() is not None or existing != identity for process, existing in self.live_workers), \
+            "The harness must never run two live workers under one session/executor identity"
+        process, logfile = self.spawn("start", label, settings, fault)
+        self.live_workers.append((process, identity))
+        wait_for(lambda: '"event": "worker_ready"' in logfile.read_text(encoding="utf-8", errors="replace") or process.poll() is not None,
+                 timeout=180)
+        assert process.poll() is None or (fault and process.poll() == 86), "Inspect isolated worker log: " + str(logfile)
+        return process
+
+    def enqueue(self, label, settings=None, fault=None):
+        return self.spawn("enqueue", label, settings, fault)[0]
+
+    @staticmethod
+    def stop(process):
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=15)
+
+    def execution(self):
+        task = self.ledger.get(self.ledger.task["task_id"])
+        identifier = worker.workflow_id(task["task_id"], task["attempt_id"])
+        return self.connection.execute("SELECT status,application_version,executor_id,recovery_attempts FROM dbos.workflow_status WHERE workflow_uuid=%s",
+                                       (identifier,)).fetchone()
+
+    def assert_single_submission(self):
+        task = self.ledger.get(self.ledger.task["task_id"])
+        actions = [entry["action"] for entry in self.ledger.actions]
+        assert actions.count("claim") == actions.count("submit") == task["attempt_no"] == 1
+        assert task["status"] == "review" and len(list(self.artifacts.glob("*.json"))) == 1
+        count = self.connection.execute("SELECT count(*) FROM dbos.workflow_status WHERE application_name=%s",
+                                       (self.settings.application_name,)).fetchone()[0]
+        assert count == 1
+        assert all(self.key not in path.read_text(encoding="utf-8", errors="replace") for path in self.directory.glob("*.log"))
+
+    def close(self):
+        for process in self.processes:
+            self.stop(process)
+        for handle in self.handles:
+            handle.close()
+        self.server.shutdown()
+        self.server.server_close()
+        self.server_thread.join(timeout=5)
+        self.connection.close()
+
+
+@pytest.fixture
+def postgres_worker_case(workspace, tmp_path):
+    database_url = os.environ.get("COGCORE_COORD_TEST_DB_URL")
+    if not database_url:
+        pytest.skip("Set COGCORE_COORD_TEST_DB_URL to a dedicated test_ PostgreSQL database")
+    pytest.importorskip("dbos")
+    psycopg = pytest.importorskip("psycopg")
+    assert urlsplit(database_url).path.rsplit("/", 1)[-1].startswith("test_"), "Only isolated test_ databases are accepted"
+    repo, artifacts, base_settings = workspace
+    unique = uuid4().hex[:12]
+    settings = replace(base_settings, database_url=database_url, session_id="test-session-" + unique,
+                       executor_id="test-executor-" + unique, application_name="coord-acceptance-" + unique,
+                       application_version="snapshot-acceptance-" + unique + "-v1")
+    case = PostgresWorkerCase(repo, artifacts, settings, tmp_path, psycopg)
+    try:
+        yield case
+    finally:
+        case.close()
+
+
+def test_postgres_two_worker_sessions_contend_for_one_task(postgres_worker_case):
+    case = postgres_worker_case
+    first_settings = replace(case.settings, session_id=case.settings.session_id + "-a", executor_id=case.settings.executor_id + "-a")
+    second_settings = replace(case.settings, session_id=case.settings.session_id + "-b", executor_id=case.settings.executor_id + "-b")
+    first_worker = case.start("worker-a", first_settings)
+    second_worker = case.start("worker-b", second_settings)
+    assert first_worker.poll() is None and second_worker.poll() is None
+    # Both CLI processes must read the same queued version and reach claim before
+    # either is allowed through. This tests a real race, not sequential ownership.
+    case.claim_barrier = threading.Barrier(2)
+    first_enqueue = case.enqueue("enqueue-a", first_settings)
+    second_enqueue = case.enqueue("enqueue-b", second_settings)
+    codes = [first_enqueue.wait(timeout=60), second_enqueue.wait(timeout=60)]
+    assert sorted(codes) == [0, 1]
+    assert len(case.claim_requests) == 2 and {body["expected_version"] for body in case.claim_requests} == {0}
+    wait_for(lambda: case.ledger.get(case.ledger.task["task_id"])["status"] == "review")
+    wait_for(lambda: case.execution()[0] == "SUCCESS")
+    winner = first_settings if codes[0] == 0 else second_settings
+    loser = second_settings if codes[0] == 0 else first_settings
+    task = case.ledger.get(case.ledger.task["task_id"])
+    assert task["worker"] == {"agent_id": winner.agent_id, "session_id": winner.session_id}
+    assert all(action["session_id"] == winner.session_id for action in case.ledger.actions)
+    assert case.execution()[2] == winner.executor_id
+    # The loser is still alive but has no attempt, accepted action, workflow or file.
+    assert loser.session_id != task["worker"]["session_id"]
+    assert first_worker.poll() is None and second_worker.poll() is None
+    case.assert_single_submission()
+
+
+def test_postgres_incompatible_version_cannot_resume_pending_workflow(postgres_worker_case):
+    case = postgres_worker_case
+    initial = case.start("initialize-v1")
+    case.stop(initial)
+    assert case.enqueue("enqueue-v1").wait(timeout=60) == 0
+    old_worker = case.start("crash-v1", fault="after_publish")
+    assert old_worker.wait(timeout=60) == 86
+    path, = case.artifacts.glob("*.json")
+    original, original_mtime = path.read_bytes(), path.stat().st_mtime_ns
+    case.ledger.expire()
+    before = case.ledger.get(case.ledger.task["task_id"])
+    accepted_actions = copy.deepcopy(case.ledger.actions)
+    old_execution = case.execution()
+    assert old_execution[0] == "PENDING" and old_execution[1] == case.settings.application_version
+
+    next_version = replace(case.settings, application_version=case.settings.application_version.removesuffix("-v1") + "-v2")
+    # Same installation identity across versions, never two live processes with it.
+    newer_worker = case.start("incompatible-v2", next_version)
+    reads_before = case.list_reads
+    wait_for(lambda: case.list_reads >= reads_before + 3)
+    assert newer_worker.poll() is None
+    registered = case.connection.execute("SELECT count(*) FROM dbos.application_versions WHERE version_name=%s AND application_name=%s",
+                                         (next_version.application_version, next_version.application_name)).fetchone()[0]
+    assert registered == 1  # V2 launched and actively reconciled, rather than failing to boot.
+    assert case.execution() == old_execution
+    assert case.ledger.get(before["task_id"]) == before and case.ledger.actions == accepted_actions
+    assert path.read_bytes() == original and path.stat().st_mtime_ns == original_mtime
+    case.stop(newer_worker)
+
+    recovered = case.start("restored-v1")
+    wait_for(lambda: case.ledger.get(before["task_id"])["status"] == "review")
+    wait_for(lambda: case.execution()[0] == "SUCCESS")
+    assert recovered.poll() is None and case.execution()[1] == case.settings.application_version
+    assert path.read_bytes() == original and path.stat().st_mtime_ns == original_mtime
+    assert case.ledger.get(before["task_id"])["attempt_id"] == before["attempt_id"]
+    assert "recover" in [action["action"] for action in case.ledger.actions]
+    case.assert_single_submission()

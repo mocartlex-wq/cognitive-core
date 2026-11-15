@@ -198,6 +198,10 @@ database or reuse a production credential. They verify:
    `recover` action, byte-identical single artifact and one submission to review.
 3. The DBOS workflow/step records contain neither the isolated test API key nor
    a credential/client configuration in workflow inputs.
+4. Two live workers with different sessions/executors race to claim one version.
+   One succeeds and one is fenced, producing one workflow/artifact/submission.
+5. After a v1 crash, a live incompatible v2 does not execute or rewrite the pending
+   v1 workflow or its artifact. Restarting the original v1 resumes that attempt.
 
 ```sh
 # Supply COGCORE_COORD_TEST_DB_URL securely in the test process environment.
@@ -208,6 +212,10 @@ These tests establish DBOS process recovery, not the production Core integration
 Separately run the ledger/API tests against real PostgreSQL and repeat the worker
 acceptance flow against a staged Core endpoint. Production installation,
 credentials, unit activation and deployment remain separate authorized actions.
+An acceptance run observed one internal `background_jobs` advisory-lock timeout
+over the SSH tunnel. Pinned DBOS 3.5.0 uses a 5000 ms idle-transaction timeout for
+that lock. Recovery still completed, but this short pilot is not a long-running
+reliability test; monitor and investigate recurring warnings before broader use.
 
 DBOS references checked against the installed 3.5.0 wheel: [configuration](https://github.com/dbos-inc/dbos-transact-py/blob/3.5.0/dbos/_dbos_config.py),
 [queue registration](https://github.com/dbos-inc/dbos-transact-py/blob/3.5.0/dbos/_queue.py),
