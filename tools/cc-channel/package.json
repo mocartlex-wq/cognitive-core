@@ -6,8 +6,8 @@
   "description": "Канал Cognitive Core для Claude Code: комнаты пушат события в живую сессию, ответ через reply.",
   "bin": { "cogcore-channel": "./index.mjs" },
   "scripts": {
-    "check": "node --check index.mjs && node --check lib/poller.mjs",
-    "test": "node test/smoke.mjs"
+    "check": "node --check index.mjs && node --check lib/poller.mjs && node --check lib/claims.mjs",
+    "test": "node --test test/*.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1"
