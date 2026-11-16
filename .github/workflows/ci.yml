@@ -32,8 +32,7 @@ jobs:
           # Запускаем только те тесты, которые НЕ требуют postgres/redis/minio.
           # Если тест требует — он пропускается через pytest.importorskip.
           python -m pytest tests/test_sanitizer.py tests/test_models.py \
-                           -v --tb=short -p no:cacheprovider || \
-            echo "Some unit tests skipped (require infra) — non-fatal in CI"
+                           -v --tb=short -p no:cacheprovider
 
   # Full integration suite против реальных postgres+redis (service containers).
   # Закрывает gap: раньше ~270 DB/API тестов в CI НЕ запускались — «зелёный CI»
