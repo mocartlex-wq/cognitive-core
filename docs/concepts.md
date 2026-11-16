@@ -1,95 +1,97 @@
-# Концепции Cognitive Core
+# Cognitive Core concepts
 
-## 5 слоёв памяти
+> 🇷🇺 Русская версия: [concepts.ru.md](concepts.ru.md)
+
+## The 5 layers of memory
 
 ```
-       L1: События          ← вы пишете (cognitive_remember)
+       L1: Events            ← you write here (cognitive_remember)
             ↓ daily (LLM curator)
-       L2: Дневные сводки   ← LLM сжимает похожее
+       L2: Daily summaries   ← the LLM compresses similar items
             ↓ weekly (LLM curator)
-       L3: Знания           ← факты с confidence ≥0.6, повтор ≥2×
+       L3: Knowledge         ← facts with confidence ≥ 0.6, repeated ≥ 2×
             ↓ snapshots
-       L4: Архив (MinIO)    ← на случай восстановления
+       L4: Archive (MinIO)   ← for recovery
 
-       OP: Быстрая память   ← KNN из L3 в живую сессию (Redis)
+       OP: Fast memory       ← KNN over L3 into the live session (Redis)
 ```
 
-**Зачем 5 слоёв вместо одной vector DB?**
-Vector DB запоминает всё подряд — и важное, и шум. Здесь — фильтр на каждом уровне: сырое событие пройдёт в долгосрочную память только если повторилось минимум 2 раза за неделю с confidence > 0.6. Снимает с агента работу «чистки» памяти.
+**Why 5 layers instead of a single vector DB?**
+A vector DB remembers everything, the important and the noise alike. Here there is a filter at every level: a raw event reaches long-term memory only if it repeated at least twice within a week with confidence above 0.6. That takes the job of "cleaning up" memory off the agent.
 
-## Основные tools
+## Core tools
 
-### Память
-- **`cognitive_remember(task, result, feedback, lessons)`** — сохранить важный факт. Самый частый use.
-- **`cognitive_recall(query, domain)`** — семантический поиск по L3 (KNN). Используйте ПЕРЕД новой задачей.
-- **`cognitive_my_history(limit)`** — последние ваши события (L1).
-- **`cognitive_save_state(current_task, state_data)`** — checkpoint working memory перед большой задачей.
-- **`cognitive_resume()`** — после рестарта/compact — восстанавливает контекст (state + pending DMs + online agents).
-- **`cognitive_consolidate(level)`** — manual L1→L2 или L2→L3 trigger (обычно auto через cron).
+### Memory
+- **`cognitive_remember(task, result, feedback, lessons)`** — save an important fact. The most frequent call.
+- **`cognitive_recall(query, domain)`** — semantic search over L3 (KNN). Use it BEFORE starting a new task.
+- **`cognitive_my_history(limit)`** — your most recent events (L1).
+- **`cognitive_save_state(current_task, state_data)`** — checkpoint working memory before a big task.
+- **`cognitive_resume()`** — after a restart or context compaction, restores context (state + pending DMs + online agents).
+- **`cognitive_consolidate(level)`** — manual L1→L2 or L2→L3 trigger (normally automatic via cron).
 
-### Комнаты (мультиагентная коллаборация)
-- **`room_join(room_key)`** — войти в комнату по ключу.
-- **`room_post(room_key, text)`** — написать в общий чат комнаты.
-- **`room_read(room_key, since)`** — прочитать новые сообщения.
-- **`room_ask(room_key, question, wait_for_agents, timeout)`** — задать вопрос и подождать ответа (long-poll).
-- **`room_answer(question_id, text)`** — ответить на ожидающий вопрос.
-- **`room_pending(room_key)`** — мои pending вопросы (ждут моего ответа).
+### Rooms (multi-agent collaboration)
+- **`room_join(room_key)`** — enter a room by key.
+- **`room_post(room_key, text)`** — post to the room's shared chat.
+- **`room_read(room_key, since)`** — read new messages.
+- **`room_ask(room_key, question, wait_for_agents, timeout)`** — ask a question and wait for an answer (long-poll).
+- **`room_answer(question_id, text)`** — answer a pending question.
+- **`room_pending(room_key)`** — my pending questions (waiting for my answer).
 
-### DM между агентами
-- **`cognitive_send(to, text, context)`** — личное сообщение другому агенту.
-- **`cognitive_inbox(since_minutes, limit)`** — мои DM.
-- **`cognitive_online(within_seconds)`** — кто сейчас онлайн.
-- **`cognitive_my_team()`** — все ваши агенты (того же владельца).
+### Direct messages between agents
+- **`cognitive_send(to, text, context)`** — private message to another agent.
+- **`cognitive_inbox(since_minutes, limit)`** — my DMs.
+- **`cognitive_online(within_seconds)`** — who is online right now.
+- **`cognitive_my_team()`** — all your agents (same owner).
 
-### Утилиты
-- **`cognitive_health()`** — статус сервера.
-- **`cognitive_heartbeat(current_task)`** — отметить «я живой» (для daemon-агентов).
-- **`cognitive_agent_manifest()`** — полный список ваших tools + best practices + лимиты.
-- **`cognitive_domains()`** — обзор доменов где у вас есть память.
+### Utilities
+- **`cognitive_health()`** — server status.
+- **`cognitive_heartbeat(current_task)`** — report "I'm alive" (for daemon agents).
+- **`cognitive_agent_manifest()`** — the full list of your tools + best practices + limits.
+- **`cognitive_domains()`** — overview of the domains where you have memory.
 
-## Tier-лимиты (что входит в Free)
+## Tier limits (what the Free tier includes)
 
-- 10 000 событий в день
-- 1 ГБ медиа-хранилища
-- 10 AI-помощников
-- 30 семантических поисков в минуту
-- 1 приватный git-репозиторий
-- Все 24 MCP-инструмента доступны
-- Комнаты + DM включены
+- 10,000 events per day
+- 1 GB of media storage
+- 10 AI assistants
+- 30 semantic searches per minute
+- 1 private git repository
+- All 24 MCP tools available
+- Rooms + DMs included
 
-Превышение → HTTP 429. Reset события в 00:00 UTC.
+Exceeding a limit returns HTTP 429. Event counters reset at 00:00 UTC.
 
-## Доменная модель
+## The domain model
 
-`domain` — это категория ваших фактов. Примеры: `memory_arch`, `fastapi_dev`, `client_X`, `личное`, `проект_Y`.
+A `domain` is a category for your facts. Examples: `memory_arch`, `fastapi_dev`, `client_X`, `personal`, `project_Y`.
 
-Рекомендации:
-- Используйте 5-10 доменов max — иначе recall становится бесполезным
-- Один проект ≈ один домен
-- `cognitive_domains()` показывает топ-доменов где у вас есть L3 знания
+Recommendations:
+- Use at most 5–10 domains, otherwise recall becomes useless
+- One project ≈ one domain
+- `cognitive_domains()` shows the top domains where you have L3 knowledge
 
 ## Best practices
 
-1. **После каждого важного решения/lesson** → `cognitive_remember` (с полем `lessons`, БЕЗ двойного тире и точек с запятой — SQL injection filter)
-2. **ПЕРЕД новой задачей** → `cognitive_recall(query)` чтобы не дублировать
-3. **Длинная сессия** → `cognitive_save_state` в начале (snapshot working memory)
-4. **Команда** → через `room_*` (открытый чат) или `cognitive_send` (приватно)
-5. **Heartbeat каждые ~5 мин** если ты long-running daemon (`cognitive_heartbeat`)
-6. **Не печатай api_key в transcript / логах / коммитах** — он секретный
+1. **After every important decision or lesson** → `cognitive_remember` (with the `lessons` field; avoid double dashes and semicolons, they trip the SQL-injection filter)
+2. **BEFORE a new task** → `cognitive_recall(query)` so you don't duplicate work
+3. **Long session** → `cognitive_save_state` at the start (snapshot of working memory)
+4. **Team** → via `room_*` (open chat) or `cognitive_send` (private)
+5. **Heartbeat every ~5 min** if you are a long-running daemon (`cognitive_heartbeat`)
+6. **Never print the api_key in transcripts, logs or commits** — it is a secret
 
-## Privacy & безопасность
+## Privacy and security
 
-- Все ваши данные изолированы по `owner_user_id` — другой клиент физически не достанет
-- MinIO bucket prefix per-owner
-- Memory queries — WHERE owner_user_id обязателен
-- Git repos — private by default
-- Backup — per-tenant snapshots
+- All your data is isolated by `owner_user_id`; another customer physically cannot reach it
+- MinIO bucket prefix per owner
+- Memory queries always carry `WHERE owner_user_id`
+- Git repos are private by default
+- Backups are per-tenant snapshots
 
-## Где найти больше
+## Where to find more
 
 - API explorer: https://mcp.me-ai.ru/sandbox (legacy alias: https://mcp.ии-память.рф/sandbox)
 - OpenAPI: https://mcp.me-ai.ru/api/openapi/cognitive.yaml
-- Quickstart Claude Code: [quickstart-claude-code.md](quickstart-claude-code.md)
-- Quickstart Cursor: [quickstart-cursor.md](quickstart-cursor.md)
-- Quickstart ChatGPT: [quickstart-chatgpt.md](quickstart-chatgpt.md)
-- Gitea: [gitea-tenant-onboarding.md](gitea-tenant-onboarding.md)
+- Quickstart Claude Code: [quickstart-claude-code.md](quickstart-claude-code.md) (Russian)
+- Quickstart Cursor: [quickstart-cursor.md](quickstart-cursor.md) (Russian)
+- Quickstart ChatGPT: [quickstart-chatgpt.md](quickstart-chatgpt.md) (Russian)
+- Gitea: [gitea-tenant-onboarding.md](gitea-tenant-onboarding.md) (Russian)

@@ -1,339 +1,361 @@
 # Cognitive Core — Changelog
 
+> The three most recent entries are in English. Older entries below the marker are kept in Russian as written at the time.
+
 ## Unreleased
 
-### Changed — План «связь owner↔флот» v2, 2026-09-05/06 (#240–#246 + ветки форка/дизайнера)
+### Changed — "Owner ↔ fleet link" plan v2, 2026-09-05/06 (#240–#246 + fork/designer branches)
 
-- **Деплой (#240)**: откат и при провале сборки/миграции, не только smoke;
-  `conditional_reload.sh` после подъёма api прогоняет `alembic upgrade head`
-  (`COGNITIVE_MIGRATE=0` на откате — схема не понижается).
-- **Гейт владельца (#241)**: ключ из БД без `owner_user_id` → 403 (раньше = admin);
-  `POST /agents/register` требует владельца; `_can_deploy(None)` → False;
-  alembic 0024 (сироты отозваны); `X-Request-Id` в логах и ответах; rate-limit
-  на `tools/call`. Cookie-путь `resolve_owner_user_id` починен (импортировал
-  несуществующую функцию).
-- **MCP Streamable HTTP (#241)**: `POST /mcp` — ответ инлайн, stateless, batch;
-  legacy SSE при `PUBLISH` без подписчиков отвечает инлайн вместо 202 «в никуда».
-  Клиент: `claude mcp add --transport http cognitive-core https://mcp.me-ai.ru/mcp`.
-- **Демон (#242, #244)**: пробуждение по PG NOTIFY (`room_event`, `agent_inbox`);
-  один инструментный цикл для всех мозгов — `managed` (Anthropic, по умолчанию
-  `claude-sonnet-5`), `custom_llm` (OpenAI-совместимые), `deepseek`; контекст
-  комнаты в промпте; инструмент `cognitive_remember`; таймаут `claude_routine`
-  с запасным ответом.
-- **Один UI (#243, #246, design/*)**: `/ui/room` = webchat; чипы «Кому», typing
-  в статусе, вставка из буфера, `?room=`; две панели на десктопе, markdown в
-  пузырях, «Показать полностью», чип «заместитель»; витрина
-  `/static/chat-prototype.html` показывает живой чат (`/chat?embed=1`,
+- **Deploy (#240)**: rollback also on a failed build or migration, not only on a
+  failed smoke test; `conditional_reload.sh` runs `alembic upgrade head` after
+  the api comes up (`COGNITIVE_MIGRATE=0` on rollback — the schema is never
+  downgraded).
+- **Owner gate (#241)**: a database key without `owner_user_id` → 403 (it used
+  to mean admin); `POST /agents/register` requires an owner; `_can_deploy(None)`
+  → False; alembic 0024 (orphans revoked); `X-Request-Id` in logs and
+  responses; rate limit on `tools/call`. The cookie path of
+  `resolve_owner_user_id` fixed (it imported a non-existent function).
+- **MCP Streamable HTTP (#241)**: `POST /mcp` — inline response, stateless,
+  batch; legacy SSE replies inline on `PUBLISH` with no subscribers instead of
+  a 202 "into the void". Client:
+  `claude mcp add --transport http cognitive-core https://mcp.me-ai.ru/mcp`.
+- **Daemon (#242, #244)**: wake-up via PG NOTIFY (`room_event`, `agent_inbox`);
+  one tool loop for every brain — `managed` (Anthropic, default
+  `claude-sonnet-5`), `custom_llm` (OpenAI-compatible), `deepseek`; room context
+  in the prompt; the `cognitive_remember` tool; `claude_routine` timeout with a
+  fallback reply.
+- **Single UI (#243, #246, design/*)**: `/ui/room` = webchat; "To" chips,
+  typing indicator in the status line, paste from clipboard, `?room=`; two
+  panels on desktop, markdown in bubbles, "Show in full", a "deputy" chip; the
+  `/static/chat-prototype.html` showcase embeds the live chat (`/chat?embed=1`,
   nginx `location = /chat` → `X-Frame-Options SAMEORIGIN`).
-- **Память**: вложения комнат/документы не удаляются через сутки (#245);
-  restore снапшота ставит `owner_user_id`; `cognitive_recall` без `domain`
-  достижим через MCP (review/recall-domain-optional); `l3_coverage_pct` в
-  `/health.deep`; platform-правила гигиены памяти (alembic 0025).
-- **Канал Claude Code** `tools/cc-channel/` (Channels preview): комнаты пушат
-  сообщения в живую сессию, ответ через `reply`.
-- Web Push включён на проде (VAPID в override.yml).
-- **Закалка демона по ревью 06.09**: исключение на одном сообщении больше не
-  роняет проход и не теряет `seen_ids`; LISTEN-поток пробует соединение раз в
-  60с (`SELECT 1`, keepalives, пароль экранирован); Anthropic-цикл держит
-  `tools` в каждом запросе (лимит через `tool_choice=none`), пол `max_tokens`
-  4096; залежавшийся `routine_pending` снимается без запасного ответа.
-- **Присутствие в комнате** (форк): `online`/`last_seen` участников в
-  `/user/rooms/{id}/detail`, точка на чипе «Кому», «N на связи» в статусе.
-  Heartbeat по умолчанию (`last_heartbeat_at DEFAULT NOW()` = `created_at`)
-  не считается присутствием — раньше шесть участников показывали одну и ту же
-  дату пересоздания комнаты.
-- **Композер webchat** (форк): полоса превью вложений до отправки (миниатюра,
-  имя, размер, ✕ снимает и маркер `(media:id)`), потолок размера до base64
-  (200 МБ / 50 МБ аудио, как на сервере), `accept` на выборе файла.
-- **Десктоп-пасс №2 webchat** (Дизайнер + форк): список комнат больше не
-  уезжает под экран (обеим панелям задан `grid-row:1`); имя отправителя
-  13px/600 и `<time>` у каждого сообщения; свёртка длинных отчётов по
-  фактической высоте (~12 строк); лента и композер в одной колонке 900,
-  от 1600 — приложение 1680 / панель 360; поля не чёрные, светлая тема
-  красит страницу через `html:has(.app.light)`; подсказка чипа «Кому» —
-  «был(а) N назад» / «не выходил(а) на связь». Тесты node-скриптов с
-  `encoding="utf-8"` (на Windows cp1251 превращал кириллицу в мусор).
-- **Консолидация L2→L3 (Фаза 5б)**: у 30+ доменов с одним L2-буфером L3 не
-  появлялся никогда — порог повторяемости считался по окну 7 дней. Теперь
-  weekly берёт догоняющее окно `WEEKLY_BACKFILL_DAYS=90` (только когда
-  материала не хватает), `run_weekly_cycle` отбирает домены по нему же;
-  порог `min_l2_repetitions_for_l3` закреплён в коде (один буфер →
-  `insufficient_repetition` без вызова LLM), окно расширяется по владельцу;
-  сбой куратора виден в логах и как `curator_errors` в результате weekly
-  (секреты вырезаны). Разовый прогон 06.09 поднял `l3_coverage_pct` 27.5 → 94.1,
-  но часть записей — из одного буфера (см. память владельца).
-- **Подсказка доменов (Фаза 5б)**: `tools/list` подставляет в описание
-  `cognitive_remember.domain` прижившиеся домены владельца (активное L3 или
-  ≥2 L2), кэш 5 мин; базовый текст больше не предлагает пример-одиночку.
+- **Memory**: room attachments/documents are no longer deleted after a day
+  (#245); snapshot restore sets `owner_user_id`; `cognitive_recall` without
+  `domain` is reachable over MCP (review/recall-domain-optional);
+  `l3_coverage_pct` in `/health.deep`; platform memory-hygiene rules
+  (alembic 0025).
+- **Claude Code channel** `tools/cc-channel/` (Channels preview): rooms push
+  messages into a live session; reply via `reply`.
+- Web Push enabled in production (VAPID in override.yml).
+- **Daemon hardening after the 06.09 review**: an exception on one message no
+  longer kills the pass or loses `seen_ids`; the LISTEN thread probes the
+  connection every 60 s (`SELECT 1`, keepalives, password escaped); the
+  Anthropic loop keeps `tools` in every request (limited via
+  `tool_choice=none`), `max_tokens` floor 4096; a stale `routine_pending` is
+  cleared without a fallback reply.
+- **Room presence** (fork): `online`/`last_seen` of participants in
+  `/user/rooms/{id}/detail`, a dot on the "To" chip, "N online" in the status
+  line. The default heartbeat (`last_heartbeat_at DEFAULT NOW()` =
+  `created_at`) no longer counts as presence — previously six participants
+  showed the same room re-creation date.
+- **Webchat composer** (fork): attachment preview strip before sending
+  (thumbnail, name, size, ✕ removes it and the `(media:id)` marker), size cap
+  before base64 (200 MB / 50 MB audio, same as the server), `accept` on the
+  file picker.
+- **Webchat desktop pass #2** (designer + fork): the room list no longer
+  slides off-screen (both panels get `grid-row:1`); sender name 13px/600 and a
+  `<time>` on every message; long reports collapse by actual height (~12
+  lines); feed and composer in one 900px column, from 1600px the app is 1680 /
+  panel 360; inputs are not black, the light theme paints the page via
+  `html:has(.app.light)`; "To" chip tooltip reads "seen N ago" / "never
+  connected". Node-script tests use `encoding="utf-8"` (on Windows cp1251
+  turned Cyrillic into garbage).
+- **L2→L3 consolidation (Phase 5b)**: 30+ domains with a single L2 buffer
+  never produced L3 — the repetition threshold was computed over a 7-day
+  window. Weekly now uses a catch-up window `WEEKLY_BACKFILL_DAYS=90` (only
+  when there is not enough material) and `run_weekly_cycle` selects domains by
+  the same window; the `min_l2_repetitions_for_l3` threshold is fixed in code
+  (one buffer → `insufficient_repetition` without an LLM call), the window
+  widens per owner; curator failures are visible in logs and as
+  `curator_errors` in the weekly result (secrets stripped). A one-off run on
+  06.09 raised `l3_coverage_pct` 27.5 → 94.1, but some entries come from a
+  single buffer (see the owner's memory).
+- **Domain hints (Phase 5b)**: `tools/list` fills the description of
+  `cognitive_remember.domain` with the owner's established domains (active L3
+  or ≥ 2 L2), cached for 5 min; the base text no longer suggests a lone
+  example.
 
 
-### Added — Wake-channels: провайдер-агностик каналы пробуждения агентов (#191–#201)
+### Added — Wake channels: provider-agnostic agent wake-up channels (#191–#201)
 
-- Демон `scripts/cognitive-agent-runtime.py` обобщён: 24/7 stand-in для ЛЮБОГО
-  opted-in агента (#191), UI-тумблер per-agent (#192).
-- Per-agent `wake_channel` диспетчер (#193): `deepseek` / `claude_routine` /
-  `managed` (Claude API напрямую, #195) / `custom_llm` (любой OpenAI-совместимый
-  endpoint, #196) / `webhook` (один центральный waker для всех агентов, #199).
-- Секреты каналов шифруются Fernet (`COGCORE_CONFIG_KEY`) (#196); UI-селектор
-  канала на карточке агента (#194); test-connection кнопка + быстрый рефреш (#198).
-- Ретраи транзиентных DNS/URL ошибок в демоне (#197); агенты отвечают своим
-  голосом — маркер авто-ответа убран (#201).
-- Docs: Agent Loop — стандарт подключения любого агента к комнатам (#200).
+- The `scripts/cognitive-agent-runtime.py` daemon generalised: a 24/7 stand-in
+  for ANY opted-in agent (#191), per-agent UI toggle (#192).
+- Per-agent `wake_channel` dispatcher (#193): `deepseek` / `claude_routine` /
+  `managed` (Claude API directly, #195) / `custom_llm` (any OpenAI-compatible
+  endpoint, #196) / `webhook` (one central waker for all agents, #199).
+- Channel secrets encrypted with Fernet (`COGCORE_CONFIG_KEY`) (#196); channel
+  selector in the UI on the agent card (#194); test-connection button + quick
+  refresh (#198).
+- Retries of transient DNS/URL errors in the daemon (#197); agents reply in
+  their own voice — the auto-reply marker removed (#201).
+- Docs: Agent Loop — the standard for plugging any agent into rooms (#200).
 
-### Added — Rooms: conductor-роутинг и участие агентов
+### Added — Rooms: conductor routing and agent participation
 
-- Безадресные сообщения владельца в комнате с дирижёром → дирижёру (#190).
-- Per-room авто-ответ агента (`room_participants.auto_respond`, миграция 0017):
-  демон будит агента на прямое @упоминание в конкретной комнате и постит ответ
-  через его `wake_channel` — без полного 24/7 stand-in (#214). Копии дирижёру и
-  безадресные сообщения не будят. API
-  `POST /user/rooms/{room_id}/participants/{agent_id}/auto-respond` + состояние в
-  `GET /user/rooms/{id}/detail` + UI-тумблер «Авто-ответ» в `/ui/room`.
-- Owner-side «добавить моего агента в комнату»: endpoint + picker в room.html (#226).
-- Композер комнаты: Enter отправляет, Shift+Enter — перенос строки (#207).
+- Unaddressed owner messages in a room with a conductor go to the conductor
+  (#190).
+- Per-room agent auto-reply (`room_participants.auto_respond`, migration 0017):
+  the daemon wakes an agent on a direct @mention in a specific room and posts
+  the reply through its `wake_channel`, without a full 24/7 stand-in (#214).
+  Copies to the conductor and unaddressed messages do not wake anyone. API
+  `POST /user/rooms/{room_id}/participants/{agent_id}/auto-respond` + state in
+  `GET /user/rooms/{id}/detail` + an "Auto-reply" toggle in `/ui/room`.
+- Owner-side "add my agent to the room": endpoint + picker in room.html (#226).
+- Room composer: Enter sends, Shift+Enter inserts a newline (#207).
 
-### Added — Shared Brain: несколько устройств = один агент (#205, #206)
+### Added — Shared Brain: several devices = one agent (#205, #206)
 
-- `agent_states.brain_id` + таблица `brains`: устройства одного владельца делят
-  state/history/память как единый агент. UI-кнопка привязки устройства к brain.
+- `agent_states.brain_id` + a `brains` table: devices of one owner share
+  state/history/memory as a single agent. UI button to bind a device to a brain.
 
-### Added — Skills в recall (#209, #210)
+### Added — Skills in recall (#209, #210)
 
-- `cognitive_resume` автоматически подмешивает топ-2 релевантных навыка из
-  L3 `domain='skills'`.
+- `cognitive_resume` automatically mixes in the top-2 relevant skills from L3
+  `domain='skills'`.
 
-### Fixed — Стабильность multi-worker (#202–#204, #208)
+### Fixed — Multi-worker stability (#202–#204, #208)
 
-- MCP SSE-транспорт стал multi-worker-safe: сессии через Redis pub/sub
-  (`mcp:sse:{sid}`) — клиент больше не рвётся, когда POST попадает в чужой
-  из 4 uvicorn-воркеров (#204).
-- `pg_advisory_xact_lock` сериализует `init_db` DDL между воркерами — раньше
-  2-3 из 4 крэшились на старте (#203).
-- Пустые env-строки трактуются как отсутствующие (mcp_protocol/outbox) (#202).
-- Eager warm-up embedding-модели на старте: первый `cognitive_recall` после
-  рестарта больше не таймаутится на холодной загрузке (#208).
+- The MCP SSE transport is multi-worker-safe: sessions via Redis pub/sub
+  (`mcp:sse:{sid}`) — the client no longer drops when a POST lands on another
+  of the 4 uvicorn workers (#204).
+- `pg_advisory_xact_lock` serialises `init_db` DDL between workers — previously
+  2–3 of 4 crashed on startup (#203).
+- Empty env strings are treated as absent (mcp_protocol/outbox) (#202).
+- Eager warm-up of the embedding model on startup: the first `cognitive_recall`
+  after a restart no longer times out on a cold load (#208).
 
-### Fixed — Deploy и cron (#211–#213, #224)
+### Fixed — Deploy and cron (#211–#213, #224)
 
-- fastembed-кэш вынесен в persistent volume в prod.yml — recall не деградирует
-  до hash-fallback после recreate контейнера (#211).
-- Auto-deploy разблокирован: чужой `nginx/conf.d/ai-crm.conf` исключён из
-  dirty-tree guard (#212).
-- subscription-cron честно читает `DATABASE_URL` из env (#213); фикс
-  module-level `import os` (NameError в main()) (#224).
+- The fastembed cache moved to a persistent volume in prod.yml — recall no
+  longer degrades to the hash fallback after a container recreate (#211).
+- Auto-deploy unblocked: the foreign `nginx/conf.d/ai-crm.conf` excluded from
+  the dirty-tree guard (#212).
+- subscription-cron honestly reads `DATABASE_URL` from env (#213); fix for the
+  module-level `import os` (NameError in main()) (#224).
 
-### Fixed — UI-раунд (#215–#223, #225)
+### Fixed — UI round (#215–#223, #225)
 
-- Карточка агента: ширина channel-select ограничена, имя/мета во всю строку
-  (#215, #216); диалоги agent/claim показывают реальную ошибку вместо
-  `[object Object]`, пробелы в agent_id блокируются (#222); занятый agent_id →
-  подсказка свободного (base-N) вместо тупика 409 (#223).
-- Нейронный фон: видимость/мягкость аксонов + cache-bust glass.css и theme.js
-  (#217–#220); степпер connect-мастера изолирован от утечки `.step` из
-  shared.css (#221); room-invite — одна кнопка generate+copy (#225).
+- Agent card: channel-select width capped, name/meta take the full row
+  (#215, #216); agent/claim dialogs show the real error instead of
+  `[object Object]`, spaces in agent_id are blocked (#222); a taken agent_id →
+  a suggestion of a free one (base-N) instead of a dead-end 409 (#223).
+- Neural background: axon visibility/softness + cache-bust of glass.css and
+  theme.js (#217–#220); the connect-wizard stepper isolated from the `.step`
+  leak out of shared.css (#221); room invite — one generate+copy button (#225).
 
-### Security — Демон: границы чужого домена (#227, #228)
+### Security — Daemon: boundaries of a foreign domain (#227, #228)
 
-- `/opt/ai-crm` удалён из WRITE-whitelist агент-демона (`git_pull` +
-  `docker_restart`): ad-hoc деплой ai-crm трижды ронял прод — теперь только
-  штатный `deploy/update.sh` (#227); упоминание убрано и из описания тула (#228).
+- `/opt/ai-crm` removed from the agent daemon's WRITE whitelist (`git_pull` +
+  `docker_restart`): ad-hoc ai-crm deploys took production down three times —
+  now only the regular `deploy/update.sh` (#227); the mention also removed from
+  the tool description (#228).
 
-### Added — Audit-раунд + мобильный UI + deploy-MCP (#229)
+### Added — Audit round + mobile UI + deploy MCP (#229)
 
-- Итоги аудит-раунда, мобильные фиксы UI и MCP-инструменты деплоя.
+- Results of the audit round, mobile UI fixes and MCP deploy tools.
 
 ## v0.6.0 (2026-05-28) — Multi-tenant platform release
 
-Большой арк после `v0.5.0-rc1`: из single-tenant pipeline вырос multi-tenant
-SaaS-продукт. Phase 4 (изоляция арендаторов) → Phase 5 (Gitea + биллинг +
-welcome-флоу) → Phase 6 (Operating Rules) + media-пайплайн, комнаты, видео-генерация,
-RU-enterprise compliance и публичный онбординг. Production-инстанс
-[https://mcp.me-ai.ru](https://mcp.me-ai.ru), 29 MCP-инструментов.
+A big arc after `v0.5.0-rc1`: the single-tenant pipeline grew into a
+multi-tenant SaaS product. Phase 4 (tenant isolation) → Phase 5 (Gitea +
+billing + welcome flow) → Phase 6 (Operating Rules) + the media pipeline,
+rooms, video generation, Russian enterprise compliance and public onboarding.
+Production instance [https://mcp.me-ai.ru](https://mcp.me-ai.ru), 29 MCP tools.
 
 ### Added — Phase 4: Multi-tenancy
 
-- `owner_user_id`-изоляция на всех слоях L1-L4: один владелец = много агентов,
-  общая память по `WHERE owner_user_id = …` (#23).
-- Per-owner префикс в MinIO (`l4/{owner_user_id}/…`) для snapshot'ов и медиа.
-- Per-tenant quotas + `GET /user/usage` (события/день, медиа-объём, число агентов).
-- Backfill `agent_keys.owner_user_id` + INSERT-путь для новых ключей (#34).
+- `owner_user_id` isolation on every layer L1–L4: one owner = many agents,
+  shared memory via `WHERE owner_user_id = …` (#23).
+- Per-owner prefix in MinIO (`l4/{owner_user_id}/…`) for snapshots and media.
+- Per-tenant quotas + `GET /user/usage` (events/day, media volume, number of
+  agents).
+- Backfill of `agent_keys.owner_user_id` + INSERT path for new keys (#34).
 
 ### Added — Phase 5: Workspace platform (Gitea + billing + welcome)
 
-- Self-hosted git на `git.me-ai.ru` (Gitea) с комбинированным TLS-сертификатом
-  для `me-ai.ru` + punycode-домена (#25, #39).
-- Pricing-страница `/ui/pricing` + welcome-флоу `/ui/welcome` + admin tenants (#25, #26).
-- Биллинг-скелет Stripe + ЮKassa: `/api/billing/checkout/{tier}`, привязка
-  pricing.html → checkout, upgrade-подсказки в профиле (#95).
-- Cron истечения подписок + модернизация README (#96).
+- Self-hosted git at `git.me-ai.ru` (Gitea) with a combined TLS certificate for
+  `me-ai.ru` + the punycode domain (#25, #39).
+- Pricing page `/ui/pricing` + welcome flow `/ui/welcome` + admin tenants
+  (#25, #26).
+- Billing skeleton for Stripe + YooKassa: `/api/billing/checkout/{tier}`,
+  pricing.html → checkout wiring, upgrade hints in the profile (#95).
+- Subscription expiry cron + README modernisation (#96).
 
 ### Added — Phase 6: Operating Rules (self-improving)
 
-- Таблицы `agent_rules` + `rule_proposals` + `rule_votes`, сид 4 платформенных
-  core-правил (#79), позднее +5-е `rule-media-via-pipeline` (миграция 0012).
-- Инжект per-owner Operating Rules в LLM-prompt оркестратора (#82).
-- CRUD `/user/rules` + предложения + `/admin/rule-proposals` (#80), UI-секция
-  правил в `/ui/profile` + страница админ-предложений (#81).
-- Weekly rule-analyzer + systemd-timer — DeepSeek еженедельно ревьюит
-  предложения правил (#83).
+- Tables `agent_rules` + `rule_proposals` + `rule_votes`, seed of 4 platform
+  core rules (#79), later a 5th `rule-media-via-pipeline` (migration 0012).
+- Per-owner Operating Rules injected into the orchestrator's LLM prompt (#82).
+- CRUD `/user/rules` + proposals + `/admin/rule-proposals` (#80), a rules
+  section in `/ui/profile` + an admin proposals page (#81).
+- Weekly rule analyzer + systemd timer — DeepSeek reviews rule proposals every
+  week (#83).
 
 ### Added — Accounts & Auth
 
-- OTP-логин (6-значный код на email, TTL 15 мин, single-use, rate-limit) вместо
-  magic-link, страница `/ui/login`.
-- Сессии с парсингом `device_info`, управление «Мои устройства», редактирование
-  аккаунта (имя/аватар), коллапс-карточка «Аккаунт» в профиле.
-- Actionable 401-сообщение для API/CLI-клиентов (#97).
-- Email-backend для OTP и дайджестов.
+- OTP sign-in (6-digit code by email, 15-min TTL, single-use, rate-limited)
+  instead of magic links, `/ui/login` page.
+- Sessions with `device_info` parsing, "My devices" management, account
+  editing (name/avatar), a collapsible "Account" card in the profile.
+- Actionable 401 message for API/CLI clients (#97).
+- Email backend for OTP and digests.
 
 ### Added — Media pipeline
 
-- Анализатор медиа: видео → кадры + транскрипция Whisper, плюс изображения.
-- GPU-Whisper на CUDA 12.2 + cuDNN8 + ffmpeg (`Dockerfile.gpu`), env-driven
-  device/compute_type (#64, #70-#74).
-- Vision-стадия Qwen-VL → `mechanics_summary` в L1-payload (#51), с DeepSeek
-  text-only fallback при недоступности Qwen (#52).
-- Per-tenant external vision-ключи (opt-in): Qwen / MiniMax / GigaChat /
+- Media analyzer: video → frames + Whisper transcription, plus images.
+- GPU Whisper on CUDA 12.2 + cuDNN8 + ffmpeg (`Dockerfile.gpu`), env-driven
+  device/compute_type (#64, #70–#74).
+- Qwen-VL vision stage → `mechanics_summary` in the L1 payload (#51), with a
+  DeepSeek text-only fallback when Qwen is unavailable (#52).
+- Per-tenant external vision keys (opt-in): Qwen / MiniMax / GigaChat /
   YandexGPT / Claude / OpenAI / Gemini (#53).
-- MCP-инструмент `cognitive_media_upload` (25-й tool) + universal base64-вход
-  `/api/media/upload_b64` (#108 предшественник).
-- Resumable upload (`cognitive_media_upload_init/_finalize`) — curl PUT в обход
-  base64 context-cap LLM (#108) + hourly-очистка orphan-файлов (#109).
-- Публичный `GET /api/media/info/{id}` + grid-карточка «Мои медиа» в профиле.
+- MCP tool `cognitive_media_upload` (the 25th tool) + universal base64 input
+  `/api/media/upload_b64` (predecessor of #108).
+- Resumable upload (`cognitive_media_upload_init/_finalize`) — curl PUT around
+  the LLM base64 context cap (#108) + hourly cleanup of orphan files (#109).
+- Public `GET /api/media/info/{id}` + a "My media" grid card in the profile.
 
 ### Added — Rooms & multi-agent
 
-- 7 MCP-инструментов `room_*` + helper `_call_rooms` (#90), backend
-  `cognitive-rooms.service` на :9098.
-- Rooms CRUD в `/ui/profile` (создание/переименование/удаление по образцу
-  машин) (#102).
-- Direct messages между агентами, `my_team`, авто-DM, presence-индикатор
-  (зелёная точка) в «Мои помощники».
+- 7 `room_*` MCP tools + the `_call_rooms` helper (#90), backend
+  `cognitive-rooms.service` on :9098.
+- Rooms CRUD in `/ui/profile` (create/rename/delete, modelled on machines)
+  (#102).
+- Direct messages between agents, `my_team`, auto-DM, presence indicator
+  (green dot) in "My assistants".
 
-### Added — AI Video Generation
+### Added — AI video generation
 
-- Скелет генерации видео Kling / Sora: MCP-обёртка `cognitive_video_generate`
-  + 17 тестов (#93).
+- Kling / Sora video generation skeleton: the `cognitive_video_generate` MCP
+  wrapper + 17 tests (#93).
 
 ### Added — Orchestrator
 
-- Server-side AI-диспетчер (daemon) для multi-agent сценариев (#42).
-- Multi-step planning chains (#49) + действия `room_join` / `room_read` /
+- Server-side AI dispatcher (daemon) for multi-agent scenarios (#42).
+- Multi-step planning chains (#49) + actions `room_join` / `room_read` /
   `cognitive_recall` / `analyze_media` (#47).
-- Прямая SQL-регистрация агентов (обход сломанного `/agents/register`) (#44).
+- Direct SQL registration of agents (bypassing the broken `/agents/register`)
+  (#44).
 
 ### Added — Onboarding & agent discovery
 
-- Unified Agent Onboarding v1: визард `/ui/connect` + claim-token флоу (агент
-  сам себя подключает), Redis-backend для claim-token (переживает рестарт API).
-- Peek-endpoint `claim/peek` + обогащение manifest (`peers[]`) + чистый
-  claim-prompt (Phase O, #101).
-- Idempotency claim-token + one-liner self-hosted установка
+- Unified Agent Onboarding v1: the `/ui/connect` wizard + claim-token flow (the
+  agent connects itself), Redis backend for claim tokens (survives an API
+  restart).
+- Peek endpoint `claim/peek` + manifest enrichment (`peers[]`) + a clean claim
+  prompt (Phase O, #101).
+- Claim-token idempotency + one-liner self-hosted install
   `curl /static/install-self-hosted.sh | sudo bash` (#106).
-- 🟢-canary в prompt + UI-предпроверка pending-агента (#110).
-- Поддержка 6 платформ (Claude Code, Cursor, ChatGPT, LangChain, Telegram-бот,
-  self-hosted VPS); browser-stable machine fingerprint через JS (#78).
+- 🟢 canary in the prompt + UI pre-check of a pending agent (#110).
+- Support for 6 platforms (Claude Code, Cursor, ChatGPT, LangChain, Telegram
+  bot, self-hosted VPS); browser-stable machine fingerprint via JS (#78).
 
-### Added — RU enterprise
+### Added — Russian enterprise
 
-- 152-ФЗ compliance pack: DPA-шаблон + ФСТЭК-21 УЗ-3, docs `compliance-152fz.md`
-  (#84).
-- Адаптеры GigaChat / YandexGPT как vision-провайдеры (#53).
+- 152-FZ compliance pack: DPA template + FSTEC-21 UZ-3, docs
+  `compliance-152fz.md` (#84).
+- GigaChat / YandexGPT adapters as vision providers (#53).
 
 ### Added — Docs
 
-- Quickstart'ы: rooms, video-generation, billing, self-hosted VPS,
-  external-providers, agent-discovery, memory-scope.
-- `docs/index.md` TOC, гайд миграции конкурентов + кейсы.
-- Launch-материалы (Habr / VC.ru / Twitter).
+- Quickstarts: rooms, video generation, billing, self-hosted VPS,
+  external providers, agent discovery, memory scope.
+- `docs/index.md` TOC, a migration guide from competitors + case studies.
+- Launch materials (Habr / VC.ru / Twitter).
 
 ### Changed
 
-- `cognitive_recall` / `analyze_media`: таймаут 60s под медленный semantic KNN
+- `cognitive_recall` / `analyze_media`: 60 s timeout for the slow semantic KNN
   (#48).
-- nginx: модернизация `http2`-директивы (синтаксис 1.25+), вступление в сеть
-  `ai-crm_aicrm`, lazy DNS-resolver, split `me-ai.ru` в redirect-only блок для
-  Yandex Browser (#40, #61, #62, #65-#67).
-- Postgres tuning под 32 GB хост (4 GB shared_buffers, 32 MB work_mem) (#68);
-  лимит памяти API 3G→8G под 4 воркера + pre-cache Whisper (#69).
-- agent_id: разрешены кириллица и любые Unicode-буквы (#32, #87).
-- Sanitizer: снят `SQL_PATTERN`-чек (запросы параметризованы, em-dash больше не
-  блокируется).
-- UI: унифицированный top-nav (Главная · AI-чат · Комнаты · API), Apple Liquid
-  Glass дизайн, view-transitions, head-bootstrap против мерцания.
+- nginx: modernised `http2` directive (1.25+ syntax), joined the `ai-crm_aicrm`
+  network, lazy DNS resolver, `me-ai.ru` split into a redirect-only block for
+  Yandex Browser (#40, #61, #62, #65–#67).
+- Postgres tuning for a 32 GB host (4 GB shared_buffers, 32 MB work_mem) (#68);
+  API memory limit 3G → 8G for 4 workers + Whisper pre-cache (#69).
+- agent_id: Cyrillic and any Unicode letters allowed (#32, #87).
+- Sanitizer: the `SQL_PATTERN` check removed (queries are parameterised; the
+  em dash is no longer blocked).
+- UI: unified top nav (Home · AI chat · Rooms · API), Apple Liquid Glass
+  design, view transitions, head bootstrap against flicker.
 
 ### Fixed
 
-- claim-token: короткий `agent_id` (`'8'`) ломал `_create_agent_core` → 5xx;
-  ON CONFLICT-баг при claim (#85).
-- Миграция 0007: `accounts.id` → `accounts.user_id` (#31); `/user/usage`
+- claim-token: a short `agent_id` (`'8'`) broke `_create_agent_core` → 5xx;
+  ON CONFLICT bug on claim (#85).
+- Migration 0007: `accounts.id` → `accounts.user_id` (#31); `/user/usage`
   AttributeError `user.id` → `user.user_id` (#29).
-- CI полностью зелёный + 4 латентных F821-бага в `connect.py` (#86).
-- Whisper compute_type=int8 для Pascal-GPU (GTX 1050 Ti поддерживает только
-  int8 на GPU) (#76, #77).
-- vision_analyzer: обработка пустых env-строк из docker-compose `${VAR:-}` (#63).
-- Replication: подавлен TimeoutError-флуд при отсутствии `nats-py` (#56).
-- MCP/SSE: session-based routing сообщений + `event:ping` keepalive (фикс
-  32s-таймаута Claude Code SDK).
-- Rooms: invite-шаблон `sender` → `from_agent` (#103).
-- Auto-deploy self-heal для dirty git-tree + диагностика rooms (#88).
+- CI fully green + 4 latent F821 bugs in `connect.py` (#86).
+- Whisper compute_type=int8 for Pascal GPUs (the GTX 1050 Ti supports only
+  int8 on GPU) (#76, #77).
+- vision_analyzer: handling of empty env strings from docker-compose
+  `${VAR:-}` (#63).
+- Replication: TimeoutError flood suppressed when `nats-py` is missing (#56).
+- MCP/SSE: session-based message routing + `event:ping` keepalive (fix for the
+  Claude Code SDK 32 s timeout).
+- Rooms: invite template `sender` → `from_agent` (#103).
+- Auto-deploy self-heal for a dirty git tree + rooms diagnostics (#88).
 
 ### Security
 
 - Billing security hardening (#89).
-- Media-cleanup v2: HARD-DELETE (файлы + L1-строка) per owner-decision (#30).
-- Sanitize state_data, quota-enforcement как защитный механизм.
+- Media cleanup v2: HARD DELETE (files + L1 row) per the owner's decision (#30).
+- Sanitised state_data, quota enforcement as a defensive mechanism.
 
 ## Unreleased — v1.0 roadmap (in progress, 2026-05-27 → 28)
 
-Overnight-спринт к v1.0: ~36 PR, частично параллельными агентами. M1 и M2
-завершены, M3-M6 частично. План: `~/.claude/plans/iridescent-enchanting-rabbit.md`.
-Известные блокеры: scope PAT для workflow, Docker IPv6 (см. фикс ниже).
+Overnight sprint towards v1.0: ~36 PRs, partly by parallel agents. M1 and M2
+complete, M3–M6 partial. Plan: `~/.claude/plans/iridescent-enchanting-rabbit.md`.
+Known blockers: PAT scope for workflow, Docker IPv6 (see the fix below).
 
-### Added — M1: Test Foundation ✅
+### Added — M1: Test foundation ✅
 
-- Session-cookie fixture-инфраструктура (#115) + admin-fixture, полный
-  claim-флоу с session-фикстурой (#116).
-- Юнит-тесты: media peek + resumable upload (#113), CircuitBreaker (#114),
-  vault encrypt/decrypt в `user_settings` (#117), quota_enforcer с mock-pool
-  (#118), email_client + email_templates (#119), pure-функции `prompts.py`
-  (#134).
+- Session-cookie fixture infrastructure (#115) + admin fixture, the full claim
+  flow with a session fixture (#116).
+- Unit tests: media peek + resumable upload (#113), CircuitBreaker (#114),
+  vault encrypt/decrypt in `user_settings` (#117), quota_enforcer with a mock
+  pool (#118), email_client + email_templates (#119), pure functions of
+  `prompts.py` (#134).
 
 ### Added — M2: Observability ✅
 
-- SRE incident-runbook (#120).
-- `scripts/restore-from-l4.sh` + design-doc восстановления из L4 (#121).
+- SRE incident runbook (#120).
+- `scripts/restore-from-l4.sh` + a design doc for restoring from L4 (#121).
 - Grafana dashboard + Prometheus alerts (#122).
 - SLO-tracking endpoint `/admin/slo` (#123).
 
 ### Added — M3: UI i18n (partial)
 
-- Инфраструктура интернационализации RU/EN UI: `sandbox/i18n.js` + локали
-  ru/en (#124).
+- Internationalisation infrastructure for the RU/EN UI: `sandbox/i18n.js` +
+  ru/en locales (#124).
 
 ### Added — M4: Features (partial)
 
 - `me-ai-edge` container stub + architecture doc (#127).
 - Admin audit-log read endpoint `/admin/audit` (#131).
-- Tenant webhook notifications с anti-SSRF + HMAC-подписью (#133).
+- Tenant webhook notifications with anti-SSRF + HMAC signature (#133).
 
 ### Changed — Ops
 
-- Docs `*.md` отдаются по HTTP (`/docs/X.md`) — починены битые ссылки; файлы
-  включены в Docker-образ (#129, #130).
-- Weekly docker-prune cron + документация memory-scope (#105).
+- Docs `*.md` are served over HTTP (`/docs/X.md`) — broken links fixed; the
+  files are included in the Docker image (#129, #130).
+- Weekly docker-prune cron + memory-scope documentation (#105).
 
 ### Fixed
 
-- **Docker IPv6 build (permanent fix)**: buildkit резолвил `registry-1.docker.io`
-  по IPv6 → «network is unreachable» на РФ VPS → падал auto-deploy. Решение —
-  авто-pre-pull base-образов (`docker pull` с IPv4-fallback) перед каждым build,
-  что праймит cache (#132).
-- Машина-rename pencil переехал в шапку группы + broadcast label (#100).
-- `my_rooms`-запрос: убрана несуществующая `p.user_id` (#126).
-- Восстановлены helper'ы `agentDot` + `agentChip` в `profile.html` (регрессия
-  из PR #102) (#125).
+- **Docker IPv6 build (permanent fix)**: buildkit resolved
+  `registry-1.docker.io` over IPv6 → "network is unreachable" on a VPS in
+  Russia → auto-deploy failed. Solution: automatic pre-pull of base images
+  (`docker pull` with an IPv4 fallback) before every build, which primes the
+  cache (#132).
+- Machine-rename pencil moved to the group header + broadcast label (#100).
+- `my_rooms` query: the non-existent `p.user_id` removed (#126).
+- Restored the `agentDot` + `agentChip` helpers in `profile.html` (regression
+  from PR #102) (#125).
 - Claim-token idempotency (#106).
+
+---
+
+> **Older entries below are in Russian** (kept as originally written; not yet translated).
 
 ## Unreleased — v0.5.0-prod sprint (in progress)
 

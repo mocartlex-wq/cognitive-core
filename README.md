@@ -1,71 +1,83 @@
 # Cognitive Core
 
-> **AI memory + multi-agent rooms + git-сервер + video-generation для AI-агентов.**
-> 5-слойная память, MCP-native, RU-first, Stripe/ЮKassa billing, 152-ФЗ compliance.
-> Работает с Claude Desktop, Cursor, Cherry Studio, ChatGPT через MCP/Custom Connector.
+> 🇷🇺 Русская версия: [README.ru.md](README.ru.md)
 
-## ⚡ За 1 минуту: попробовать без установки
+**Long-term memory and a shared workspace for AI agents, exposed over MCP.**
 
-**Публичный инстанс:** [https://mcp.me-ai.ru](https://mcp.me-ai.ru) (legacy: https://mcp.ии-память.рф)
+Cognitive Core is a self-hosted server that gives any MCP-compatible assistant (Claude Code, Claude Desktop, Cursor, ChatGPT, LangChain agents) a persistent memory that actually learns: raw events are distilled by an LLM curator into daily summaries and then into durable knowledge, so an agent remembers *lessons*, not every keystroke. On top of that memory sit multi-agent rooms with direct messages, a media pipeline (video → frames + Whisper transcript), AI video generation, a built-in git server and a billing layer for running it as a SaaS.
 
-1. Email + OTP → [`/ui/login`](https://mcp.me-ai.ru/ui/login)
-2. «🪄 Передать помощнику» в [`/ui/profile`](https://mcp.me-ai.ru/ui/profile) → 1-клик настройка для Claude Code / Cursor / ChatGPT
-3. После рестарта твоего AI-клиента — 32 MCP-инструмента (`cognitive_remember`, `cognitive_recall`, `room_post`, `cognitive_video_generate`, `cognitive_media_upload_init`...)
+[![Version](https://img.shields.io/badge/version-v0.6.0-blue.svg)](CHANGELOG.md)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)](https://fastapi.tiangolo.com/)
+[![Postgres 16 + pgvector](https://img.shields.io/badge/postgres-16+pgvector-336791.svg)](https://github.com/pgvector/pgvector)
+[![Tests](https://img.shields.io/badge/tests-369%20passing-success.svg)](#testing)
+[![Stress](https://img.shields.io/badge/stress-171%20ev%2Fs%20p95%20111ms-success.svg)](scripts/stress_test.py)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Free tier: 10k событий/день, 1 GB медиа, 10 агентов. Pro (490₽/мес или $5/mo) — 10x всё + приоритетная поддержка. Тарифы: [`/ui/pricing`](https://mcp.me-ai.ru/ui/pricing).
+## ⚡ Try it in one minute, no install
 
-## 📦 Что внутри (2026-07-05)
+**Public instance:** [https://mcp.me-ai.ru](https://mcp.me-ai.ru) (legacy alias: https://mcp.ии-память.рф)
 
-| Феичер | Endpoint / Tool | Документация |
+1. Sign in with email + one-time code at [`/ui/login`](https://mcp.me-ai.ru/ui/login)
+2. Click "Hand over to assistant" in [`/ui/profile`](https://mcp.me-ai.ru/ui/profile) for a one-click setup of Claude Code / Cursor / ChatGPT
+3. Restart your AI client and you get 32 MCP tools (`cognitive_remember`, `cognitive_recall`, `room_post`, `cognitive_video_generate`, `cognitive_media_upload_init`, ...)
+
+Free tier: 10k events/day, 1 GB media, 10 agents. Pro ($5/mo) is 10x everything plus priority support. Plans: [`/ui/pricing`](https://mcp.me-ai.ru/ui/pricing).
+
+## 📦 What's inside (2026-07-05)
+
+| Feature | Endpoint / Tool | Docs |
 |---|---|---|
-| **5-слойная память** (L1→L2→L3→L4 + OP) | `cognitive_remember`, `cognitive_recall` | [concepts.md](docs/concepts.md) |
-| **Multi-agent комнаты** + DM | `room_*` (7 tools), `cognitive_send` | [quickstart-rooms.md](docs/quickstart-rooms.md) |
-| **Media pipeline** (video→frames+Whisper) | `cognitive_media_upload` | server-side, через nginx |
-| **AI Video Generation** (Kling / Sora) | `cognitive_video_generate` | [quickstart-video-generation.md](docs/quickstart-video-generation.md) |
+| **5-layer memory** (L1→L2→L3→L4 + OP) | `cognitive_remember`, `cognitive_recall` | [concepts.md](docs/concepts.md) |
+| **Multi-agent rooms** + DMs | `room_*` (7 tools), `cognitive_send` | [quickstart-rooms.md](docs/quickstart-rooms.md) |
+| **Media pipeline** (video → frames + Whisper) | `cognitive_media_upload` | server-side, behind nginx |
+| **AI video generation** (Kling / Sora) | `cognitive_video_generate` | [quickstart-video-generation.md](docs/quickstart-video-generation.md) |
 | **External vision providers** (per-tenant keys) | Qwen / MiniMax / GigaChat / YandexGPT / Claude / OpenAI / Gemini | [external-providers.md](docs/external-providers.md) |
-| **Self-hosted git** (Gitea на git.me-ai.ru) | Standard git protocol | [gitea-tenant-onboarding.md](docs/gitea-tenant-onboarding.md) |
-| **Operating Rules** (Phase 6) | Auto-inject 5 core rules в system_prompt | rules через [`/user/rules`](https://mcp.me-ai.ru/ui/profile) |
-| **152-ФЗ compliance** (РФ enterprise) | DPA + ФСТЭК-21 УЗ-3 | [compliance-152fz.md](docs/compliance-152fz.md) |
-| **Billing** (Stripe + ЮKassa) | `/api/billing/checkout/{tier}` | [quickstart-billing.md](docs/quickstart-billing.md) |
-| **Multi-tenant isolation** (Phase 4) | `owner_user_id` на всех L1-L4 queries | per-tenant MinIO prefix |
-| **Resumable upload** (PR #108, no context-cap) | `cognitive_media_upload_init/_finalize` | curl PUT обходит base64 в LLM context |
-| **Agent discovery + onboarding** (PR #101, #106, #110) | `claim/peek`, `cognitive_agent_manifest.peers[]`, 🟢-canary, idempotent claim | [agent-discovery.md](docs/agent-discovery.md), [memory-scope.md](docs/memory-scope.md) |
+| **Self-hosted git** (Gitea at git.me-ai.ru) | Standard git protocol | [gitea-tenant-onboarding.md](docs/gitea-tenant-onboarding.md) |
+| **Operating Rules** (Phase 6) | 5 core rules auto-injected into the system prompt | rules via [`/user/rules`](https://mcp.me-ai.ru/ui/profile) |
+| **Billing** (Stripe + YooKassa) | `/api/billing/checkout/{tier}` | [quickstart-billing.md](docs/quickstart-billing.md) |
+| **Multi-tenant isolation** (Phase 4) | `owner_user_id` on every L1–L4 query | per-tenant MinIO prefix |
+| **Resumable upload** (PR #108, no context cap) | `cognitive_media_upload_init/_finalize` | curl PUT bypasses base64 in the LLM context |
+| **Agent discovery + onboarding** (PR #101, #106, #110) | `claim/peek`, `cognitive_agent_manifest.peers[]`, 🟢 canary, idempotent claim | [agent-discovery.md](docs/agent-discovery.md), [memory-scope.md](docs/memory-scope.md) |
 | **Self-hosted instance** (one-liner) | `curl /static/install-self-hosted.sh \| sudo bash` | [onboarding-vps.md](docs/onboarding-vps.md) |
+| **Russian enterprise compliance** (152-FZ) | DPA + FSTEC-21 UZ-3 | [compliance-152fz.md](docs/compliance-152fz.md) (Russian) |
 
-Полный TOC документации: [docs/index.md](docs/index.md).
+Full documentation index: [docs/index.md](docs/index.md).
 
-## Зачем это
+## Why
 
-Большинство AI-памятей — `add()` + `search()` поверх vector DB. Cognitive Core делает иначе: **сырое событие → дневной анализ → недельный синтез → долговременное знание**, а на каждом переходе LLM-куратор отсеивает шум. Результат: ваш агент **помнит выученные уроки, а не каждое нажатие**.
+Most "AI memory" products are `add()` + `search()` on top of a vector database. Cognitive Core does it differently: **raw event → daily analysis → weekly synthesis → long-term knowledge**, with an LLM curator filtering noise at every transition. The result: your agent **remembers the lessons it learned, not every keystroke**.
 
-## Кому
+After one minute of the local demo the system holds 18 events, 3 daily buffers and roughly 30 learned knowledge entries.
 
-| Профиль | Зачем |
+## Who it's for
+
+| Profile | Why |
 |---|---|
-| Solo AI-developer | Persistent память для Claude Desktop / Cursor / Cherry Studio через MCP |
-| AI-стартап (5-50 человек) | Аккумуляция опыта команды агентов с audit log |
-| Enterprise (regulated) | Self-hosted compliance (GDPR, SOC2), полный audit L5, on-prem |
+| Solo AI developer | Persistent memory for Claude Desktop / Cursor / Cherry Studio over MCP |
+| AI startup (5–50 people) | Accumulated experience of a team of agents, with an audit log |
+| Enterprise (regulated) | Self-hosted compliance (GDPR, SOC 2), full L5 audit, on-prem |
 
-## За 30 секунд (local)
+## 30 seconds, locally
 
 ```bash
 git clone <repo-url> cognitive-core && cd cognitive-core
-cp .env.example .env  # вставьте DEEPSEEK_API_KEY
+cp .env.example .env  # add your DEEPSEEK_API_KEY
 docker compose up -d
-open http://localhost:9001/   # главная с кнопкой "Запустить демо"
+open http://localhost:9001/   # landing page with a "Run demo" button
 ```
 
-## Свой VPS (one-liner, ~10 мин)
+## Your own VPS (one-liner, ~10 min)
 
-Для tenant'ов кому нужна **полная изоляция** (не shared cloud):
+For tenants who need **full isolation** rather than the shared cloud:
 
 ```bash
 curl -fsSL https://mcp.me-ai.ru/static/install-self-hosted.sh | sudo bash
 ```
 
-Скрипт спросит домен + email + SMTP creds → выпустит TLS-сертификаты → поднимет docker-compose → прогонит миграции → создаст admin-аккаунт. Полная инструкция: [`docs/onboarding-vps.md`](docs/onboarding-vps.md).
+The script asks for a domain, an email and SMTP credentials, issues TLS certificates, brings up docker-compose, runs migrations and creates an admin account. Full guide: [`docs/onboarding-vps.md`](docs/onboarding-vps.md).
 
-## Production server (1 команда)
+## Production server (one command)
 
 ```bash
 ssh user@your-vps
@@ -73,146 +85,129 @@ git clone <repo-url> /opt/cognitive-core && cd /opt/cognitive-core
 DOMAIN=cognitive.example.com EMAIL=admin@example.com bash install-server.sh
 ```
 
-10 минут — рабочий HTTPS-стек с авто-бэкапами, MCP SSE для удалённых клиентов, systemd auto-start. См. [`DEPLOY-SERVER.md`](DEPLOY-SERVER.md).
+Ten minutes later you have a working HTTPS stack with automatic backups, MCP over SSE / Streamable HTTP for remote clients and systemd auto-start. See [`DEPLOY-SERVER.md`](DEPLOY-SERVER.md).
 
-[![Version](https://img.shields.io/badge/version-v0.6.0-blue.svg)](CHANGELOG.md)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)](https://fastapi.tiangolo.com/)
-[![Postgres 16 + pgvector](https://img.shields.io/badge/postgres-16+pgvector-336791.svg)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-369%20passing-success.svg)](#тестирование)
-[![Stress](https://img.shields.io/badge/stress-171%20ev%2Fs%20p95%20111ms-success.svg)](scripts/stress_test.py)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-## Что это
-
-Большинство AI-памятей — это «положил вектор → нашёл по сходству». Cognitive Core делает иначе:
-**сырое событие → дневной анализ → недельный синтез → долговременное знание**, и на каждом переходе работает LLM-куратор, отсеивающий шум.
-
-Результат: ваш агент **помнит уроки, а не каждое нажатие**.
-
-Через минуту локального демо в системе будет 18 событий, 3 дневных буфера и ~30 выученных знаний.
-
-## Сравнение с конкурентами
+## How it compares
 
 | | Mem0 | Letta | Zep | **Cognitive Core** |
 |---|---|---|---|---|
-| Self-hosted | ✅ | ⚠️ heavy | ⚠️ paid | ✅ один docker compose |
-| Multi-layer consolidation | ❌ | ❌ | ❌ | ✅ **3 LLM-уровня** |
-| Per-agent state checkpoint | ❌ | ✅ | ❌ | ✅ + общая память |
-| Audit log L5 | ❌ | ❌ | ❌ | ✅ append-only |
-| Snapshot + restore SHA-256 | ❌ | ❌ | ❌ | ✅ |
-| Multi-language | ❌ | ❌ | ❌ | ✅ 8 языков |
-| MCP server | ⚠️ | ❌ | ❌ | ✅ stdio + SSE |
-| Production install за 10 мин | ❌ | ❌ | ⚠️ | ✅ install-server.sh |
+| Self-hosted | ✅ | ⚠️ heavy | ⚠️ paid | ✅ one docker compose |
+| Multi-layer consolidation | ❌ | ❌ | ❌ | ✅ **3 LLM levels** |
+| Per-agent state checkpoint | ❌ | ✅ | ❌ | ✅ + shared memory |
+| Audit log (L5) | ❌ | ❌ | ❌ | ✅ append-only |
+| Snapshot + restore with SHA-256 | ❌ | ❌ | ❌ | ✅ |
+| Multi-language | ❌ | ❌ | ❌ | ✅ 8 languages |
+| MCP server | ⚠️ | ❌ | ❌ | ✅ stdio + SSE + Streamable HTTP |
+| Production install in 10 min | ❌ | ❌ | ⚠️ | ✅ install-server.sh |
 
-Детальное сравнение с примерами кода — [`COMPARISON.md`](COMPARISON.md). Анализ рынка — [`MARKET.md`](MARKET.md).
+Detailed comparison with code samples: [`COMPARISON.md`](COMPARISON.md) (Russian). Market analysis: [`MARKET.md`](MARKET.md) (Russian).
 
-## Главная идея — 5 слоёв памяти
+## The core idea: 5 layers of memory
 
 ```
-L1 сырые события  →  L2 дневные срезы  →  L3 эталонные знания  →  L4 архив (S3)
-        ↓                  ↓ (LLM)                ↓ (LLM+куратор)         ↓
-  POST /events        ежедневно ночью          еженедельно           снапшоты
-                                                    ↓
-                                              OP — KNN-поиск из агентов
+L1 raw events  →  L2 daily buffers  →  L3 master knowledge  →  L4 archive (S3)
+      ↓                ↓ (LLM)               ↓ (LLM + curator)        ↓
+ POST /events      nightly               weekly                 snapshots
+                                              ↓
+                                     OP — KNN search from agents
 ```
 
-| Слой | Что хранит | Когда обновляется | Кто пишет |
+| Layer | What it stores | When it updates | Who writes |
 |---|---|---|---|
-| **L1** raw events | Сырой лог опыта агентов | Сразу при `POST /events` | Агенты |
-| **L2** daily buffers | Резюме дня по доменам | Каждую ночь (02:00 UTC) | LLM Daily Analyzer |
-| **L3** master knowledge | Подтверждённые знания + tools | Каждую неделю + по аудиту | LLM Weekly Consolidator + Куратор |
-| **L4** snapshots | Бэкапы L3 в S3/MinIO | После weekly если L3 изменилась | System |
-| **L5** audit log | Каждое действие в системе | Постоянно | Все компоненты |
-| **OP** operative | Сессия KNN-поиска по L3 | По запросу `POST /operative/query` | Агенты |
+| **L1** raw events | Raw log of agent experience | Immediately on `POST /events` | Agents |
+| **L2** daily buffers | Per-domain daily summaries | Every night (02:00 UTC) | LLM Daily Analyzer |
+| **L3** master knowledge | Confirmed knowledge + tools | Weekly + on audit | LLM Weekly Consolidator + Curator |
+| **L4** snapshots | Backups of L3 in S3/MinIO | After weekly, if L3 changed | System |
+| **L5** audit log | Every action in the system | Continuously | All components |
+| **OP** operative | KNN search session over L3 | On `POST /operative/query` | Agents |
 
-## Почему это лучше обычного RAG
+## Why this beats plain RAG
 
-| Обычный RAG | Cognitive Core |
+| Plain RAG | Cognitive Core |
 |---|---|
-| Кладёт всё подряд | Куратор-LLM фильтрует шум на каждом переходе |
-| Знание = текст + вектор | Знание = `{pattern, mistake, rule} + confidence + version + history` |
-| Векторный поиск | Векторный поиск + temporal-aware + tools-registry |
-| Без аудита | Полный L5 audit-log: кто-когда-что |
-| Без бэкапов | L4 snapshot/restore с SHA-256 |
-| 1 контекст на всё | Изоляция по доменам, мульти-агент |
+| Stores everything | An LLM curator filters noise at every transition |
+| Knowledge = text + vector | Knowledge = `{pattern, mistake, rule} + confidence + version + history` |
+| Vector search | Vector search + temporal awareness + tools registry |
+| No audit | Full L5 audit log: who, when, what |
+| No backups | L4 snapshot/restore with SHA-256 |
+| One context for everything | Domain isolation, multi-agent |
 
-## Стек
+## Stack
 
 - **Python 3.11** + **FastAPI** + **asyncpg**
-- **PostgreSQL 16** с расширением **pgvector** (HNSW для KNN)
-- **Redis Stack** (RediSearch для быстрого KNN с TAG-фильтром)
-- **MinIO** (S3-совместимое хранилище для L4)
-- **DeepSeek V4 Pro** как основной LLM (с fallback на OpenAI / Ollama)
-- **fastembed** `multilingual-e5-small` для эмбеддингов (CPU, 384-dim, 8 языков)
-- **Docker Compose** — поднимается одной командой
+- **PostgreSQL 16** with **pgvector** (HNSW for KNN)
+- **Redis Stack** (RediSearch for fast KNN with TAG filters)
+- **MinIO** (S3-compatible storage for L4)
+- **DeepSeek V4 Pro** as the primary LLM (fallback to OpenAI / Ollama)
+- **fastembed** `multilingual-e5-small` for embeddings (CPU, 384-dim, 8 languages)
+- **Docker Compose**: one command to bring everything up
 
-Без npm/build для UI: vanilla HTML+CSS+JS, ~600 LOC.
+No npm or build step for the UI: vanilla HTML+CSS+JS, ~600 LOC.
 
-## Установка и запуск
+## Install and run
 
-### Требования
+### Requirements
 - Docker + Docker Compose v2
-- 4 GB RAM (для контейнеров) + 1 GB для fastembed model cache
+- 4 GB RAM for the containers + 1 GB for the fastembed model cache
 
-### Шаги
+### Steps
 
 ```bash
-# 1. Клонировать
+# 1. Clone
 git clone <repo-url> cognitive-core
 cd cognitive-core
 
-# 2. Конфигурация
+# 2. Configure
 cp .env.example .env
-# Откройте .env и установите DEEPSEEK_API_KEY (получить на platform.deepseek.com)
+# Open .env and set DEEPSEEK_API_KEY (get one at platform.deepseek.com)
 
-# 3. Запустить
+# 3. Start
 docker compose up -d --build
 
-# 4. Проверить
+# 4. Check
 curl http://localhost:9001/health
 # {"healthy":true,"version":"0.6.0",...}
 
-# 5. Загрузить демо-данные (опционально — можно из UI)
+# 5. Load demo data (optional — also available from the UI)
 python scripts/seed_demo.py --full
 ```
 
-### Порты по умолчанию
+### Default ports
 - `9001` — Web UI + API (FastAPI)
 - `5432` — PostgreSQL
 - `6379` — Redis
 - `9000` / `9002` — MinIO API / Console (admin: `minioadmin`/`minioadmin`)
 
-## Web-интерфейс
+## Web UI
 
-| URL | Назначение |
+| URL | Purpose |
 |---|---|
-| `http://localhost:9001/` | Главная — объяснение, диаграмма, кнопка демо |
-| `http://localhost:9001/ui` | Дашборд — live-метрики, графики, обозреватель знаний |
-| `http://localhost:9001/sandbox` | Песочница API — все эндпоинты по этапам |
+| `http://localhost:9001/` | Landing page: explanation, diagram, demo button |
+| `http://localhost:9001/ui` | Dashboard: live metrics, charts, knowledge explorer |
+| `http://localhost:9001/sandbox` | API sandbox: every endpoint, stage by stage |
 | `http://localhost:9001/docs` | OpenAPI Swagger |
 
-## API кратко
+## API in brief
 
 ```bash
-# Записать событие в L1
+# Write an event into L1
 curl -X POST http://localhost:9001/events \
   -H "X-API-Key: key-design-001" \
   -H "Content-Type: application/json" \
   -d '{"source_agent":"my_agent","domain":"my_domain","payload":{"task":"...","result":"...","feedback":"positive"}}'
 
-# Найти знания по KNN
+# Find knowledge with KNN
 curl -X POST http://localhost:9001/operative/query \
   -H "X-API-Key: key-design-001" \
   -H "Content-Type: application/json" \
   -d '{"domain":"my_domain","context":"how to ...","top_k":5}'
 
-# Запустить daily консолидацию
+# Trigger daily consolidation
 curl -X POST "http://localhost:9001/memory/consolidate/daily?domain=my_domain" \
   -H "X-API-Key: key-design-001"
 ```
 
-Полный список — в [DEMO.md](DEMO.md) или открыв `/docs`.
+Full list: [DEMO.md](DEMO.md) (Russian) or open `/docs`.
 
 ## Python SDK
 
@@ -223,166 +218,178 @@ async with AsyncMemoryClient(
     base_url="http://localhost:9001",
     api_key="key-design-001",
 ) as memory:
-    # Записать опыт
+    # Record an experience
     await memory.remember(
         domain="codegen",
         payload={"task": "...", "result": "...", "feedback": "positive"},
     )
-    # Найти знания
+    # Find knowledge
     results = await memory.recall(domain="codegen", context="how to ...")
 ```
 
-См. [cognitive-client/README.md](cognitive-client/) для полного API.
+The SDK lives in [cognitive-client/](cognitive-client/).
 
-## MCP-сервер для Claude Desktop / Cursor / Code
+## MCP server for Claude Code / Claude Desktop / Cursor
 
-Cognitive Core можно подключить к любому MCP-совместимому ИИ-клиенту:
+Cognitive Core speaks MCP natively. The server exposes Streamable HTTP at `/mcp` (plus legacy SSE at `/mcp/sse`); authenticate with your agent key as `X-API-Key` or `Authorization: Bearer <key>`.
+
+```bash
+# Claude Code, one line
+claude mcp add --transport http cognitive-core http://localhost:9001/mcp \
+  --header "Authorization: Bearer key-design-001"
+```
 
 ```json
-// claude_desktop_config.json
+// Generic MCP client config (Cursor, Claude Desktop with a remote MCP, etc.)
 {
   "mcpServers": {
     "cognitive-core": {
-      "command": "python",
-      "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/cognitive-core",
-      "env": {
-        "COGNITIVE_API_URL": "http://localhost:9001",
-        "COGNITIVE_API_KEY": "key-design-001"
-      }
+      "url": "http://localhost:9001/mcp",
+      "headers": { "Authorization": "Bearer key-design-001" }
     }
   }
 }
 ```
 
-После перезапуска Claude получает 7 инструментов: `cognitive_remember`, `cognitive_recall`, `cognitive_list`, `cognitive_tools`, `cognitive_consolidate`, `cognitive_health`, `cognitive_domains`.
+For a one-click setup against the public instance use "Hand over to assistant" in [`/ui/profile`](https://mcp.me-ai.ru/ui/profile). Local installers for Claude Desktop / Cursor / Claude Code / Cherry Studio: [`installer.sh`](installer.sh), [`installer.ps1`](installer.ps1), [`CHERRY_STUDIO.md`](CHERRY_STUDIO.md).
 
-Подробности в [mcp_server/README.md](mcp_server/README.md).
+After a restart the client sees the memory tools (`cognitive_remember`, `cognitive_recall`, `cognitive_list`, `cognitive_tools`, `cognitive_consolidate`, `cognitive_health`, `cognitive_domains`), the `room_*` tools, direct messages, media upload and video generation. Call `cognitive_agent_manifest` for the complete list.
 
-## Тестирование
+## Testing
 
 ```bash
-# Все тесты в контейнере
+# All tests inside the container
 docker exec cognitive_api python -m pytest tests/ -v
 
-# Только юнит-тесты (без сети/LLM)
+# Unit tests only (no network / LLM)
 docker exec cognitive_api python -m pytest tests/test_sanitizer.py tests/test_embedder.py tests/test_models.py -v
 
-# Только API + интеграция
+# API + integration only
 docker exec cognitive_api python -m pytest tests/test_api.py tests/test_dashboard.py -v
 ```
 
-Текущие категории:
-- `test_models.py` — Pydantic-схемы (12 тестов)
-- `test_sanitizer.py` — фильтр SQL/JS/XSS/shell (20 тестов)
-- `test_embedder.py` — эмбеддинги (3 теста)
-- `test_api.py` — интеграция API (34 теста)
-- `test_dashboard.py` — read-only обозреватели (8 тестов)
-- `test_advisory_lock.py` — защита от двойной консолидации (3 теста)
-- `test_pgvector.py` — pgvector интеграция (6 тестов)
-- `test_demo.py` — streaming /demo/run (2 теста)
+Current categories:
+- `test_models.py` — Pydantic schemas (12 tests)
+- `test_sanitizer.py` — SQL/JS/XSS/shell filter (20 tests)
+- `test_embedder.py` — embeddings (3 tests)
+- `test_api.py` — API integration (34 tests)
+- `test_dashboard.py` — read-only explorers (8 tests)
+- `test_advisory_lock.py` — protection against double consolidation (3 tests)
+- `test_pgvector.py` — pgvector integration (6 tests)
+- `test_demo.py` — streaming `/demo/run` (2 tests)
 
-## Безопасность
+## Security
 
-- **Аутентификация**: X-API-Key per-agent через `AGENT_API_KEYS` в `.env`
-- **Rate limiting**: 100 событий/сек на агента (Redis INCR + TTL)
-- **Sanitizer**: блокирует SQL-инъекции, JS, XSS, shell-команды до записи в L1
-- **JSON depth limit**: ≤10 уровней, ≤500 ключей, ≤256KB payload
-- **Audit log L5**: каждое действие логируется (агент, время, цель, успех/ошибка)
-- **L4 snapshots**: SHA-256 проверка целостности при восстановлении
+- **Authentication**: per-agent `X-API-Key` (or `Authorization: Bearer`) via `AGENT_API_KEYS` in `.env`
+- **Rate limiting**: 100 events/sec per agent (Redis INCR + TTL)
+- **Sanitizer**: blocks SQL injection, JS, XSS and shell commands before anything is written to L1
+- **JSON depth limit**: ≤10 levels, ≤500 keys, ≤256 KB payload
+- **L5 audit log**: every action is logged (agent, time, target, success/error)
+- **L4 snapshots**: SHA-256 integrity check on restore
 
-Для production:
-- TLS через nginx — конфиг в [nginx/](nginx/) + [docker-compose.prod.yml](docker-compose.prod.yml)
-- Бэкапы Postgres: [scripts/backup_postgres.sh](scripts/backup_postgres.sh)
-- Подробнее: [DEPLOY.md](DEPLOY.md)
+For production:
+- TLS via nginx: config in [nginx/](nginx/) + [docker-compose.prod.yml](docker-compose.prod.yml)
+- Postgres backups: [scripts/backup_postgres.sh](scripts/backup_postgres.sh)
+- More: [DEPLOY.md](DEPLOY.md) (Russian)
 
-## Hot-reload эмбеддингов
+Threat model and reporting: [SECURITY.md](SECURITY.md).
 
-При смене эмбеддинг-модели в `app/services/embedder.py`:
+## Hot-reloading embeddings
+
+When you change the embedding model in `app/services/embedder.py`:
 
 ```bash
-# Удалит stale-векторы из Redis + переиндексирует все домены
+# Drops stale vectors from Redis and reindexes every domain
 curl -X POST http://localhost:9001/memory/reindex \
   -H "X-API-Key: key-design-001"
 
-# Cold-start после рестарта Redis (без LLM-вызовов)
+# Cold start after a Redis restart (no LLM calls)
 curl -X POST http://localhost:9001/memory/restore-redis \
   -H "X-API-Key: key-design-001"
 ```
 
-## Производительность
+## Performance
 
-На обычном ноутбуке (M2 / 16GB / без GPU):
+On an ordinary laptop (M2 / 16 GB / no GPU):
 - POST /events: **~5 ms**
-- KNN-запрос (RediSearch, до 1000 знаний): **~3-5 ms**
-- KNN-запрос (pgvector HNSW, до 1000 знаний): **~5-15 ms**
-- Daily consolidation (DeepSeek): **~10 сек на домен**
-- Weekly consolidation: **~20-30 сек на домен**
-- fastembed на CPU: **~50-100 ms на embed**
+- KNN query (RediSearch, up to 1000 entries): **~3–5 ms**
+- KNN query (pgvector HNSW, up to 1000 entries): **~5–15 ms**
+- Daily consolidation (DeepSeek): **~10 s per domain**
+- Weekly consolidation: **~20–30 s per domain**
+- fastembed on CPU: **~50–100 ms per embed**
 
-## Дорожная карта
+## Roadmap
 
-| Версия | Статус | Что |
+| Version | Status | What |
 |---|---|---|
-| v0.2.0 | ✅ | MVP: 5 слоёв, 13 эндпоинтов, 69 тестов |
-| v0.2.5 | ✅ | UX: главная, дашборд, песочница, общий дизайн |
-| v0.3.0 | ✅ | Reliability: pgvector, advisory lock, hot-reload |
-| v0.4.0 | ✅ | Reach: MCP-сервер, Apple Glass UI, pgvector HNSW |
-| v0.5.0 | ✅ | Production: Alembic, TLS, CI, бэкапы, smoke+rollback |
-| v0.6.0 | ✅ | Multi-tenant SaaS: изоляция, биллинг, комнаты, media, wake-channels |
-| v1.0.0 | ⏳ | Scale: Celery, шардирование, Ollama+GPU, public launch |
-| v2.0.0 | ⏳ | Advanced: граф знаний, temporal queries, активное обучение |
+| v0.2.0 | ✅ | MVP: 5 layers, 13 endpoints, 69 tests |
+| v0.2.5 | ✅ | UX: landing page, dashboard, sandbox, shared design |
+| v0.3.0 | ✅ | Reliability: pgvector, advisory lock, hot reload |
+| v0.4.0 | ✅ | Reach: MCP server, Apple Glass UI, pgvector HNSW |
+| v0.5.0 | ✅ | Production: Alembic, TLS, CI, backups, smoke + rollback |
+| v0.6.0 | ✅ | Multi-tenant SaaS: isolation, billing, rooms, media, wake channels |
+| v1.0.0 | ⏳ | Scale: Celery, sharding, Ollama + GPU, public launch |
+| v2.0.0 | ⏳ | Advanced: knowledge graph, temporal queries, active learning |
 
-Полный план — [roadmap.md](roadmap.md).
+Full plan: [roadmap.md](roadmap.md) (Russian).
 
-## Структура проекта
+## Project layout
 
 ```
 cognitive-core/
-├── app/                       # FastAPI приложение
-│   ├── api/                   # Роутеры: events, operative, memory, tools, dashboard, demo
-│   ├── db/                    # Адаптеры: postgres (asyncpg), redis, s3 (minio)
-│   ├── models/                # Pydantic-схемы
+├── app/                       # FastAPI application
+│   ├── api/                   # Routers: events, operative, memory, tools, dashboard, demo, mcp_protocol, ...
+│   ├── db/                    # Adapters: postgres (asyncpg), redis, s3 (minio)
+│   ├── models/                # Pydantic schemas
 │   ├── security/              # auth, sanitizer, validator, audit
-│   ├── services/              # Бизнес-логика: ingestor, analyzer, consolidator, curator,
+│   ├── services/              # Business logic: ingestor, analyzer, consolidator, curator,
 │   │                          #    embedder, llm_client, operative, tools, prompts, metrics
 │   ├── main.py                # FastAPI + lifespan + middleware
-│   ├── config.py              # Pydantic-settings из .env
-│   └── worker.py              # Фоновый scheduler (daily/weekly/monthly)
+│   ├── config.py              # pydantic-settings from .env
+│   └── worker.py              # Background scheduler (daily/weekly/monthly)
 ├── sandbox/                   # Web UI: home.html, dashboard.html, index.html, shared.css, tour.js
-├── mcp_server/                # MCP-сервер для Claude Desktop / Cursor / Code
 ├── cognitive-client/          # Python SDK (sync + async)
-├── tests/                     # 80+ pytest
-├── scripts/                   # seed_demo.py, delegate_deepseek.py, consult_deepseek.py
-├── nginx/                     # nginx.conf для production TLS
-├── docker-compose.yml         # Локальная разработка
-├── docker-compose.prod.yml    # Production (с nginx + TLS)
+├── tests/                     # pytest suite
+├── scripts/                   # seed_demo.py, stress_test.py, backups, deploy helpers
+├── nginx/                     # nginx.conf for production TLS
+├── docker-compose.yml         # Local development
+├── docker-compose.prod.yml    # Production (nginx + TLS)
 ├── Dockerfile
 ├── requirements.txt
 ├── .env.example
-├── README.md                  # ← вы здесь
-├── DEMO.md                    # Пошаговая инструкция демо
-├── DEPLOY.md                  # Runbook production-деплоя
-├── roadmap.md                 # План развития
-└── CLAUDE.md                  # Заметки для AI-помощников
+├── README.md                  # ← you are here
+├── README.ru.md               # Russian README
+├── DEMO.md                    # Step-by-step demo walkthrough
+├── DEPLOY.md                  # Production deployment runbook
+├── roadmap.md                 # Development plan
+└── CLAUDE.md                  # Notes for AI assistants
 ```
 
-## Вклад в проект
+## For customers in Russia
 
-PR'ы приветствуются. Перед PR:
-1. `docker exec cognitive_api python -m pytest tests/` должен быть зелёным
-2. Новый код покрыт тестами
-3. Изменение API → обновить `DEMO.md`
-4. Изменение архитектуры → обновить `roadmap.md`
+- Billing via **YooKassa** (`YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY`) alongside Stripe; Pro tier is 490 ₽/month.
+- **152-FZ** personal-data compliance pack: DPA template and FSTEC order 21 (UZ-3 level) checklist, see [docs/compliance-152fz.md](docs/compliance-152fz.md) and [docs/dpa-template-152fz.md](docs/dpa-template-152fz.md).
+- Russia-resident LLM adapters (GigaChat, YandexGPT) for vision analysis without exporting data.
+- Legacy Cyrillic domain alias: https://mcp.ии-память.рф.
 
-## Лицензия
+## Contributing
 
-MIT — см. [LICENSE](LICENSE).
+PRs are welcome. Before opening one:
+1. `docker exec cognitive_api python -m pytest tests/` must be green
+2. New code is covered by tests
+3. API changes → update `DEMO.md`
+4. Architecture changes → update `roadmap.md`
 
-## Благодарности
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-- [DeepSeek](https://www.deepseek.com/) — основной LLM
-- [pgvector](https://github.com/pgvector/pgvector) — векторный поиск в Postgres
-- [Redis Stack](https://redis.io/docs/stack/) — KNN с TAG-фильтрами
-- [fastembed](https://github.com/qdrant/fastembed) — лёгкие эмбеддинги без GPU
-- [FastMCP](https://github.com/jlowin/fastmcp) — MCP-сервер на Python
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Acknowledgements
+
+- [DeepSeek](https://www.deepseek.com/) — primary LLM
+- [pgvector](https://github.com/pgvector/pgvector) — vector search in Postgres
+- [Redis Stack](https://redis.io/docs/stack/) — KNN with TAG filters
+- [fastembed](https://github.com/qdrant/fastembed) — lightweight embeddings without a GPU
+- [FastMCP](https://github.com/jlowin/fastmcp) — MCP server in Python
