@@ -102,6 +102,8 @@ async def search_records(pool, query: str, owner_user_id: str | None,
     terms = search_terms(query)
     # Match history but return the head. An older "done" must not beat a newer
     # reopened checkpoint merely because it repeated the query words more often.
+    # Keep each term count behind a materialization barrier: with stale table
+    # statistics an inlined score filter can run again for every source row.
     candidates = r"""
     , searchable AS MATERIALIZED (
         SELECT e.id, to_tsvector('russian', e.raw_payload::text) AS ru,
@@ -113,7 +115,7 @@ async def search_records(pool, query: str, owner_user_id: str | None,
           AND (e.timestamp >= NOW() - ($3::int * INTERVAL '1 day')
                OR e.raw_payload #>> '{checkpoint,schema_version}' = '1'
                OR e.raw_payload->>'task' ~ '^CHECKPOINT [^ ]+ \[[^@]+@[^]]+\]')
-    ), scores AS (
+    ), scores AS MATERIALIZED (
         SELECT s.id, s.domain, s.task_key,
           (SELECT count(*) FROM unnest($4::text[]) AS t(term)
             WHERE c.ru @@ plainto_tsquery('russian', term)
