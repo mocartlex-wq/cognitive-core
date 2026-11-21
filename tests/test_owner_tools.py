@@ -208,6 +208,15 @@ async def test_real_snapshot_roundtrip_preserves_manual_body_and_old_restore_can
     await registry.execute("UPDATE l4_snapshots SET snapshot_hash=$1 WHERE id=$2",
                            hashlib.sha256(objects[key]).hexdigest(), snapshot)
     await registry.execute("DELETE FROM l3_tools_registry WHERE id=$1", card["id"])
+    monkeypatch.setattr(owner_security, "resolve_owner_user_id", AsyncMock(return_value=str(uuid4())))
+    assert (await memory.restore_snapshot(snapshot, header_request()))["tools_count"] == 0
+    monkeypatch.setattr(owner_security, "resolve_owner_user_id", AsyncMock(return_value=owner.user_id))
+    outsider = str(uuid4())
+    await registry.execute("""INSERT INTO l3_tools_registry(id, domain, tool_name, tool_type, owner_user_id)
+                           VALUES ($1,'another-domain','Foreign ordinary tool','service',$2::uuid)""", card["id"], outsider)
+    assert (await memory.restore_snapshot(snapshot, header_request()))["tools_count"] == 0
+    assert (await shared_tools.read_shared_tool(card["id"], outsider))["name"] == "Foreign ordinary tool"
+    await registry.execute("DELETE FROM l3_tools_registry WHERE id=$1 AND owner_user_id=$2::uuid", card["id"], outsider)
     result = await memory.restore_snapshot(snapshot, header_request())
     assert result["status"] == "restored" and result["tools_count"] == 1
     assert await shared_tools.read_shared_tool(card["id"], owner.user_id) == card

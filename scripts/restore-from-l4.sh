@@ -227,7 +227,9 @@ SQL
         | while IFS= read -r row; do
             : >> "$TL_SQL"
             # Encode the full JSON record once so multiline instructions and quotes remain data.
-            encoded=$(printf '%s' "$row" | jq -Rr '@base64')
+            encoded=$(printf '%s' "$row" | jq -r '
+                def unpack: if type == "string" then (. as $s | try fromjson catch $s) else . end;
+                .config_schema |= unpack | .usage_patterns |= unpack | @base64')
             cat >> "$TL_SQL" <<SQL
 WITH source AS (SELECT convert_from(decode('$encoded', 'base64'), 'UTF8')::jsonb AS t)
 INSERT INTO l3_tools_registry
@@ -235,7 +237,8 @@ INSERT INTO l3_tools_registry
      config_schema, usage_patterns, version, effective_from, owner_managed, embedding)
 SELECT (t->>'id')::uuid, '$OWNER'::uuid, t->>'domain', t->>'tool_name',
        COALESCE(t->>'tool_type', 'service'), COALESCE(t->>'description', ''),
-       COALESCE(t->>'config_schema', '{}')::jsonb, COALESCE(t->>'usage_patterns', '{}')::jsonb,
+       COALESCE(NULLIF(t->'config_schema', 'null'::jsonb), '{}'::jsonb),
+       COALESCE(NULLIF(t->'usage_patterns', 'null'::jsonb), '{}'::jsonb),
        COALESCE((t->>'version')::integer, 1), COALESCE((t->>'effective_from')::timestamptz, now()),
        t->'owner_managed' IS NOT DISTINCT FROM 'true'::jsonb,
        CASE WHEN t->'owner_managed' = 'true'::jsonb THEN (t->>'embedding')::vector END

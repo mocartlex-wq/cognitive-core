@@ -388,6 +388,10 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
 
                 restored_tools = 0
                 for t in data.get("tools", []):
+                    managed = t.get("owner_managed") is True
+                    if managed and (not t.get("owner_user_id") or
+                                    (caller_owner and str(t["owner_user_id"]) != str(caller_owner))):
+                        continue
                     restored = await conn.fetchval(
                         """
                         INSERT INTO l3_tools_registry
@@ -404,6 +408,8 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
                             owner_user_id = COALESCE(l3_tools_registry.owner_user_id,
                                                      EXCLUDED.owner_user_id)
                         WHERE NOT l3_tools_registry.owner_managed
+                          AND (NOT EXCLUDED.owner_managed OR l3_tools_registry.owner_user_id IS NULL
+                               OR l3_tools_registry.owner_user_id = EXCLUDED.owner_user_id)
                         RETURNING id
                         """,
                         UUID(t["id"]), t["domain"], t.get("tool_name", ""),
@@ -412,7 +418,7 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
                         json.dumps(_parse_jsonb(t.get("usage_patterns", {}))),
                         t.get("version", 1), _parse_ts(t.get("effective_from")),
                         t.get("owner_user_id") or caller_owner,
-                        t.get("owner_managed") is True, t.get("embedding") if t.get("owner_managed") is True else None,
+                        managed, t.get("embedding") if managed else None,
                     )
                     restored_tools += int(restored is not None)
 
