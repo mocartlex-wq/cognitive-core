@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.models.tools import ToolRegistryInput
 from app.security.auth import verify_api_key
 from app.security.owner import resolve_owner_user_id
+from app.services.shared_tools import read_shared_tool
 from app.services.tools import deprecate_tool, get_active_tools, register_tool
 
 router = APIRouter(prefix="/tools", tags=["tools"])
@@ -35,6 +36,18 @@ async def list_tools(domain: str, request: Request):
     owner = await _authorize(request)
     tools = await get_active_tools(domain, owner_user_id=owner)
     return {"domain": domain, "count": len(tools), "tools": tools}
+
+
+@router.get("/{tool_id}")
+async def get_tool(tool_id: UUID, request: Request):
+    """Read the complete shared tool card within the authenticated owner's catalog."""
+    owner = await _authorize(request)
+    if not owner:
+        raise HTTPException(403, "Требуется подключение агента с владельцем")
+    card = await read_shared_tool(tool_id, owner)
+    if card is None:
+        raise HTTPException(404, "Средство не найдено")
+    return card
 
 
 @router.delete("/{tool_id}")

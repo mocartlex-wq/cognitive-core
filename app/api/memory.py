@@ -479,6 +479,7 @@ async def run_cleanup(request: Request):
     ни разу не анализировался (реальная потеря: июнь 2026, ~2 недели событий).
     Для необработанных действует страховочный потолок retention_unprocessed_days,
     чтобы брошенные домены не копились вечно.
+    Записи с комментариями владельца остаются доступны по постоянной ссылке.
     """
     await verify_api_key(request)
 
@@ -489,6 +490,7 @@ async def run_cleanup(request: Request):
             DELETE FROM l1_raw_events
             WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
               AND processed_to_l2 = TRUE
+              AND NOT has_owner_comment
             """,
             str(settings.retention_days),
         )
@@ -499,6 +501,7 @@ async def run_cleanup(request: Request):
             DELETE FROM l1_raw_events
             WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
               AND processed_to_l2 = FALSE
+              AND NOT has_owner_comment
             """,
             str(settings.retention_unprocessed_days),
         )

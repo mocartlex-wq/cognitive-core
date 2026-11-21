@@ -76,6 +76,10 @@ TOOLS: list[dict[str, Any]] = [
                     "Предметная область = проект (cognitive_core, ai_crm, deploy…), "
                     "не имя агента и не test_/probe_. Новый домен — только для нового проекта.")},
                 "task": {"type": "string", "description": "Что было сделано"},
+                "session_id": {
+                    "type": "string", "minLength": 1, "maxLength": 160,
+                    "description": "ID рабочего чата, если клиент его знает. Для контрольной точки используется checkpoint.session_id.",
+                },
                 "result": {"type": "string", "description": "Каков результат", "default": ""},
                 "feedback": {"type": "string", "description": "positive / negative / neutral", "default": ""},
                 "lessons": {"type": "string", "description": "Какие уроки извлечены", "default": ""},
@@ -94,6 +98,7 @@ TOOLS: list[dict[str, Any]] = [
             "свежие записи владельца и последние контрольные точки задач независимо от возраста. "
             "Для статуса задачи учитывайте task_state и дату наблюдения; L3 — общий опыт, не текущий статус. "
             "Полный источник и его преемник доступны через cognitive_read_record по id. "
+            "Полный текст карточки из frame.tools открывается через cognitive_read_tool. "
             "domain НЕОБЯЗАТЕЛЕН: без него поиск идёт по доменам знаний "
             "(work_journal, infra_lessons, skills, setup_log, deploy) — там "
             "выводы, а не переписка. Указывайте домен, только если точно знаете "
@@ -140,6 +145,15 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"domain": {"type": "string"}},
             "required": ["domain"],
+        },
+    },
+    {
+        "name": "cognitive_read_tool",
+        "description": "Открыть по UUID полную карточку инструмента или навыка владельца, включая сохранённые инструкции. ID возвращают frame.tools и cognitive_tools.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tool_id": {"type": "string", "format": "uuid"}},
+            "required": ["tool_id"],
         },
     },
     {
@@ -1126,6 +1140,11 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         body = {"source_agent": agent_id, "domain": domain, "payload": payload}
         if a.get("checkpoint") is not None:
             payload["checkpoint"] = a["checkpoint"]
+        elif a.get("session_id") is not None:
+            session_id = a["session_id"]
+            if not isinstance(session_id, str) or not 1 <= len(session_id.strip()) <= 160:
+                raise ValueError("Invalid working chat ID")
+            payload["session_id"] = session_id.strip()
         if a.get("idempotency_key") is not None:
             body["idempotency_key"] = a["idempotency_key"]
         return await _call_self(request, "POST", "/events", json_body=body, timeout_s=6.0)
@@ -1162,7 +1181,20 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             "workspace": a.get("workspace"),
         }
         params = {"grouped": "true"} if a.get("grouped", True) else None
-        return await _call_self(request, "POST", "/operative/query", json_body=body, params=params, timeout_s=18.0)
+        result = await _call_self(request, "POST", "/operative/query", json_body=body, params=params, timeout_s=18.0)
+        # A saved skill can contain a complete script. Keep discovery lightweight
+        # across both grouped and flat clients. Exact reads return the original.
+        frame = result.get("frame") or {}
+        for rows in (result.get("results") or [], frame.get("tools") or [], frame.get("all") or []):
+            for item in rows:
+                usage = item.get("usage")
+                if item.get("record_type") != "tool" or not isinstance(usage, dict) or not usage.get("resource_kind"):
+                    continue
+                instructions = usage.get("instructions")
+                if isinstance(instructions, str) and len(instructions) > 1200:
+                    item["usage"] = {**usage, "instructions": instructions[:1200], "instructions_truncated": True}
+                    item["read_tool"] = "cognitive_read_tool"
+        return result
 
     if name == "cognitive_list":
         params = {"limit": min(max(int(a.get("limit", 50)), 1), 200)}
@@ -1172,6 +1204,11 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
 
     if name == "cognitive_tools":
         return await _call_self(request, "GET", "/tools", params={"domain": a.get("domain", "")}, timeout_s=4.0)
+
+    if name == "cognitive_read_tool":
+        from uuid import UUID
+        tool_id = UUID(str(a.get("tool_id", "")))
+        return await _call_self(request, "GET", f"/tools/{tool_id}", timeout_s=6.0)
 
     if name == "cognitive_consolidate":
         level = a.get("level", "daily")
@@ -1758,7 +1795,9 @@ async def _handle_jsonrpc(request: Request, raw: Any) -> dict:
                 _dispatch_tool(request, tool_name, tool_args), timeout=wait_for_to,
             )
             return _ok(req_id, {
-                "content": [{"type": "text", "text": _format_text(result, full=tool_name == "cognitive_read_record")}],
+                "content": [{"type": "text", "text": _format_text(
+                    result, full=tool_name in {"cognitive_read_record", "cognitive_read_tool"},
+                )}],
                 "structuredContent": result,
                 "isError": isinstance(result, dict) and "_error" in result,
             })
@@ -1898,7 +1937,7 @@ def _format_text(data: Any, *, full: bool = False) -> str:
         text = str(data)
     if full or len(text) <= 8000:
         return text
-    return text[:8000] + "\n[Preview truncated. Full response is in structuredContent; read a source by ID with cognitive_read_record.]"
+    return text[:8000] + "\n[Preview truncated. Full response is in structuredContent. Open a memory event with cognitive_read_record or a tool card with cognitive_read_tool.]"
 
 
 async def _mark_mcp_connected(request: Request) -> None:

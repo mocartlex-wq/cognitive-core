@@ -105,7 +105,17 @@ async def ingest_event(payload: RawEventInput, request: Request):
 async def get_record(record_id: UUID, request: Request):
     await verify_api_key(request)
     owner = await resolve_owner_user_id(request)
-    record = await read_record(await get_pool(), str(record_id), owner)
+    pool = await get_pool()
+    record = await read_record(pool, str(record_id), owner)
     if record is None:
         raise HTTPException(404, "Memory record not found")
+    comments = await pool.fetch(
+        """SELECT id, text, created_at FROM owner_memory_comments
+           WHERE record_id=$1 AND owner_user_id=$2::uuid
+           ORDER BY created_at DESC, id DESC LIMIT 11""",
+        record_id, owner,
+    )
+    if comments:
+        record["owner_comments"] = [dict(row) for row in comments[:10]]
+        record["more_owner_comments"] = len(comments) > 10
     return record

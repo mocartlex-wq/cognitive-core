@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Память проекта — Cognitive Core</title>
+  <link rel="stylesheet" href="/static/shared.css?v=20260520j">
+  <link rel="stylesheet" href="/static/glass.css?v=20260613">
+  <link rel="stylesheet" href="/static/memory.css?v=1">
+  <script src="/static/head-bootstrap.js?v=20260522"></script>
+  <script src="/static/memory.js?v=1" defer></script>
+</head>
+<body class="glass-mode">
+  <main class="memory-page">
+    <nav class="links" aria-label="Личный кабинет">
+      <a href="/ui/profile">Мой профиль</a>
+      <a href="/ui/shared-tools">Инструменты и навыки</a>
+    </nav>
+    <h1>Память проекта</h1>
+    <section id="list-view">
+      <form id="filters" class="panel" method="get" action="/ui/memory" role="search">
+        <label for="q">Тема или текст записи</label>
+        <div class="search-row">
+          <input type="search" id="q" name="q" maxlength="200">
+          <button class="primary">Найти</button>
+        </div>
+        <details id="filter-options">
+          <summary>Фильтры</summary>
+          <div class="filter-grid">
+            <label>Проект<input name="domain" maxlength="64"></label>
+            <label>Имя или ID автора<input name="agent" maxlength="160"></label>
+            <label>ID чата или сессии<input name="session_id" maxlength="200"></label>
+            <label>UUID записи<input name="record_id" spellcheck="false" autocapitalize="none"
+              pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"></label>
+          </div>
+        </details>
+        <a id="clear" href="/ui/memory" hidden>Сбросить фильтры</a>
+      </form>
+      <h2>Записи</h2>
+      <div id="list-status" role="status"></div>
+      <ul id="records" class="records"></ul>
+      <nav class="links" aria-label="Страницы записей">
+        <a id="first-page" hidden>К началу списка</a>
+        <a id="next-page" hidden>Следующая страница →</a>
+      </nav>
+    </section>
+    <section id="detail-view" hidden>
+      <a id="back-list" href="/ui/memory">← К списку записей</a>
+      <div id="detail-status" role="status"></div>
+      <article id="detail" class="panel" hidden>
+        <h2 id="record-title"></h2>
+        <dl id="metadata"></dl>
+        <div class="links">
+          <a id="permalink">Постоянная ссылка</a>
+          <button type="button" id="copy">Скопировать ссылку</button>
+          <span id="copy-status" role="status"></span>
+        </div>
+        <div id="body-fields"></div>
+      </article>
+      <section id="discussion" class="panel" hidden>
+        <h2>Комментарии владельца</h2>
+        <form id="compose">
+          <label for="comment">Комментарий к этой записи</label>
+          <textarea id="comment" required maxlength="4000" rows="3"></textarea>
+          <div class="links">
+            <button class="primary" id="send">Добавить комментарий</button>
+            <span id="send-status" role="status"></span>
+          </div>
+        </form>
+        <div id="comments-status" role="status"></div>
+        <ol id="comments" class="comments"></ol>
+        <button type="button" id="more-comments" hidden>Показать ещё комментарии</button>
+      </section>
+    </section>
+  </main>
+</body>
+</html>
