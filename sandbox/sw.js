@@ -9,7 +9,7 @@
  * версия переживёт исправление на сервере, и починить её со стороны сервера
  * будет нечем. Поэтому кэш здесь — только запасной выход при отсутствии сети.
  */
-const VERSION = 'cc-v1';
+const VERSION = 'cc-v2';
 const SHELL = 'cc-shell-' + VERSION;
 const OFFLINE_URL = '/static/offline.html';
 const PRECACHE = [
@@ -32,7 +32,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     const names = await caches.keys();
-    await Promise.all(names.filter((n) => n !== SHELL).map((n) => caches.delete(n)));
+    await Promise.all(names.filter((n) => n.startsWith('cc-shell-') && n !== SHELL).map((n) => caches.delete(n)));
     await self.clients.claim();
   })());
 });
