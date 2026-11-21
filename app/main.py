@@ -270,6 +270,8 @@ _PAGE_ACTIVE = {
     "dashboard.html": "rooms",
     "webchat.html": "chat",
     "profile.html": "profile",
+    "memory.html": "profile",
+    "shared-tools.html": "profile",
 }
 
 
@@ -425,11 +427,15 @@ app.include_router(mcp_router)
 
 # Новые роутеры (2026-05-17): аккаунты + magic-link авторизация
 from app.api.auth import router as auth_router
+from app.api.owner_tools import router as owner_tools_router
 from app.api.push import router as push_router
 from app.api.user import router as user_router
+from app.api.user_memory import router as user_memory_router
 
 app.include_router(auth_router)
 app.include_router(user_router)
+app.include_router(user_memory_router)
+app.include_router(owner_tools_router)
 app.include_router(push_router)
 
 # Frontend error reporter (2026-05-20): /api/errors POST/GET
@@ -530,6 +536,16 @@ async def room_page_legacy():
 async def profile_page():
     """Профиль — мои комнаты, помощники, устройства."""
     return _html("profile.html")
+
+
+@app.get("/ui/memory")
+async def owner_memory_page():
+    return _html("memory.html")
+
+
+@app.get("/ui/shared-tools")
+async def owner_tools_page():
+    return _html("shared-tools.html")
 
 
 @app.get("/sw.js")

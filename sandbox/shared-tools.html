@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Инструменты и навыки · Cognitive Core</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/shared.css">
+  <style>
+    .catalog-shell { max-width: 1120px; margin: 0 auto; padding: 24px clamp(18px,4vw,48px) 96px }
+    .crumb { font-size: .92rem; color: var(--dim); text-decoration: none }
+    .crumb:hover { color: var(--text) }
+    .heading { display: flex; justify-content: space-between; align-items: center; gap: 22px; margin: 25px 0 32px }
+    h1 { font-size: clamp(1.75rem,4vw,2.8rem); letter-spacing: -.04em; line-height: 1.16 }
+    .heading p { margin-top: 10px }
+    .muted, .scope-note { color: var(--dim) }
+    .catalog-shell button, dialog button { font: inherit; color: inherit; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 15px; background: var(--surface); cursor: pointer }
+    .catalog-shell .primary, dialog .primary { background: #84bdfd; color: #10233b; border-color: transparent; font-weight: 650; white-space: nowrap }
+    button:disabled { opacity: .5; cursor: default }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px }
+    input, select, textarea { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 7px; font: inherit; background: var(--surface2); color: var(--text) }
+    label { display: grid; gap: 5px; font-weight: 560 }
+    #find { display: flex; align-items: end; gap: 10px; max-width: 640px; margin-bottom: 22px }
+    #find label { flex: 1 }
+    #list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,275px),1fr)); gap: 14px }
+    #list button { display: grid; align-content: start; gap: 10px; text-align: left; padding: 18px 20px; border-color: var(--border); overflow-wrap: anywhere }
+    #list button:hover { border-color: var(--accent) }
+    .meta { color: var(--dim); font-size: .82rem; font-weight: 550 }
+    .resource-name { font-size: 1.11rem; line-height: 1.35 }
+    .summary { color: var(--dim); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden }
+    #status { margin: 8px 0 }
+    #more { margin-top: 18px }
+    dialog { box-sizing: border-box; margin: auto; width: min(620px,calc(100vw - 24px)); max-height: 90vh; padding: clamp(18px,4vw,30px); border: 1px solid var(--border-strong); border-radius: 14px; color: var(--text); background: var(--surface); overflow-y: auto }
+    dialog::backdrop { background: rgb(7 12 20 / 75%) }
+    .dialog-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 18px }
+    h2, h3, .detail-text { overflow-wrap: anywhere }
+    h2 { font-size: 1.45rem; line-height: 1.3 }
+    h3 { font-size: 1rem; margin: 16px 0 6px }
+    #editor { display: grid; gap: 13px }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+    textarea { resize: vertical }
+    .actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px }
+    .notice { color: var(--yellow); white-space: pre-wrap }
+    .detail-text { white-space: pre-wrap }
+    #detail-body a, #login { color: var(--accent); text-underline-offset: .18em }
+    #detail pre { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: .92rem }
+    [hidden] { display: none !important }
+    @media (max-width: 560px) { .heading { align-items: start; flex-direction: column } .fields { grid-template-columns: 1fr } }
+  </style>
+  <script defer src="/static/shared-tools.js"></script>
+</head>
+<body>
+  <main class="catalog-shell">
+    <a class="crumb" href="/ui/profile">← Личный кабинет</a>
+    <header class="heading">
+      <div><h1>Инструменты и навыки</h1><p class="muted">Ресурсы, к которым могут обращаться ваши агенты через общую память.</p></div>
+      <button type="button" class="primary" id="add" disabled>Добавить ресурс</button>
+    </header>
+    <form id="find"><label>Поиск<input id="query" type="search" maxlength="300" placeholder="Название, назначение или домен"></label><button>Найти</button></form>
+    <p id="status" class="muted" role="status"></p>
+    <a id="login" href="/ui/login" hidden>Войти в кабинет</a>
+    <section id="list" aria-label="Карточки ресурсов"></section>
+    <button id="more" type="button" hidden>Показать ещё</button>
+  </main>
+  <dialog id="detail" aria-labelledby="detail-title">
+    <header class="dialog-head"><h2 id="detail-title">Карточка ресурса</h2><button type="button" data-close>Закрыть</button></header>
+    <div id="detail-body"></div>
+  </dialog>
+  <dialog id="edit" aria-labelledby="edit-title">
+    <header class="dialog-head"><h2 id="edit-title">Добавить ресурс</h2><button data-close type="button">Закрыть</button></header>
+    <form id="editor">
+      <label>Название<input name="name" required maxlength="128" autocomplete="off"></label>
+      <div class="fields">
+        <label>Вид<select name="kind"><option value="skill">Навык</option><option value="script">Скрипт</option><option value="prompt">Промпт</option><option value="api">API</option><option value="library">Библиотека</option><option value="service">Сервис</option></select></label>
+        <label>Где применяется<select name="scope"><option value="portable">У любого агента</option><option value="local">На определённом ПК</option><option value="service">В подключённом сервисе</option></select></label>
+      </div>
+      <label>Для чего нужен<textarea name="description" rows="2" required maxlength="3000"></textarea></label>
+      <label>Инструкция или полный текст<textarea name="instructions" rows="7" required maxlength="64000" placeholder="Вставьте текст навыка, скрипта или порядок использования."></textarea></label>
+      <label>Путь или ссылка <input name="location" maxlength="1500" placeholder="Необязательно"></label>
+      <p class="muted" id="scope-note">Для использования на другом компьютере сохраните текст или укажите доступный агенту адрес.</p>
+      <p class="notice" id="edit-status" role="status"></p>
+      <div class="actions"><button type="submit" class="primary" id="save">Сохранить</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

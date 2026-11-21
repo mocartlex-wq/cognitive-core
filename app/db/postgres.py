@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS l1_raw_events (
     -- IF NOT EXISTS их не трогает; расхождение закрывается для новых.
     owner_user_id UUID
 );
+ALTER TABLE l1_raw_events ADD COLUMN IF NOT EXISTS has_owner_comment boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS idx_l1_timestamp ON l1_raw_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_l1_domain ON l1_raw_events(domain, timestamp);
 CREATE INDEX IF NOT EXISTS idx_l1_agent ON l1_raw_events(source_agent);
@@ -104,6 +105,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_l3_tools_unique_active
     WHERE effective_to IS NULL;
 
 -- pgvector колонка для tools
+ALTER TABLE l3_tools_registry ADD COLUMN IF NOT EXISTS owner_managed boolean NOT NULL DEFAULT false;
 ALTER TABLE l3_tools_registry ADD COLUMN IF NOT EXISTS embedding vector(384);
 CREATE INDEX IF NOT EXISTS idx_l3_tools_hnsw ON l3_tools_registry
     USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);

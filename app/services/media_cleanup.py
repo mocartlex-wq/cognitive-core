@@ -79,6 +79,8 @@ async def cleanup_expired_media() -> dict:
             SELECT id::text AS id, raw_payload
               FROM l1_raw_events
              WHERE domain = 'media_analysis'
+               AND raw_payload ? 'media_id'
+               AND NOT has_owner_comment
                AND timestamp < $1
              ORDER BY timestamp ASC
              LIMIT 100
@@ -111,12 +113,13 @@ async def cleanup_expired_media() -> dict:
 
             # v2: HARD-DELETE L1 row — без него ничего не значит
             async with pool.acquire() as conn:
-                await conn.execute(
-                    "DELETE FROM l1_raw_events WHERE id = $1::uuid",
+                result = await conn.execute(
+                    "DELETE FROM l1_raw_events WHERE id = $1::uuid AND NOT has_owner_comment",
                     row["id"],
                 )
-            stats["rows_deleted"] += 1
-            stats["cleaned"] += 1
+            if result == "DELETE 1":
+                stats["rows_deleted"] += 1
+                stats["cleaned"] += 1
         except Exception as e:
             stats["errors"].append(f"{row['id']}: {type(e).__name__}: {e}")
 
