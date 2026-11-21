@@ -234,3 +234,43 @@ async def test_real_snapshot_roundtrip_preserves_manual_body_and_old_restore_can
     assert result["tools_count"] == 1
     assert await shared_tools.read_shared_tool(card["id"], owner.user_id) == card
     assert not await registry.fetchval("SELECT owner_managed FROM l3_tools_registry WHERE id=$1", ordinary["id"])
+
+@pytest.mark.asyncio
+async def test_agent_exact_registration_matches_catalog_without_changing_cabinet(registry, monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.api import tools as routes
+    from app.services import tools
+
+    owner, outsider, rid = (uuid4() for _ in range(3))
+    usage = {"local_path": "C:/qa/script.js", "sha256": "a"*64,
+             "arbitrary": [0, False, None, {"source": "Отчёт\r\n\"" }],
+             "credentials": {"client_secret": "private-placeholder"},
+             "instructions": "Отступы\r\n\tГотово\r\n"}
+    config = {"properties": {"mode": {"enum":["fast", 2]}, "api_key":{"type":"string", "default":"private-default"}}}
+    observed = datetime.now(timezone.utc)
+    await registry.execute("""INSERT INTO l3_tools_registry
+        (id, domain, tool_name, tool_type, description, usage_patterns, config_schema, version, created_at, owner_user_id)
+        VALUES ($1,'legacy','Tool "A"','script','Original',$2,$3,6,$4,$5)""",
+        rid, json.dumps(usage), json.dumps(config), observed, owner)
+    monkeypatch.setattr(tools, "get_pool", AsyncMock(return_value=registry))
+    monkeypatch.setattr(routes, "_authorize", AsyncMock(return_value=str(owner)))
+    entry, = (await routes.list_tools("legacy", header_request()))["tools"]
+    result = await routes.get_tool(rid, header_request())
+    assert set(entry) == {"id", "domain", "description", "tool_name", "tool_type", "config_schema",
+                          "usage_patterns", "version", "created_at", "read_tool"}
+    assert {key: result[key] for key in entry} == entry
+    assert entry["read_tool"] == "cognitive_read_tool"
+    assert result["version"] == 6 and result["created_at"] == observed
+    assert result["location"] == usage["local_path"] and result["instructions"] == usage["instructions"]
+    assert json.loads(result["usage_patterns"])["arbitrary"] == usage["arbitrary"]
+    assert json.loads(result["config_schema"])["properties"]["api_key"]["type"] == "string"
+    assert "private-placeholder" not in str(result) and "private-default" not in str(result)
+    cabinet = await shared_tools.read_shared_tool(rid, str(owner))
+    assert cabinet["instructions"] == result["instructions"]
+    assert "config_schema" not in cabinet and "usage_patterns" not in cabinet
+    for viewer, target in ((owner, uuid4()), (outsider, rid)):
+        monkeypatch.setattr(routes, "_authorize", AsyncMock(return_value=str(viewer)))
+        with pytest.raises(HTTPException) as missing:
+            await routes.get_tool(target, header_request())
+        assert missing.value.status_code == 404

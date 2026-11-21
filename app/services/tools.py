@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 from app.db.postgres import get_pool
 from app.models.tools import ToolRegistryInput
+from app.services.shared_tools import REGISTRY_COLUMNS
 
 
 class OwnerManagedToolConflict(ValueError):
@@ -67,9 +68,8 @@ async def get_active_tools(domain: str, owner_user_id: str | None = None) -> lis
     async with pool.acquire() as conn:
         if owner_user_id is None:
             rows = await conn.fetch(
-                """
-                SELECT id, domain, tool_name, tool_type, description,
-                       config_schema, usage_patterns, version, created_at
+                f"""
+                SELECT {REGISTRY_COLUMNS}
                 FROM l3_tools_registry
                 WHERE domain = $1 AND effective_to IS NULL
                 ORDER BY tool_name
@@ -78,9 +78,8 @@ async def get_active_tools(domain: str, owner_user_id: str | None = None) -> lis
             )
         else:
             rows = await conn.fetch(
-                """
-                SELECT id, domain, tool_name, tool_type, description,
-                       config_schema, usage_patterns, version, created_at
+                f"""
+                SELECT {REGISTRY_COLUMNS}
                 FROM l3_tools_registry
                 WHERE domain = $1 AND effective_to IS NULL
                   AND owner_user_id = $2::uuid
