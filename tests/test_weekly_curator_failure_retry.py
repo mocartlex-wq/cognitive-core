@@ -134,14 +134,39 @@ async def test_retry_cycle_keeps_domain_when_curator_still_down(fake_redis):
     members.add("yurist")
     still_down = {"status": "no_buffers", "curator_errors": [{"owner": "o", "error": "APIConnectionError"}]}
 
+    audit = AsyncMock()
     with (
         patch.object(worker, "get_redis", new=AsyncMock(return_value=r)),
         patch.object(worker, "weekly_consolidate", new=AsyncMock(return_value=still_down)),
-        patch.object(worker, "log_audit", new=AsyncMock()),
+        patch.object(worker, "log_audit", new=audit),
     ):
         await worker.run_weekly_retry_cycle()
 
     assert members == {"yurist"}
+    assert audit.await_args.kwargs["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_backstop_keeps_locked_retry_and_reports_nested_failure(fake_redis):
+    redis, members = fake_redis
+    members.update({"locked", "failed", "recovered"})
+    outcomes = {
+        "locked": {"status": "lock_held"},
+        "failed": {"owners": [{"status": "error"}]},
+        "recovered": {"status": "consolidated"},
+    }
+    full = {"status": "ran", "failed_domains": ["recovered", "never_retried"]}
+    with (
+        patch.object(worker, "get_redis", new=AsyncMock(return_value=redis)),
+        patch.object(worker, "weekly_consolidate", new=AsyncMock(side_effect=outcomes.__getitem__)),
+        patch.object(worker, "run_weekly_cycle_if_due", new=AsyncMock(return_value=full)),
+        patch.object(worker, "log_audit", new=AsyncMock()),
+    ):
+        report = await worker.weekly_backstop_report(5)
+    assert members == {"failed", "locked"}
+    assert report["retry_failed"] == ["failed"]
+    assert report["retry_deferred"] == ["locked"]
+    assert report["unresolved"] == ["failed", "locked", "never_retried"]
 
 
 GOOD_RUN = {"results": [{"domain": "a", "result": {"status": "consolidated"}}]}
@@ -160,6 +185,12 @@ QUIET_RUN = {"results": [
 
 def test_run_produced_quiet_week_without_failures_counts():
     assert worker._weekly_run_produced(QUIET_RUN)
+
+
+def test_partial_run_with_consolidated_owner_counts_for_full_run_age():
+    result = {"status": "partial_error", "owners": [{"status": "error"}, {"status": "consolidated"}]}
+    assert worker.weekly_failed_domains([{"domain": "partial", "result": result}]) == ["partial"]
+    assert worker._weekly_run_produced({"results": [{"domain": "partial", "result": result}]})
 
 
 def test_run_produced_failures_with_only_quiet_domains_does_not_count():
@@ -194,7 +225,7 @@ async def test_if_due_runs_when_last_full_run_is_old_or_missing():
             patch.object(worker, "run_weekly_cycle", new=run),
         ):
             out = await worker.run_weekly_cycle_if_due(max_age_days=5)
-        assert out == {"status": "ran", "domains": 2, "failed": 1}
+        assert out == {"status": "ran", "domains": 2, "failed": 1, "failed_domains": ["b"]}
         run.assert_awaited_once()
 
 
