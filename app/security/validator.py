@@ -58,10 +58,19 @@ def _validate_daily(data: dict) -> dict:
 
 
 def _validate_weekly(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError("Weekly response must be an object")
     if "new_or_updated" not in data and "deprecated_l3_ids" not in data:
         raise ValueError("Weekly response requires 'new_or_updated' or 'deprecated_l3_ids'")
-    if "tools" in data and not isinstance(data["tools"], list):
-        raise ValueError("'tools' must be a list")
+    for field in ("new_or_updated", "deprecated_l3_ids", "tools"):
+        if field in data and not isinstance(data[field], list):
+            raise ValueError(f"'{field}' must be a list")
+    for item in data.get("new_or_updated", []):
+        if not isinstance(item, dict) or not isinstance(item.get("content"), dict) or not item["content"]:
+            raise ValueError("Weekly knowledge proposal requires a content object")
+    for item in data.get("tools", []):
+        if not isinstance(item, dict) or not isinstance(item.get("tool_name"), str) or not item["tool_name"].strip():
+            raise ValueError("Weekly tool proposal requires a tool_name")
     return data
 
 

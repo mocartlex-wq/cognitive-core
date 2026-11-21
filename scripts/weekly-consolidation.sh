@@ -19,26 +19,22 @@ mkdir -p "$LOGDIR"
 [ -f "$LOGFILE" ] || touch "$LOGFILE"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-log() { echo "[$(ts)] $*" | tee -a "$LOGFILE"; }
+# systemd already appends stdout to the log. Mirror it only for manual runs.
+if [[ ! /dev/stdout -ef "$LOGFILE" ]]; then
+  exec > >(tee -a "$LOGFILE") 2>&1
+fi
 
 MAX_AGE_DAYS="${WEEKLY_MAX_AGE_DAYS:-5}"
-log "weekly start (max_age_days=$MAX_AGE_DAYS)"
+echo "[$(ts)] weekly start (max_age_days=$MAX_AGE_DAYS)"
 
-OUT=$(docker exec cognitive_api python -c "
-import asyncio, json
-from app.worker import run_weekly_cycle_if_due, run_weekly_retry_cycle
-async def main():
-    full = await run_weekly_cycle_if_due(max_age_days=$MAX_AGE_DAYS)
-    retry = await run_weekly_retry_cycle()
-    failed = [r['domain'] for r in retry if 'error' in r]
-    return {'full': full, 'retry_domains': len(retry), 'retry_failed': failed}
-print(json.dumps(asyncio.run(main()), ensure_ascii=False)[:600])
-" 2>&1)
-RC=$?
+docker exec -i cognitive_api python - "$MAX_AGE_DAYS" <<'PY'
+import asyncio
+import json
+import sys
 
-if [ $RC -ne 0 ]; then
-  log "FAIL rc=$RC: ${OUT:0:400}"
-  exit 1
-fi
-log "result: ${OUT:0:600}"
-exit 0
+from app.worker import weekly_backstop_report
+
+report = asyncio.run(weekly_backstop_report(int(sys.argv[1])))
+print(json.dumps(report, ensure_ascii=False))
+sys.exit(1 if report["unresolved"] else 0)
+PY

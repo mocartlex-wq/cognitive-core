@@ -116,13 +116,18 @@ def _weekly_result_failed(result: dict | None) -> bool:
     if not isinstance(result, dict):
         return False
     owners = result.get("owners") or []
-    if any(o.get("status") == "error" for o in owners):
+    if result.get("status") in {"error", "partial_error"} or any(o.get("status") == "error" for o in owners):
         return True
     # Сбой куратора качества при СОСТОЯВШЕМСЯ синтезе — не провал: L3 уже
     # записан, повтор прогнал бы те же буферы через модель второй раз
     # (04.11.2026: cognitive_core получил 34 знания и всё равно встал в очередь).
     consolidated = any(o.get("status") == "consolidated" for o in owners)
     return bool(result.get("curator_errors")) and not consolidated
+
+
+def weekly_failed_domains(results: list[dict]) -> list[str]:
+    """List failed domains, including failures returned inside owner results."""
+    return [r["domain"] for r in results if "error" in r or _weekly_result_failed(r.get("result"))]
 
 
 async def run_weekly_cycle():
@@ -154,7 +159,7 @@ async def run_weekly_cycle():
         action="weekly_consolidate",
         target_table="l3_master_knowledge",
         details={"results": results},
-        success=True,
+        success=not weekly_failed_domains(results),
     )
     return results
 
@@ -167,7 +172,7 @@ async def _weekly_over_domains(domains: list[str], retry_pending: set[str]) -> l
             results.append({"domain": domain, "result": result})
             if _weekly_result_failed(result):
                 await _retry_queue_add(RETRY_KEY_WEEKLY, domain)
-            elif domain in retry_pending:
+            elif domain in retry_pending and result.get("status") != "lock_held":
                 await _retry_queue_remove(RETRY_KEY_WEEKLY, domain)
         except Exception as e:
             results.append({"domain": domain, "error": str(e)})
@@ -175,13 +180,15 @@ async def _weekly_over_domains(domains: list[str], retry_pending: set[str]) -> l
     return results
 
 
-async def run_weekly_retry_cycle() -> list[dict]:
+async def run_weekly_retry_cycle(*, only_domain: str | None = None) -> list[dict]:
     """Добрать только упавшие домены weekly, не дожидаясь понедельника.
 
     Запускается ежедневно из systemd (cogcore-weekly.timer). Пустая очередь —
     ничего не делаем и не пишем аудит: тихий день не должен выглядеть как прогон.
     """
     retry_pending = await _retry_queue_pending(RETRY_KEY_WEEKLY)
+    if only_domain is not None:
+        retry_pending = retry_pending.intersection({only_domain})
     if not retry_pending:
         return []
     log.info("weekly retry-queue drain domains=%s", sorted(retry_pending))
@@ -191,7 +198,7 @@ async def run_weekly_retry_cycle() -> list[dict]:
         action="weekly_consolidate",
         target_table="l3_master_knowledge",
         details={"results": results, "mode": "retry"},
-        success=True,
+        success=not weekly_failed_domains(results),
     )
     return results
 
@@ -215,7 +222,11 @@ def _weekly_run_produced(details) -> bool:
         return True  # старый формат без results — не угадываем, считаем прогоном
     rows = [r for r in results if isinstance(r, dict)]
     failed = any("error" in r or _weekly_result_failed(r.get("result")) for r in rows)
-    consolidated = any((r.get("result") or {}).get("status") == "consolidated" for r in rows)
+    consolidated = any(
+        (r.get("result") or {}).get("status") == "consolidated"
+        or any(o.get("status") == "consolidated" for o in (r.get("result") or {}).get("owners", []))
+        for r in rows
+    )
     return consolidated or not failed
 
 
@@ -233,7 +244,8 @@ async def run_weekly_cycle_if_due(max_age_days: int = 5) -> dict:
         rows = await conn.fetch(
             """
             SELECT event_time, details FROM l5_audit_log
-             WHERE action = 'weekly_consolidate' AND success
+             WHERE action = 'weekly_consolidate'
+               AND (success OR jsonb_typeof(details->'results') = 'array')
                AND COALESCE(details->>'mode', '') <> 'retry'
              ORDER BY event_time DESC LIMIT 10
             """
@@ -255,9 +267,21 @@ async def run_weekly_cycle_if_due(max_age_days: int = 5) -> dict:
             return {"status": "skipped", "last_run": last.isoformat(),
                     "age_days": round(age_days, 2)}
     results = await run_weekly_cycle()
-    return {"status": "ran", "domains": len(results),
-            "failed": sum(1 for r in results
-                          if "error" in r or _weekly_result_failed(r.get("result")))}
+    failed = weekly_failed_domains(results)
+    return {"status": "ran", "domains": len(results), "failed": len(failed), "failed_domains": failed}
+
+
+async def weekly_backstop_report(max_age_days: int) -> dict:
+    """Report outcomes after the full-run check and the scheduled retry."""
+    full = await run_weekly_cycle_if_due(max_age_days)
+    retry = await run_weekly_retry_cycle()
+    failed = weekly_failed_domains(retry)
+    deferred = [r["domain"] for r in retry if (r.get("result") or {}).get("status") == "lock_held"]
+    # A successful retry resolves that domain's earlier failure in this run.
+    pending = set(full.get("failed_domains", [])) - {r["domain"] for r in retry}
+    pending.update(failed + deferred)
+    return {"full": full, "retry_domains": len(retry), "retry_failed": failed,
+            "retry_deferred": deferred, "unresolved": sorted(pending)}
 
 
 async def run_monthly_cycle():

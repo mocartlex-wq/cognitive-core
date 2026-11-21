@@ -384,8 +384,14 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
         log.info("weekly: недостаточно повторов domain=%s owner=%s buffers=%d < %d",
                  domain, owner, len(l2_buffers), settings.min_l2_repetitions_for_l3)
         return {"status": "insufficient_repetition", "buffers": len(l2_buffers)}
+    window = sorted(l2_buffers, key=lambda buf: str(buf["id"]))
+    payload = json.dumps([domain, owner, window], sort_keys=True, default=str)
+    fingerprint = hashlib.sha256(payload.encode()).hexdigest()
+    applied = {"status": "consolidated", "already_applied": True, "new_items": 0, "deprecated": 0, "tools_added": 0}
     pool = await get_pool()
     async with pool.acquire() as conn:
+        if await conn.fetchval("SELECT 1 FROM weekly_applied_windows WHERE fingerprint=$1", fingerprint):
+            return applied
         # Действующие знания владельца
         l3_rows = await conn.fetch(
             """
@@ -419,13 +425,33 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
     # Шаг 3: Применяем изменения
     now = datetime.now(timezone.utc)
     rejected_low_confidence = 0
-    async with pool.acquire() as conn:
+    existing = {k["id"]: k for k in current_l3}
+    retire_ids = {_to_uuid(k) for k in synthesis.get("deprecated_l3_ids", [])}
+    if not retire_ids <= existing.keys():
+        raise ValueError("Unknown L3 retirement target")
+    blocked_retirements = set()
+    replaced = set()
+    source_ids = [b["id"] for b in l2_buffers]
+    async with pool.acquire() as conn, conn.transaction():
+        # A validated no-change proposal is also a completed window. A missing
+        # model response raises in analyze_weekly before this transaction.
+        claimed = await conn.fetchval(
+            """INSERT INTO weekly_applied_windows(fingerprint) VALUES ($1)
+               ON CONFLICT DO NOTHING RETURNING fingerprint""",
+            fingerprint,
+        )
+        if not claimed:
+            return applied
         # Новые/обновлённые знания
         for item in synthesis.get("new_or_updated", []):
             new_id = _uuid.uuid4()
             content = item.get("content", {})
             knowledge_type = item.get("type", "rule")
             merge_id = item.get("merge_with_l3_id")
+            if merge_id:
+                merge_id = _to_uuid(merge_id)
+                if merge_id not in existing:
+                    raise ValueError("Unknown L3 merge target")
 
             # Порог уверенности применяется В КОДЕ, а не только в тексте промпта.
             # settings.min_confidence_for_l3 существует с самого начала, но
@@ -436,43 +462,62 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
             confidence = _confidence_of(content)
             if confidence < settings.min_confidence_for_l3:
                 rejected_low_confidence += 1
+                if merge_id in retire_ids:
+                    blocked_retirements.add(merge_id)
                 log.info(
                     "L3 отклонено по уверенности: домен=%s тип=%s confidence=%.2f < %.2f",
                     domain, knowledge_type, confidence, settings.min_confidence_for_l3,
                 )
                 continue
 
-            if merge_id:
+            if merge_id and merge_id not in retire_ids:
                 # Обновляем существующее
-                await conn.execute(
+                updated = await conn.execute(
                     """
                     UPDATE l3_master_knowledge
-                    SET content = $1, version = version + 1
-                    WHERE id = $2
+                    SET content = $1, version = version + 1,
+                        derived_from_l2_ids = ARRAY(SELECT DISTINCT source_id FROM
+                            unnest(derived_from_l2_ids || $3::uuid[]) AS source_id)
+                    WHERE id = $2 AND version = $4 AND effective_to IS NULL
                     """,
                     json.dumps(content, ensure_ascii=False),
-                    _to_uuid(merge_id),
+                    merge_id, source_ids, existing[merge_id]["version"],
                 )
+                if updated != "UPDATE 1":
+                    raise ValueError("L3 merge target changed during synthesis")
             else:
+                # Если модель одновременно исправляет и снимает один ID,
+                # сохраняем исправление отдельно, а исходник остаётся в истории.
+                version = 1
+                sources = source_ids
+                if merge_id:
+                    if merge_id in replaced:
+                        raise ValueError("Multiple replacements for the same L3 merge target")
+                    replaced.add(merge_id)
+                    version = existing[merge_id]["version"] + 1
+                    sources = list(dict.fromkeys([*(existing[merge_id]["derived_from_l2_ids"] or []), *source_ids]))
                 await conn.execute(
                     """
                     INSERT INTO l3_master_knowledge
                         (id, domain, knowledge_type, content, version, derived_from_l2_ids,
                          effective_from, created_at, owner_user_id)
-                    VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8::uuid)
+                    VALUES ($1, $2, $3, $4, $9, $5, $6, $7, $8::uuid)
                     """,
                     new_id, domain, knowledge_type,
                     json.dumps(content, ensure_ascii=False),
-                    [str(b["id"]) for b in l2_buffers],
-                    now, now, owner,
+                    sources, now, now, owner, version,
                 )
 
         # Депрекация устаревшего
-        for dep_id in synthesis.get("deprecated_l3_ids", []):
-            await conn.execute(
-                "UPDATE l3_master_knowledge SET effective_to = $1 WHERE id = $2",
-                now, _to_uuid(dep_id),
+        retire_ids -= blocked_retirements - replaced
+        for dep_id in retire_ids:
+            retired = await conn.execute(
+                """UPDATE l3_master_knowledge SET effective_to = $1
+                   WHERE id = $2 AND version = $3 AND effective_to IS NULL""",
+                now, dep_id, existing[dep_id]["version"],
             )
+            if retired != "UPDATE 1":
+                raise ValueError("L3 retirement target changed during synthesis")
 
         # Инструменты
         VALID_TOOL_TYPES = {"api", "script", "prompt", "library", "service"}
@@ -518,7 +563,7 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
         # расходилась бы с содержимым базы.
         "new_items": len(synthesis.get("new_or_updated", [])) - rejected_low_confidence,
         "rejected_low_confidence": rejected_low_confidence,
-        "deprecated": len(synthesis.get("deprecated_l3_ids", [])),
+        "deprecated": len(retire_ids),
         "tools_added": len(synthesis.get("tools", [])),
         "quality": quality,
         # Наверх, а не только внутрь quality: сбой куратора должен быть виден

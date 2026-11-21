@@ -48,6 +48,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_l2_date_domain_owner
     ON l2_daily_buffers(date, domain, owner_user_id) NULLS NOT DISTINCT;
 
 -- L3: Эталонные знания
+CREATE TABLE IF NOT EXISTS weekly_applied_windows (
+    fingerprint CHAR(64) PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS l3_master_knowledge (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     domain VARCHAR(64) NOT NULL,
