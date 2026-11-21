@@ -86,4 +86,4 @@ async def analyze_weekly(
                 raise
             user = f"{get_user_weekly(l)}\n\n{get_user_retry(l)}"
 
-    return {"new_or_updated": [], "deprecated_l3_ids": [], "tools": []}
+    raise RuntimeError("Weekly synthesis returned no model response after all attempts")

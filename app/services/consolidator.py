@@ -433,16 +433,15 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
     replaced = set()
     source_ids = [b["id"] for b in l2_buffers]
     async with pool.acquire() as conn, conn.transaction():
-        # Empty responses can mean the model was unavailable. Only a synthesis
-        # with proposals can establish that this input was processed.
-        if any(synthesis.get(key) for key in ("new_or_updated", "deprecated_l3_ids", "tools")):
-            claimed = await conn.fetchval(
-                """INSERT INTO weekly_applied_windows(fingerprint) VALUES ($1)
-                   ON CONFLICT DO NOTHING RETURNING fingerprint""",
-                fingerprint,
-            )
-            if not claimed:
-                return applied
+        # A validated no-change proposal is also a completed window. A missing
+        # model response raises in analyze_weekly before this transaction.
+        claimed = await conn.fetchval(
+            """INSERT INTO weekly_applied_windows(fingerprint) VALUES ($1)
+               ON CONFLICT DO NOTHING RETURNING fingerprint""",
+            fingerprint,
+        )
+        if not claimed:
+            return applied
         # Новые/обновлённые знания
         for item in synthesis.get("new_or_updated", []):
             new_id = _uuid.uuid4()

@@ -97,6 +97,19 @@ async def test_unrelated_provider_error_is_not_swallowed():
 
 
 @pytest.mark.asyncio
+async def test_weekly_missing_model_response_fails_but_valid_empty_synthesis_succeeds():
+    client = MagicMock()
+    client._try_call = AsyncMock(return_value=None)
+    no_changes = {"new_or_updated": [], "deprecated_l3_ids": [], "tools": []}
+    with patch.object(analyzer, "get_llm_client", return_value=client):
+        with pytest.raises(RuntimeError, match="no model response"):
+            await analyzer.analyze_weekly("sample", [], [], [{"id": "b1"}])
+        assert client._try_call.await_count == 3
+        client._try_call.return_value = no_changes
+        assert await analyzer.analyze_weekly("sample", [], [], [{"id": "b1"}]) == no_changes
+
+
+@pytest.mark.asyncio
 async def test_weekly_retries_on_broken_json_and_asks_for_strict_json():
     good = {"new_or_updated": [], "deprecated_l3_ids": [], "tools": []}
     c = MagicMock()
