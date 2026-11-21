@@ -41,8 +41,10 @@ def resource_card(row, full=False):
     }
     if full:
         card["location"] = _display(location)
-        card["instructions"] = _display(usage.get("instructions") or usage.get("command")
-                                        or usage.get("example"))
+        instructions = usage.get("instructions") or usage.get("command") or usage.get("example")
+        if not instructions and usage.get("pattern") != row["description"]:
+            instructions = usage.get("pattern")
+        card["instructions"] = _display(instructions)
         card["notes"] = {key: _display(usage[key]) for key in
                          ("recipients", "author_check", "independent_use") if usage.get(key)}
     return card

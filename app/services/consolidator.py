@@ -409,7 +409,7 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
             """
             SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns
             FROM l3_tools_registry
-            WHERE domain = $1 AND effective_to IS NULL
+            WHERE domain = $1 AND effective_to IS NULL AND NOT owner_managed
               AND owner_user_id IS NOT DISTINCT FROM $2::uuid
             """,
             domain, owner,
@@ -521,11 +521,12 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
 
         # Инструменты
         VALID_TOOL_TYPES = {"api", "script", "prompt", "library", "service"}
+        tools_written = 0
         for tool in synthesis.get("tools", []):
             tool_id = _uuid.uuid4()
             raw_type = tool.get("tool_type", "service")
             safe_type = raw_type if raw_type in VALID_TOOL_TYPES else "service"
-            await conn.execute(
+            written = await conn.fetchval(
                 """
                 -- Конфликт разрешается по (домен, имя, владелец) среди
                 -- ДЕЙСТВУЮЩИХ записей — индекс idx_l3_tools_unique_active,
@@ -543,6 +544,8 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
                 DO UPDATE SET description = EXCLUDED.description,
                               usage_patterns = EXCLUDED.usage_patterns,
                               version = l3_tools_registry.version + 1
+                WHERE NOT l3_tools_registry.owner_managed
+                RETURNING id
                 """,
                 tool_id, domain,
                 tool.get("tool_name", "unknown"),
@@ -552,6 +555,7 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
                 json.dumps({"pattern": tool.get("usage_pattern", "")}, ensure_ascii=False),
                 now, now, owner,
             )
+            tools_written += int(written is not None)
 
     # Снапшот и переиндексация делаются один раз на домен в вызывающей функции —
     # они не owner-специфичны, и повторять их на каждого владельца значило бы
@@ -564,7 +568,7 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
         "new_items": len(synthesis.get("new_or_updated", [])) - rejected_low_confidence,
         "rejected_low_confidence": rejected_low_confidence,
         "deprecated": len(retire_ids),
-        "tools_added": len(synthesis.get("tools", [])),
+        "tools_added": tools_written,
         "quality": quality,
         # Наверх, а не только внутрь quality: сбой куратора должен быть виден
         # без раскопок, иначе «LLM не ответил» читается как «нечего продвигать».
@@ -738,7 +742,7 @@ async def run_monthly_audit(domain: str) -> dict:
         )
         tool_rows = await conn.fetch(
             "SELECT * FROM l3_tools_registry "
-            "WHERE domain = $1 AND effective_to IS NULL "
+            "WHERE domain = $1 AND effective_to IS NULL AND NOT owner_managed "
             "ORDER BY created_at DESC LIMIT $2",
             domain, AUDIT_MAX_ITEMS,
         )
@@ -769,11 +773,19 @@ async def run_monthly_audit(domain: str) -> dict:
                 "WHERE id = $2 AND domain = $3 AND effective_to IS NULL",
                 now, dup_id, domain,
             )
+        candidates = {t["id"] for t in l3_tools}
+        retired_tools = []
         for dead_id in result.get("dead_tool_ids", []):
-            await conn.execute(
-                "UPDATE l3_tools_registry SET effective_to = $1 WHERE id = $2",
-                now, _to_uuid(dead_id),
-            )
+            tool_id = _to_uuid(dead_id)
+            if tool_id in candidates:
+                retired = await conn.fetchval(
+                    "UPDATE l3_tools_registry SET effective_to=$1 WHERE id=$2 AND domain=$3 "
+                    "AND effective_to IS NULL AND NOT owner_managed RETURNING id",
+                    now, tool_id, domain,
+                )
+                if retired:
+                    retired_tools.append(str(retired))
+        result["dead_tool_ids"] = retired_tools
 
     # Переиндексация векторов после очистки
     from app.services.operative import _remove_indexed_vectors

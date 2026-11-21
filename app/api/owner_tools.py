@@ -95,8 +95,9 @@ async def add_shared_tool(body: SharedTool, request: Request, user: Session = De
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""INSERT INTO l3_tools_registry
-                    (domain, tool_name, tool_type, description, config_schema, usage_patterns, owner_user_id, embedding)
-                    VALUES ('skills', $1,$2,$3,'{{}}',$4::jsonb,$5::uuid,$6::vector)
+                    (domain, tool_name, tool_type, description, config_schema, usage_patterns, owner_user_id, embedding,
+                     owner_managed)
+                    VALUES ('skills', $1,$2,$3,'{{}}',$4::jsonb,$5::uuid,$6::vector,true)
                     ON CONFLICT (domain, tool_name, owner_user_id) WHERE effective_to IS NULL DO NOTHING
                     RETURNING {CARD_COLUMNS}""",
                 body.name, kind, body.description, json.dumps(usage, ensure_ascii=False), user.user_id, vector,
@@ -105,7 +106,7 @@ async def add_shared_tool(body: SharedTool, request: Request, user: Session = De
             if not created:
                 row = await conn.fetchrow(f"""SELECT {CARD_COLUMNS} FROM l3_tools_registry
                                               WHERE domain='skills' AND tool_name=$1 AND owner_user_id=$2::uuid
-                                                AND effective_to IS NULL""", body.name, user.user_id)
+                                                AND owner_managed AND effective_to IS NULL""", body.name, user.user_id)
                 if not row or row["tool_type"] != kind or row["description"] != body.description or card_usage(row) != usage:
                     raise HTTPException(409, "В вашем каталоге уже есть другая карточка с таким названием.")
     return {"created": created, "item": resource_card(row, full=True)}

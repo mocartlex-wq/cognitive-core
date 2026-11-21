@@ -7,7 +7,21 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from app.api import mcp_protocol, memory
+from app.api import events, mcp_protocol, memory
+from app.services import media_cleanup
+
+
+@pytest.mark.asyncio
+async def test_existing_record_can_be_read_before_comments_migration(monkeypatch):
+    rid = uuid4()
+    record = {"id": str(rid), "content": {"task": "Saved note"}}
+    pool = AsyncMock()
+    pool.fetch.side_effect = asyncpg.UndefinedTableError("owner_memory_comments")
+    monkeypatch.setattr(events, "verify_api_key", AsyncMock())
+    monkeypatch.setattr(events, "resolve_owner_user_id", AsyncMock(return_value=str(uuid4())))
+    monkeypatch.setattr(events, "get_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(events, "read_record", AsyncMock(return_value=record))
+    assert await events.get_record(rid, None) == record
 
 
 @pytest.mark.asyncio
@@ -68,5 +82,40 @@ async def test_cleanup_preserves_annotated_memory(monkeypatch):
         result = await memory.run_cleanup(None)
         assert result["deleted_events"] == result["deleted_stale_unprocessed"] == 1
         assert await conn.fetchval("SELECT count(*) FROM l1_raw_events WHERE has_owner_comment") == 2
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_media_cleanup_only_expires_unannotated_uploads(monkeypatch):
+    dsn = os.getenv("COGCORE_TEST_DB_URL")
+    if not dsn:
+        pytest.skip("requires isolated PostgreSQL")
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("""
+            CREATE TEMP TABLE l1_raw_events (
+                id uuid DEFAULT gen_random_uuid(), domain text DEFAULT 'media_analysis',
+                timestamp timestamptz DEFAULT now() - interval '1 year',
+                raw_payload jsonb, has_owner_comment boolean);
+            INSERT INTO l1_raw_events (raw_payload, has_owner_comment) VALUES
+                ('{"task":"A project note","result":"Saved"}', false),
+                ('{"task":"A project note","result":"Reviewed"}', true),
+                ('{"media_id":"pinned","kind":"image"}', true),
+                ('{"media_id":"expired","kind":"image"}', false);
+        """)
+
+        class FixturePool:
+            @asynccontextmanager
+            async def acquire(self):
+                yield conn
+
+        cleanup_files = AsyncMock(return_value=(1, []))
+        monkeypatch.setattr(media_cleanup, "get_pool", AsyncMock(return_value=FixturePool()))
+        monkeypatch.setattr(media_cleanup, "_cleanup_one_media", cleanup_files)
+        result = await media_cleanup.cleanup_expired_media()
+        assert result["scanned"] == result["rows_deleted"] == 1
+        cleanup_files.assert_awaited_once_with("expired", "image")
+        assert await conn.fetchval("SELECT count(*) FROM l1_raw_events") == 3
     finally:
         await conn.close()

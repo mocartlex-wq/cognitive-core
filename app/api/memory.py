@@ -14,6 +14,7 @@ from app.services.consolidator import (
     weekly_consolidate,
 )
 from app.services.operative import (
+    _parse_jsonb,
     cleanup_stale_vectors,
     index_domain_vectors,
     restore_redis_from_pg,
@@ -385,28 +386,35 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
                         k.get("owner_user_id") or caller_owner,
                     )
 
+                restored_tools = 0
                 for t in data.get("tools", []):
-                    await conn.execute(
+                    restored = await conn.fetchval(
                         """
                         INSERT INTO l3_tools_registry
                             (id, domain, tool_name, tool_type, description, config_schema,
-                             usage_patterns, version, effective_from, owner_user_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid)
+                             usage_patterns, version, effective_from, owner_user_id, owner_managed, embedding)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12::vector)
                         ON CONFLICT (id) DO UPDATE
                         SET description = EXCLUDED.description,
                             config_schema = EXCLUDED.config_schema,
                             usage_patterns = EXCLUDED.usage_patterns,
+                            owner_managed = EXCLUDED.owner_managed,
+                            embedding = COALESCE(EXCLUDED.embedding, l3_tools_registry.embedding),
                             effective_to = NULL,
                             owner_user_id = COALESCE(l3_tools_registry.owner_user_id,
                                                      EXCLUDED.owner_user_id)
+                        WHERE NOT l3_tools_registry.owner_managed
+                        RETURNING id
                         """,
                         UUID(t["id"]), t["domain"], t.get("tool_name", ""),
                         t.get("tool_type", "service"), t.get("description", ""),
-                        json.dumps(t.get("config_schema", {})),
-                        json.dumps(t.get("usage_patterns", {})),
+                        json.dumps(_parse_jsonb(t.get("config_schema", {}))),
+                        json.dumps(_parse_jsonb(t.get("usage_patterns", {}))),
                         t.get("version", 1), _parse_ts(t.get("effective_from")),
                         t.get("owner_user_id") or caller_owner,
+                        t.get("owner_managed") is True, t.get("embedding") if t.get("owner_managed") is True else None,
                     )
+                    restored_tools += int(restored is not None)
 
                 # Помечаем как verified если integrity прошёл
                 if verify["ok"]:
@@ -419,7 +427,7 @@ async def restore_snapshot(snapshot_id: str, request: Request, strict: bool = Tr
             "status": "restored",
             "snapshot_id": snapshot_id,
             "knowledge_count": len(data.get("knowledge", [])),
-            "tools_count": len(data.get("tools", [])),
+            "tools_count": restored_tools,
             "integrity_verified": verify["ok"],
             "warnings": warnings,
         }

@@ -226,23 +226,22 @@ SQL
     jq -r '.tools[] | @json' "$local_file" \
         | while IFS= read -r row; do
             : >> "$TL_SQL"
-            id=$(printf '%s' "$row" | jq -r '.id')
-            domain=$(printf '%s' "$row" | jq -r '.domain')
-            tname=$(printf '%s' "$row" | jq -r '.tool_name')
-            ttype=$(printf '%s' "$row" | jq -r '.tool_type // "service"')
-            desc=$(printf '%s' "$row" | jq -r '.description // ""')
-            cfg=$(printf '%s' "$row" | jq -c '.config_schema // {}')
-            up=$(printf '%s' "$row" | jq -c '.usage_patterns // {}')
-            desc_esc=${desc//\'/\'\'}
-            cfg_esc=${cfg//\'/\'\'}
-            up_esc=${up//\'/\'\'}
+            # Encode the full JSON record once so multiline instructions and quotes remain data.
+            encoded=$(printf '%s' "$row" | jq -Rr '@base64')
             cat >> "$TL_SQL" <<SQL
+WITH source AS (SELECT convert_from(decode('$encoded', 'base64'), 'UTF8')::jsonb AS t)
 INSERT INTO l3_tools_registry
     (id, owner_user_id, domain, tool_name, tool_type, description,
-     config_schema, usage_patterns, version, effective_from)
-VALUES ('$id', '$OWNER', '$domain', '$tname', '$ttype', '$desc_esc',
-        '$cfg_esc'::jsonb, '$up_esc'::jsonb, 1, NOW())
-ON CONFLICT (id) DO NOTHING;
+     config_schema, usage_patterns, version, effective_from, owner_managed, embedding)
+SELECT (t->>'id')::uuid, '$OWNER'::uuid, t->>'domain', t->>'tool_name',
+       COALESCE(t->>'tool_type', 'service'), COALESCE(t->>'description', ''),
+       COALESCE(t->>'config_schema', '{}')::jsonb, COALESCE(t->>'usage_patterns', '{}')::jsonb,
+       COALESCE((t->>'version')::integer, 1), COALESCE((t->>'effective_from')::timestamptz, now()),
+       t->'owner_managed' IS NOT DISTINCT FROM 'true'::jsonb,
+       CASE WHEN t->'owner_managed' = 'true'::jsonb THEN (t->>'embedding')::vector END
+FROM source
+WHERE t->'owner_managed' IS DISTINCT FROM 'true'::jsonb OR (t->>'owner_user_id')::uuid = '$OWNER'::uuid
+ON CONFLICT DO NOTHING;
 SQL
         done
 
