@@ -402,6 +402,7 @@ async def search_pgvector(
             "knowledge_type": kd.get("knowledge_type", ""),
             "confidence": _extract_confidence(parsed),
             "distance": float(kd["distance"]),
+            "cosine_similarity": 1.0 - float(kd["distance"]),
         })
     for t in tools:
         td = dict(t)
@@ -411,27 +412,33 @@ async def search_pgvector(
             "domain": td["domain"],
             "tool_name": td.get("tool_name", ""),
             "tool_type": td.get("tool_type", ""),
+            "description": td.get("description"),
             "config_schema": _parse_jsonb(td.get("config_schema")),
             "usage": _parse_jsonb(td.get("usage_patterns")),
             "distance": float(td["distance"]),
+            "cosine_similarity": 1.0 - float(td["distance"]),
         })
     results.sort(key=lambda x: x["distance"])
     return results
 
 
-async def _search_redis_vector(query_vec: list[float], domain: str, top_k: int = 5) -> list[dict]:
+async def _search_redis_vector(query_vec: list[float], domain: str, top_k: int = 5,
+                               include_tools: bool = True) -> list[dict]:
     """Поиск через RediSearch KNN. Возвращает список результатов."""
     try:
         r = await get_redis_raw()
         vec_bytes = struct.pack(f"{len(query_vec)}f", *query_vec)
+        scope = f"@domain:{{{domain}}}"
+        if not include_tools:
+            scope = f"({scope} @record_type:{{knowledge}})"
         results = await r.execute_command(
             "FT.SEARCH", "idx:operative",
-            f"@domain:{{{domain}}}=>[KNN {top_k} @embedding $vec]",
+            f"{scope}=>[KNN {top_k} @embedding $vec]",
             "SORTBY", "__embedding_score",
             "PARAMS", "2", "vec", vec_bytes,
             "DIALECT", "2",
             "LIMIT", "0", str(top_k),
-            "RETURN", "3", "id", "record_type", "content_summary",
+            "RETURN", "3", "id", "record_type", "__embedding_score",
         )
         items = []
         for i in range(2, len(results), 2):
@@ -445,7 +452,11 @@ async def _search_redis_vector(query_vec: list[float], domain: str, top_k: int =
                 if isinstance(val, bytes):
                     val = val.decode()
                 fields[key] = val
-            items.append({"id": fields.get("id", ""), "record_type": fields.get("record_type", "knowledge")})
+            items.append({
+                "id": fields["id"],
+                "record_type": fields["record_type"],
+                "distance": float(fields["__embedding_score"]),
+            })
         return items
     except Exception:
         return []
@@ -532,7 +543,7 @@ async def build_operative(
     # отдельным PR. Multi-tenant запросы идут через pgvector — он correctly
     # isolation-safe прямо в SQL.
     if owner_user_id is None:
-        redis_hits = await _search_redis_vector(query_vec, domain, top_k)
+        redis_hits = await _search_redis_vector(query_vec, domain, top_k, include_tools)
         if redis_hits:
             pool = await get_pool()
             async with pool.acquire() as conn:
@@ -556,9 +567,10 @@ async def build_operative(
                                 "content": parsed,
                                 "knowledge_type": rd.get("knowledge_type", ""),
                                 "confidence": _extract_confidence(parsed),
-                                "distance": 0.0,
+                                "distance": hit["distance"],
+                                "cosine_similarity": 1.0 - hit["distance"],
                             })
-                    elif rtype == "tool":
+                    elif rtype == "tool" and include_tools:
                         row = await conn.fetchrow(
                             "SELECT id, domain, tool_name, tool_type, description, config_schema, usage_patterns "
                             "FROM l3_tools_registry WHERE id = $1 AND effective_to IS NULL",
@@ -572,9 +584,11 @@ async def build_operative(
                                 "domain": rt["domain"],
                                 "tool_name": rt.get("tool_name", ""),
                                 "tool_type": rt.get("tool_type", ""),
+                                "description": rt.get("description"),
                                 "config_schema": _parse_jsonb(rt.get("config_schema")),
                                 "usage": _parse_jsonb(rt.get("usage_patterns")),
-                                "distance": 0.0,
+                                "distance": hit["distance"],
+                                "cosine_similarity": 1.0 - hit["distance"],
                             })
                 if results:
                     recall_path.set("redis")
@@ -700,6 +714,7 @@ async def build_operative(
             "knowledge_type": k.get("knowledge_type", ""),
             "confidence": _extract_confidence(parsed),
             "distance": k["distance"],
+            "cosine_similarity": k["distance"],
         })
 
     if include_tools:
@@ -710,9 +725,11 @@ async def build_operative(
                 "domain": t["domain"],
                 "tool_name": t.get("tool_name", ""),
                 "tool_type": t.get("tool_type", ""),
+                "description": t.get("description"),
                 "config_schema": _parse_jsonb(t.get("config_schema")),
                 "usage": _parse_jsonb(t.get("usage_patterns")),
                 "distance": t["distance"],
+                "cosine_similarity": t["distance"],
             })
 
     results.sort(key=lambda x: x["distance"], reverse=True)
