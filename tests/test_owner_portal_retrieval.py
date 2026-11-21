@@ -38,6 +38,16 @@ async def test_regular_note_keeps_chat_id_and_authenticated_author(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_legacy_tool_search_points_to_exact_reader(monkeypatch):
+    tool_id = str(uuid4())
+    result = {"results": [{"id": tool_id, "record_type": "tool", "usage": {"local_path": "tool.js"}}]}
+    monkeypatch.setattr(mcp_protocol, "_call_self", AsyncMock(return_value=result))
+    found = await mcp_protocol._dispatch_tool(None, "cognitive_recall", {"query": "find a tool", "grouped": False})
+    assert found["results"][0]["read_tool"] == "cognitive_read_tool"
+    assert found["results"][0]["id"] == tool_id
+
+
+@pytest.mark.asyncio
 async def test_large_skill_discovery_and_exact_read(monkeypatch):
     rid = str(uuid4())
     original = "Run the requested check.\n" * 800

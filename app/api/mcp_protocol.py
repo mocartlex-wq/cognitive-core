@@ -1187,13 +1187,15 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
         frame = result.get("frame") or {}
         for rows in (result.get("results") or [], frame.get("tools") or [], frame.get("all") or []):
             for item in rows:
+                if item.get("record_type") != "tool":
+                    continue
+                item["read_tool"] = "cognitive_read_tool"
                 usage = item.get("usage")
-                if item.get("record_type") != "tool" or not isinstance(usage, dict) or not usage.get("resource_kind"):
+                if not isinstance(usage, dict) or not usage.get("resource_kind"):
                     continue
                 instructions = usage.get("instructions")
                 if isinstance(instructions, str) and len(instructions) > 1200:
                     item["usage"] = {**usage, "instructions": instructions[:1200], "instructions_truncated": True}
-                    item["read_tool"] = "cognitive_read_tool"
         return result
 
     if name == "cognitive_list":
