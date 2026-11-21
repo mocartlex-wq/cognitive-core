@@ -12,6 +12,7 @@ from app.security.auth import verify_api_key
 from app.security.owner import resolve_owner_user_id
 from app.services.metrics import track_recall
 from app.services.operative import (
+    _fuse_rrf,
     build_operative,
     close_session,
     create_session,
@@ -112,17 +113,26 @@ async def _search_default_domains(
         if isinstance(chunk, Exception):
             continue
         for item in chunk:
-            key = str(item.get("id"))
-            if key in seen:
+            key = item.get("id")
+            if not key or key in seen or (not include_tools and item.get("record_type") == "tool"):
                 continue
             seen.add(key)
             merged.append(item)
 
-    # Сортировка по релевантности: у путей поиска исторически разная семантика
-    # поля distance (у одного это расстояние, у другого — сходство), поэтому
-    # опираемся на confidence, который считается одинаково везде.
-    merged.sort(key=lambda r: r.get("confidence") or 0.0, reverse=True)
-    return merged[:top_k]
+    if not query.strip():
+        # Each domain supplied its own query, so its scores are not comparable.
+        return sorted(merged, key=lambda r: r.get("confidence") or 0.0, reverse=True)[:top_k]
+
+    # Re-rank each retrieval channel across domains before fusion. Confidence
+    # certifies a record's content; it says nothing about this query. A small
+    # RRF offset retains a leading exact or semantic match even when several
+    # weak candidates appear in both shortlists.
+    channels = [
+        sorted((r for r in merged if r.get(field) is not None),
+               key=lambda r: r[field], reverse=True)
+        for field in ("cosine_similarity", "fts_rank")
+    ]
+    return _fuse_rrf(channels, top_k=top_k, k=1)
 
 
 def _group_results_for_agent(results: list[dict]) -> dict:
