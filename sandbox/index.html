@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
+<script src="/static/site-theme.js?v=1"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cognitive Core — Песочница API</title>
@@ -213,6 +214,7 @@
   }
 </style>
 <script src="/static/head-bootstrap.js?v=20260522"></script>
+<link rel="stylesheet" href="/static/site.css?v=1">
 </head>
 <body class="glass-mode">
 <div class="orb-3"></div>
@@ -256,14 +258,14 @@
     <option value="key-dev-001">agent_developer (key-dev-001)</option>
     <option value="default-key">agent_default (default-key)</option>
   </select>
-  <span class="text-xs muted help" data-tip="Ключи задаются в .env через AGENT_API_KEYS. Каждый запрос требует X-API-Key. По нему определяется source_agent для аудита.">?</span>
+  <span class="text-xs muted help" tabindex="0" aria-label="Ключи задаются в .env через AGENT_API_KEYS. Каждый запрос требует X-API-Key. По нему определяется source_agent для аудита." data-tip="Ключи задаются в .env через AGENT_API_KEYS. Каждый запрос требует X-API-Key. По нему определяется source_agent для аудита.">?</span>
 </div>
 
 <!-- ========== ЭТАП 1: ЗАПИСЬ ОПЫТА ========== -->
 <section class="stage">
   <div class="stage-head">
     <span class="stage-num">Этап 1</span>
-    <h2 class="stage-title">Запись опыта в L1 <span class="help" data-tip="Единственная точка входа данных. Каждое событие проходит 6-шаговый защитный конвейер: auth → rate-limit → pydantic → sanitizer → ingest → audit.">?</span></h2>
+    <h2 class="stage-title">Запись опыта в L1 <span class="help" tabindex="0" aria-label="Единственная точка входа данных. Каждое событие проходит 6-шаговый защитный конвейер: auth → rate-limit → pydantic → sanitizer → ingest → audit." data-tip="Единственная точка входа данных. Каждое событие проходит 6-шаговый защитный конвейер: auth → rate-limit → pydantic → sanitizer → ingest → audit.">?</span></h2>
   </div>
   <p class="stage-sub">
     Агент отправляет каждое значимое действие в систему. Это попадает в L1 и ждёт ночной консолидации.
@@ -324,7 +326,7 @@
 <section class="stage">
   <div class="stage-head">
     <span class="stage-num">Этап 2</span>
-    <h2 class="stage-title">Анализ памяти LLM-куратором <span class="help" data-tip="Обычно эти задачи запускает фоновый worker по расписанию (daily 02:00, weekly понедельник 03:00, monthly 1-го). Здесь — ручной запуск для тестирования.">?</span></h2>
+    <h2 class="stage-title">Анализ памяти LLM-куратором <span class="help" tabindex="0" aria-label="Обычно эти задачи запускает фоновый worker по расписанию (daily 02:00, weekly понедельник 03:00, monthly 1-го). Здесь — ручной запуск для тестирования." data-tip="Обычно эти задачи запускает фоновый worker по расписанию (daily 02:00, weekly понедельник 03:00, monthly 1-го). Здесь — ручной запуск для тестирования.">?</span></h2>
   </div>
   <p class="stage-sub">
     Куратор фильтрует шум, аналитик извлекает паттерны. Daily превращает L1 в L2, weekly — L2 в L3.
@@ -407,7 +409,7 @@
 <section class="stage">
   <div class="stage-head">
     <span class="stage-num">Этап 3</span>
-    <h2 class="stage-title">Поиск знаний через OP <span class="help" data-tip="Operative — единственный канал чтения для агентов. KNN-поиск по эмбеддингам в RediSearch. Возвращает релевантные L3-знания + инструменты.">?</span></h2>
+    <h2 class="stage-title">Поиск знаний через OP <span class="help" tabindex="0" aria-label="Operative — единственный канал чтения для агентов. KNN-поиск по эмбеддингам в RediSearch. Возвращает релевантные L3-знания + инструменты." data-tip="Operative — единственный канал чтения для агентов. KNN-поиск по эмбеддингам в RediSearch. Возвращает релевантные L3-знания + инструменты.">?</span></h2>
   </div>
   <p class="stage-sub">
     Агент задаёт контекст-вопрос → система превращает его в вектор → KNN ищет ближайшие L3-записи →
@@ -510,7 +512,7 @@
 <section class="stage">
   <div class="stage-head">
     <span class="stage-num">Этап 4</span>
-    <h2 class="stage-title">Реестр инструментов L3 <span class="help" data-tip="Параллельно знаниям, в L3 хранятся описания инструментов: API, библиотеки, скрипты. Когда найдены через KNN, агент знает чем именно решать задачу.">?</span></h2>
+    <h2 class="stage-title">Реестр инструментов L3 <span class="help" tabindex="0" aria-label="Параллельно знаниям, в L3 хранятся описания инструментов: API, библиотеки, скрипты. Когда найдены через KNN, агент знает чем именно решать задачу." data-tip="Параллельно знаниям, в L3 хранятся описания инструментов: API, библиотеки, скрипты. Когда найдены через KNN, агент знает чем именно решать задачу.">?</span></h2>
   </div>
   <p class="stage-sub">
     Инструменты можно регистрировать вручную (агент описал свою API) или они извлекаются автоматически
@@ -578,7 +580,7 @@
 <section class="stage">
   <div class="stage-head">
     <span class="stage-num">Этап 5</span>
-    <h2 class="stage-title">Снапшоты L4 <span class="help" data-tip="L4 — слой архивирования. Полные слепки L3 в S3 (MinIO). Создаются автоматически после weekly если L3 изменилась. Можно восстановить L3 из любого снапшота.">?</span></h2>
+    <h2 class="stage-title">Снапшоты L4 <span class="help" tabindex="0" aria-label="L4 — слой архивирования. Полные слепки L3 в S3 (MinIO). Создаются автоматически после weekly если L3 изменилась. Можно восстановить L3 из любого снапшота." data-tip="L4 — слой архивирования. Полные слепки L3 в S3 (MinIO). Создаются автоматически после weekly если L3 изменилась. Можно восстановить L3 из любого снапшота.">?</span></h2>
   </div>
   <p class="stage-sub">
     Disaster recovery: если L3 повреждён — восстанавливаем из любого снапшота. Каждый снапшот с SHA-256.

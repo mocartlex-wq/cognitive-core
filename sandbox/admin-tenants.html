@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
+<script src="/static/site-theme.js?v=1"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin · Tenants · Cognitive Core</title>
@@ -95,6 +96,7 @@
   .err { color: #ff7770; padding: 16px; }
 </style>
 <script src="/static/head-bootstrap.js?v=20260522"></script>
+<link rel="stylesheet" href="/static/site.css?v=1">
 </head>
 <body class="glass-mode">
 
@@ -104,15 +106,15 @@
   </a>
   <nav class="top-nav">
     <a href="/ui/profile">Профиль</a>
-    <a href="/ui/admin/tenants" class="active">Tenants</a>
-    <a href="/ui/admin/media">Media</a>
-    <a href="/ui/admin/errors">Errors</a>
+    <a href="/ui/admin/tenants" class="active">Аккаунты</a>
+    <a href="/ui/admin/media">Медиа</a>
+    <a href="/ui/admin/errors">Ошибки</a>
   </nav>
 </div>
 
 <main class="page">
-  <h1>Tenants</h1>
-  <p class="sub">Все владельцы аккаунтов + их usage + tier. Меняй tier / suspend через кнопки в строке.</p>
+  <h1>Аккаунты</h1>
+  <p class="sub">Тарифы, использование и статус аккаунтов.</p>
 
   <div id="tenantsBlock" class="empty">Загружаем…</div>
 </main>

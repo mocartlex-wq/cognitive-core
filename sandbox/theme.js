@@ -60,7 +60,7 @@
 
   // Inject neuron background и icon sprite
   document.addEventListener('DOMContentLoaded', () => {
-    if (!document.querySelector('.neuron-bg')) {
+    if (!document.querySelector('link[href*="/static/site.css"]') && !document.querySelector('.neuron-bg')) {
       const wrap = document.createElement('div');
       wrap.className = 'neuron-bg';
       wrap.setAttribute('aria-hidden', 'true');

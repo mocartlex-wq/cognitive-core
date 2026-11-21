@@ -1,19 +1,27 @@
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Нет сети — Память</title>
-<style>
-  html,body{height:100%;margin:0;background:#000;color:#eaeaf0;
-    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  .w{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:14px;padding:24px;text-align:center}
-  .t{font-size:19px;font-weight:600}
-  .m{color:#8e8e93;max-width:30ch}
-  button{margin-top:6px;padding:11px 22px;border:0;border-radius:12px;
-    background:#0a84ff;color:#fff;font-size:16px}
-</style>
-<div class="w">
-  <div style="font-size:44px">🔌</div>
-  <div class="t">Нет сети</div>
-  <div class="m">Сообщения и комнаты живут на сервере, локальной копии переписки приложение не хранит.</div>
-  <button onclick="location.replace('/chat')">Попробовать снова</button>
-</div>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Нет сети — Cognitive Core</title>
+  <style>
+    :root { color-scheme: light dark; --paper: #f4f6fa; --ink: #192b40; --muted: #53667c; }
+    @media (prefers-color-scheme: dark) {
+      :root { --paper: #121a24; --ink: #f1f5fb; --muted: #afbdce; }
+    }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 "Segoe UI", system-ui, sans-serif; }
+    main { box-sizing: border-box; min-height: 100vh; min-height: 100svh; display: grid; place-content: center; justify-items: start; padding: 24px; }
+    h1 { margin: 0; font-size: clamp(32px, 6vw, 48px); line-height: 1.1; }
+    p { max-width: 35ch; color: var(--muted); margin: 12px 0 24px; }
+    button { border: 0; border-radius: 8px; padding: 12px 18px; background: #245bc4; color: white; cursor: pointer; font: inherit; font-weight: 600; }
+    button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Нет сети</h1>
+    <p>Для загрузки комнат и переписки подключитесь к интернету.</p>
+    <button type="button" onclick="location.replace('/chat')">Попробовать снова</button>
+  </main>
+</body>
+</html>

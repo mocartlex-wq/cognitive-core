@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
+<script src="/static/site-theme.js?v=1"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Профиль — Cognitive Core</title>
@@ -233,6 +234,7 @@
   }
 </style>
 <script src="/static/head-bootstrap.js?v=20260522"></script>
+<link rel="stylesheet" href="/static/site.css?v=1">
 </head>
 <body class="glass-mode">
 <div class="orb-3"></div>
@@ -255,15 +257,37 @@
   </div>
 </div>
 
-<main class="page">
-  <div class="page-title">Мой профиль</div>
-
-  <nav class="card" aria-label="Рабочие разделы" style="display:flex;flex-wrap:wrap;gap:12px">
-    <a class="btn" href="/ui/memory">Память проекта</a>
-    <a class="btn secondary" href="/ui/shared-tools">Инструменты и навыки</a>
+<main class="page profile-home">
+  <nav class="workspace-rail" aria-label="Разделы кабинета">
+    <button class="workspace-rail-toggle" type="button" hidden aria-expanded="true" aria-controls="rail-work rail-settings">Разделы кабинета <span aria-hidden="true">⌄</span></button>
+    <div class="rail-group" id="rail-work">
+      <h2>Рабочая область</h2>
+      <a href="#overview" aria-current="page">Обзор</a>
+      <a href="#agents">Помощники</a>
+      <a href="#rooms">Мои комнаты</a>
+      <a href="/coordination">Очередь задач</a>
+      <a href="#media">Медиатека</a>
+    </div>
+    <div class="rail-group" id="rail-settings">
+      <h2>Настройки</h2>
+      <a href="#account">Аккаунт</a>
+      <a href="#rules">Правила агентов</a>
+      <a href="#providers">AI-провайдеры</a>
+      <a href="#devices">Устройства</a>
+    </div>
+  </nav>
+  <div class="workspace-content">
+  <h1 id="workspace-title" tabindex="-1">Рабочее пространство</h1>
+  <nav class="workspace-choices" id="overview" data-panel="overview" aria-label="Рабочие разделы">
+    <a href="/ui/memory"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#memory"/></svg><strong>Память проекта</strong><span>Найти запись или оставить комментарий</span></a>
+    <a href="/ui/shared-tools"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#layers"/></svg><strong>Инструменты и навыки</strong><span>Открыть каталог или добавить ресурс</span></a>
   </nav>
 
-  <div class="card" style="padding:0;overflow:hidden">
+  <section class="card recent-panel" data-panel="overview" aria-labelledby="recent-title">
+    <header><h2 id="recent-title">Последние записи</h2><a href="/ui/memory">Все записи</a></header>
+    <ul id="workspace-recent" aria-live="polite"><li>Загрузка записей…</li></ul>
+  </section>
+  <div class="card" id="account" data-panel="account" style="padding:0;overflow:hidden">
     <details id="accountDetails">
       <summary style="cursor:pointer;padding:18px 28px;list-style:none;display:flex;align-items:center;gap:14px;user-select:none">
         <span id="avatarSlot"></span>
@@ -284,7 +308,7 @@
   </style>
 
   <!-- PR #23 multi-tenant: per-owner usage карточка (events/storage/agents)  -->
-  <div class="card" id="usageCard">
+  <div class="card" id="usageCard" data-panel="overview">
     <h2>
       Использование
       <span id="usageTierBadge" style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:rgba(88,166,255,.15);border:1px solid rgba(88,166,255,.35);color:var(--glass-text);margin-left:auto"></span>
@@ -292,12 +316,12 @@
     <div id="usageBlock" class="empty">Загружаем…</div>
   </div>
 
-  <div class="card">
+  <div class="card" id="rooms" data-panel="rooms">
     <h2>Мои комнаты</h2>
     <div id="roomsBlock" class="empty">Загружаем…</div>
   </div>
 
-  <div class="card">
+  <div class="card" id="agents" data-panel="agents">
     <h2>
       Мои помощники
       <span style="display:flex;gap:6px">
@@ -308,8 +332,8 @@
     <div id="agentsBlock" class="empty">Загружаем…</div>
   </div>
 
-  <div class="card">
-    <h2>📸 Мои медиа <span id="mediaCountBadge" style="font-size:13px;color:var(--glass-text-dim);font-weight:normal"></span></h2>
+  <div class="card" id="media" data-panel="media">
+    <h2>Мои медиа <span id="mediaCountBadge" style="font-size:13px;color:var(--glass-text-dim);font-weight:normal"></span></h2>
     <div id="mediaBlock" class="empty">Загружаем…</div>
   </div>
 
@@ -317,9 +341,9 @@
        Opt-in — без своих ключей платформа использует shared Qwen + DeepSeek
        fallback. Со своими — vision-analyzer перенаправляется на твой провайдер
        и оплата идёт на твой счёт у провайдера. -->
-  <div class="card">
+  <div class="card" id="providers" data-panel="providers">
     <h2>
-      🤖 Внешние AI-провайдеры
+      Внешние AI-провайдеры
       <span style="font-size:12px;font-weight:500;color:var(--glass-text-dim);margin-left:auto">opt-in</span>
     </h2>
     <p class="msg-line" style="margin: 0 0 14px; font-size: 13px; line-height: 1.5">
@@ -331,8 +355,8 @@
     <div id="externalKeysBlock" class="empty">Загружаем…</div>
   </div>
   <!-- Agent Operating Rules — Phase 6 -->
-  <div class="card">
-    <h2>🎯 Правила для агентов</h2>
+  <div class="card" id="rules" data-panel="rules">
+    <h2>Правила для агентов</h2>
     <div id="platformRulesBanner" class="msg-line"
          style="background:rgba(88,166,255,0.08);border-left:3px solid var(--glass-orb-1);padding:10px 14px;border-radius:4px;margin-bottom:14px">
       Загружаем платформенные правила…
@@ -427,16 +451,18 @@
   </dialog>
 
 
-  <div class="card">
+  <div class="card" id="devices" data-panel="devices">
     <h2>Мои устройства</h2>
     <div id="sessionsBlock" class="empty">Загружаем…</div>
   </div>
 
-  <div class="card" style="text-align: center;">
+  <div class="card" data-panel="account">
     <button class="btn danger" id="deleteAccountBtn">Удалить аккаунт</button>
     <p class="msg-line">Аккаунт помечается на удаление. Можно восстановить в течение 30 дней.</p>
   </div>
+  </div>
 </main>
+<script src="/static/workspace-nav.js" defer></script>
 
 <dialog id="claimTokenDialog">
   <h3>Передать ключ помощнику</h3>
@@ -1502,7 +1528,7 @@ codex mcp add cognitive-core --url https://mcp.me-ai.ru/mcp --bearer-token-env-v
         else if (u.tier === 'admin') badge.style.background = 'rgba(255,140,66,.18)', badge.style.borderColor = 'rgba(255,140,66,.5)';
       }
       const bar = (pct, label, used, max, unit) => {
-        const color = pct >= 90 ? '#f85149' : pct >= 70 ? '#d29922' : '#3fb950';
+          const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--yellow)' : 'var(--glass-orb-1)';
         return `
           <div style="margin-bottom:14px">
             <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:5px">

@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
+<script src="/static/site-theme.js?v=1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -411,6 +412,7 @@
   /* Убираем плавающий ассистент-виджет — приложение само по себе чат */
   #cogasst-fab,#cogasst-panel{display:none!important}
 </style>
+<link rel="stylesheet" href="/static/site.css?v=1">
 </head>
 <body>
 <!-- self-contained app: подавляем серверную инъекцию плавающих виджетов: assistant-widget.js + topbar-chat -->
@@ -1185,7 +1187,7 @@ const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==
 const isStandalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredPrompt=e; buildProfile(lastUser); });
 let lastUser=null, appVer='';
-function themeOn(){ return localStorage.getItem('chat-theme')==='light'; }
+function themeOn(){ return (localStorage.getItem('chat-theme') || document.documentElement.dataset.theme) === 'light'; }
 function applyTheme(){ app.classList.toggle('light', themeOn()); }
 async function loadProfile(){
   try{ const h=await (await fetch('/health',J)).json(); appVer=h.version||''; }catch(e){}
