@@ -180,13 +180,15 @@ async def _weekly_over_domains(domains: list[str], retry_pending: set[str]) -> l
     return results
 
 
-async def run_weekly_retry_cycle() -> list[dict]:
+async def run_weekly_retry_cycle(*, only_domain: str | None = None) -> list[dict]:
     """Добрать только упавшие домены weekly, не дожидаясь понедельника.
 
     Запускается ежедневно из systemd (cogcore-weekly.timer). Пустая очередь —
     ничего не делаем и не пишем аудит: тихий день не должен выглядеть как прогон.
     """
     retry_pending = await _retry_queue_pending(RETRY_KEY_WEEKLY)
+    if only_domain is not None:
+        retry_pending = retry_pending.intersection({only_domain})
     if not retry_pending:
         return []
     log.info("weekly retry-queue drain domains=%s", sorted(retry_pending))

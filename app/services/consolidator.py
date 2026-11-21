@@ -492,6 +492,8 @@ async def _weekly_for_owner(domain: str, owner: str | None, l2_buffers: list) ->
                 version = 1
                 sources = source_ids
                 if merge_id:
+                    if merge_id in replaced:
+                        raise ValueError("Multiple replacements for the same L3 merge target")
                     replaced.add(merge_id)
                     version = existing[merge_id]["version"] + 1
                     sources = list(dict.fromkeys([*(existing[merge_id]["derived_from_l2_ids"] or []), *source_ids]))

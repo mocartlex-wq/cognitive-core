@@ -169,6 +169,23 @@ async def test_backstop_keeps_locked_retry_and_reports_nested_failure(fake_redis
     assert report["unresolved"] == ["failed", "locked", "never_retried"]
 
 
+@pytest.mark.asyncio
+async def test_filtered_retry_processes_only_selected_pending_domain(fake_redis):
+    redis, members = fake_redis
+    members.update({"focus", "neighbour"})
+    weekly = AsyncMock(return_value={"status": "consolidated"})
+    with (
+        patch.object(worker, "get_redis", new=AsyncMock(return_value=redis)),
+        patch.object(worker, "weekly_consolidate", new=weekly),
+        patch.object(worker, "log_audit", new=AsyncMock()),
+    ):
+        assert await worker.run_weekly_retry_cycle(only_domain="absent") == []
+        result = await worker.run_weekly_retry_cycle(only_domain="focus")
+    weekly.assert_awaited_once_with("focus")
+    assert [r["domain"] for r in result] == ["focus"]
+    assert members == {"neighbour"}
+
+
 GOOD_RUN = {"results": [{"domain": "a", "result": {"status": "consolidated"}}]}
 ALL_FAILED_RUN = {"results": [
     {"domain": "a", "result": {"status": "no_buffers", "curator_errors": [{"owner": "o", "error": "APIConnectionError"}]}},

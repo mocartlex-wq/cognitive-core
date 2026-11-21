@@ -11,7 +11,7 @@ from app.services import consolidator
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["replacement", "below_threshold", "rollback", "merge_only"])
+@pytest.mark.parametrize("case", ["replacement", "below_threshold", "rollback", "ambiguous", "merge_only"])
 async def test_apply_weekly_correction(case, monkeypatch):
     dsn = os.environ.get("COGCORE_TEST_DB_URL")
     if not dsn:
@@ -25,6 +25,9 @@ async def test_apply_weekly_correction(case, monkeypatch):
     updates = [{"type": "rule", "merge_with_l3_id": str(old_id), "content": corrected}]
     if case == "rollback":
         updates.append({"type": "rule", "content": corrected, "merge_with_l3_id": str(uuid4())})
+    if case == "ambiguous":
+        updates.append({"type": "rule", "content": {"description": "other", "confidence": 0.99},
+                        "merge_with_l3_id": str(old_id)})
     monkeypatch.setattr(consolidator, "get_pool", AsyncMock(return_value=pool))
     monkeypatch.setattr(consolidator, "pre_weekly_check", AsyncMock(return_value={}))
     monkeypatch.setattr(consolidator, "analyze_weekly", AsyncMock(return_value={
@@ -40,7 +43,7 @@ async def test_apply_weekly_correction(case, monkeypatch):
         )
         buffers = [{"id": i} for i in new_sources]
         operation = consolidator._weekly_for_owner(domain, str(owner), buffers)
-        if case == "rollback":
+        if case in {"rollback", "ambiguous"}:
             with pytest.raises(ValueError, match="merge target"):
                 await operation
         else:
@@ -71,7 +74,7 @@ async def test_apply_weekly_correction(case, monkeypatch):
             assert len(rows) == 1 and active[0]["id"] == old_id
             assert json.loads(active[0]["content"]) == old
             assert active[0]["version"] == 1
-        if case == "rollback":
+        if case in {"rollback", "ambiguous"}:
             # A failed proposal did not claim its inputs, even after executing
             # an INSERT earlier in the transaction.
             updates.pop()
