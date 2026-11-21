@@ -140,7 +140,6 @@ body.glass-mode .endpoint-path, body.glass-mode .api-key-bar select { color: var
 .catalog-shell #list button:focus-visible, .catalog-shell #list button:hover { border-color: var(--cc-link) }
 .memory-page .record { border-radius: 8px; background: var(--cc-paper) }
 html:has(.app), html:has(.screen) { --sent: #245bc4; --recv: #273747; --scr: #121a24; --chatbg: #121a24; --mut: #afbdce }
-.shell:has(.filters) { --blue: #245bc4; --blue-soft: #e8eef7 }
 @media (max-width: 1140px) {
   body .top-bar { display: flex; flex-wrap: wrap; gap: 6px 12px }
   .top-bar .top-nav { order: 5; flex: 1 0 100%; justify-content: flex-start; padding-bottom: 3px }
