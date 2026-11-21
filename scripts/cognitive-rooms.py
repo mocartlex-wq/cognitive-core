@@ -2003,10 +2003,11 @@ def _ui_top_nav(active=""):
         ("/ui/profile", "Профиль", "profile"),
         ("/sandbox", "API", "api"),
     ]
-    links = "".join(
-        f'<a href="{href}" class="{ "active" if key == active else "" }">{label}</a>'
-        for href, label, key in items
-    )
+    items_html = []
+    for href, label, key in items:
+        current = ' class="active" aria-current="page"' if key == active else ""
+        items_html.append(f'<a href="{href}"{current}>{label}</a>')
+    links = "".join(items_html)
     return (
         '<div class="top-bar">'
         '<a class="brand" href="/">'

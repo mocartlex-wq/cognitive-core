@@ -125,6 +125,12 @@ main.profile-home {
 #workspace-recent small { grid-column: 1; overflow-wrap: anywhere }
 #workspace-recent time { grid-area: 1 / 2 / 3 / 3; align-self: center; font-size: 13px }
 .filter-tabs { flex-wrap: wrap }
+.help:not(:hover):not(:focus)::after { display: none }
+.help:focus::after { opacity: 1 }
+.help::after { color: #f1f5fb }
+body.glass-mode .endpoint-head h3 { color: var(--cc-ink) }
+body.glass-mode .endpoint-desc, body.glass-mode .api-key-bar label { color: var(--cc-muted) }
+body.glass-mode .endpoint-path, body.glass-mode .api-key-bar select { color: var(--cc-ink); background: var(--cc-raised) }
 .profile-home #usageBlock:not(.empty) { display: grid; gap: 10px 20px; grid-template-columns: repeat(auto-fit,minmax(min(195px,100%),1fr)) }
 .workspace-content .card:has(#usageBlock) { background: transparent; border-width: 1px 0 0; border-radius: 0; padding-inline: 0 }
 .workspace-content .card:has(#usageBlock) h2 { font-size: 18px }
@@ -142,6 +148,10 @@ html:has(.app), html:has(.screen) { --sent: #245bc4; --recv: #273747; --scr: #12
   .workspace-rail { top: 108px }
 }
 @media (max-width: 760px) {
+  .help::after { position: fixed; inset: auto 12px 14px; max-width: min(360px, calc(100vw - 24px)); width: auto; margin-inline: auto; transform: none }
+  body.glass-mode .api-key-bar { flex-wrap: wrap; backdrop-filter: none }
+  body.glass-mode .api-key-bar select { min-width: 0 }
+  .stage-grid { grid-template-columns: minmax(0,1fr) }
   .top-bar .top-status { flex: 0 1 auto; min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 6px }
   .top-bar .top-status:has(#d-pg) { flex-basis: 100%; justify-content: flex-start }
   body .glass-hero { grid-template-columns: minmax(0,1fr) }

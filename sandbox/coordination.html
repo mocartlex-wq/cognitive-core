@@ -4,18 +4,21 @@
 <script src="/static/site-theme.js?v=1"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>Очередь задач — Cognitive Core</title>
   <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/shared.css?v=20260520j">
+  <link rel="stylesheet" href="/static/glass.css?v=20260613">
+  <script src="/static/theme.js?v=20261121" defer></script>
   <style>
     :root {
-      --page: #f3f6fa;
-      --paper: #fff;
-      --ink: #24364a;
-      --muted: #617288;
-      --line: #d8e2ed;
-      --blue: #24678a;
-      --blue-soft: #eaf3fa;
+      --page: var(--cc-canvas);
+      --paper: var(--cc-paper);
+      --ink: var(--cc-ink);
+      --muted: var(--cc-muted);
+      --line: var(--cc-line);
+      --blue: var(--cc-link);
+      --blue-soft: var(--cc-raised);
       --green: #246743;
       --green-soft: #eaf5ee;
       --amber: #825711;
@@ -43,34 +46,34 @@
     h1 { font-size: clamp(27px, 3vw, 34px); line-height: 1.2; letter-spacing: -.8px; font-weight: 650; }
     h2 { font-size: 21px; line-height: 1.35; font-weight: 650; letter-spacing: -.35px; }
     h3 { font-size: 15px; font-weight: 650; }
-    .topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
-    .topbar-inner { max-width: 1480px; padding: 18px 32px; margin: auto; display: flex; align-items: center; gap: 16px; }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.3px; }
-    .brand-mark { display: grid; grid-template-columns: repeat(2, 7px); gap: 3px; transform: rotate(-9deg); }
-    .brand-mark i { display: block; width: 7px; height: 7px; border-radius: 2px; background: var(--blue); }
-    .brand-mark i:last-child { opacity: .35; }
-    .topbar-label { font-size: 13px; color: var(--muted); padding-left: 16px; border-left: 1px solid var(--line); }
-    .connection { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+
+
+
+
+
+
+
+    .connection { margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
     .connection-dot { width: 7px; height: 7px; background: #8996a6; border-radius: 50%; flex-shrink: 0; }
     .connection[data-state="ok"] .connection-dot { background: #3d8b66; }
     .connection[data-state="error"] .connection-dot { background: #bb7c20; }
     .shell { max-width: 1480px; padding: 34px 32px 42px; margin: auto; }
     .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
-    .subtitle { color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 60ch; }
+
     .btn { border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; background: var(--paper); font-weight: 600; display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 42px; text-decoration: none; white-space: nowrap; }
-    .btn:hover:not(:disabled) { background: #f0f5f9; border-color: #b7cbdc; }
-    .btn-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .btn:hover:not(:disabled) { background: var(--cc-raised); border-color: #b7cbdc; }
+    .btn-primary { background: var(--cc-action); border-color: var(--cc-action); color: #fff; }
     .btn-primary:hover:not(:disabled) { background: #1c5573; border-color: #1c5573; }
     .btn-quiet { background: transparent; border-color: transparent; color: var(--muted); }
     .btn-small { min-height: 34px; padding: 6px 10px; font-size: 13px; }
     .btn svg { width: 17px; height: 17px; flex-shrink: 0; }
     .banner { border: 1px solid #e8c992; background: var(--amber-soft); color: #694a17; border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; margin-bottom: 18px; line-height: 1.5; }
     .banner p { flex: 1; }
-    .banner a { color: #5c4217; }
+    .banner a { color: var(--ink); }
     .toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 20px; }
     .field { display: grid; gap: 7px; min-width: 0; }
     .field label, .field-label { font-size: 13px; font-weight: 600; }
-    input, select, textarea { width: 100%; min-width: 0; background: var(--paper); color: var(--ink); border: 1px solid #c6d4e1; border-radius: 8px; padding: 10px 12px; min-height: 42px; }
+    input, select, textarea { width: 100%; min-width: 0; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-height: 42px; }
     input::placeholder, textarea::placeholder { color: #738296; }
     textarea { min-height: 90px; resize: vertical; line-height: 1.5; }
     .search-field { flex: 1; }
@@ -80,9 +83,9 @@
     .project-field { width: 220px; }
     .filters { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 22px; }
     .filter { display: inline-flex; gap: 9px; align-items: center; padding: 8px 11px; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 13px; white-space: nowrap; min-height: 35px; }
-    .filter:hover { background: #e9eff6; }
+    .filter:hover { background: var(--cc-raised); }
     .filter[aria-pressed="true"] { border-color: #aac7dc; background: var(--paper); color: var(--blue); font-weight: 650; }
-    .filter-count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; background: #e6edf4; border-radius: 4px; min-width: 20px; padding: 1px 5px; }
+    .filter-count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; background: var(--cc-raised); border-radius: 4px; min-width: 20px; padding: 1px 5px; }
     .filter[aria-pressed="true"] .filter-count { color: var(--blue); background: var(--blue-soft); }
     .workspace { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(390px, 1fr); gap: 22px; align-items: start; }
     .queue { min-width: 0; }
@@ -92,20 +95,20 @@
     .task-list { display: grid; gap: 10px; }
     .task-card { text-align: left; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); padding: 17px 18px 15px; cursor: pointer; position: relative; }
     .task-card:hover { border-color: #98b8ce; }
-    .task-card[aria-pressed="true"] { border-color: #5c90b1; box-shadow: inset 3px 0 var(--blue); background: #fbfdff; }
+    .task-card[aria-pressed="true"] { border-color: #5c90b1; box-shadow: inset 3px 0 var(--blue); background: var(--cc-raised); }
     .card-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
     .project-label { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .badge { font-size: 11px; font-weight: 650; background: #edf1f5; color: #57697f; border-radius: 5px; padding: 4px 7px; display: inline-flex; align-items: center; white-space: nowrap; }
-    .badge-running { background: var(--blue-soft); color: #225f86; }
+    .badge-running { background: var(--blue-soft); color: var(--blue); }
     .badge-review { background: #eef0fc; color: #575f9c; }
     .badge-verified_done { background: var(--green-soft); color: var(--green); }
     .badge-blocked { background: var(--amber-soft); color: var(--amber); }
     .badge-failed { background: var(--red-soft); color: var(--red); }
     .card-title { display: block; font-size: 16px; line-height: 1.42; font-weight: 650; margin-top: 11px; overflow-wrap: anywhere; }
     .card-next { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 7px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .card-next strong { color: #4b6076; font-weight: 600; }
+    .card-next strong { color: var(--ink); font-weight: 600; }
     .card-warning { display: block; font-size: 12px; color: var(--amber); margin-top: 9px; line-height: 1.4; }
-    .card-stages { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px solid #e4ebf2; margin-top: 13px; padding-top: 11px; }
+    .card-stages { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px solid var(--line); margin-top: 13px; padding-top: 11px; }
     .stage { min-width: 0; }
     .stage-label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
     .stage-value { display: flex; gap: 6px; align-items: start; font-size: 12px; font-weight: 600; line-height: 1.4; }
@@ -125,8 +128,8 @@
     .detail-time { color: var(--muted); font-size: 11px; text-align: right; }
     .detail-title { overflow-wrap: anywhere; }
     .detail-project { margin-top: 10px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-    .detail-next { margin: 21px 0; padding: 14px 16px; border-left: 3px solid #4d89b0; background: #f0f6fb; border-radius: 0 7px 7px 0; }
-    .detail-next h3 { font-size: 12px; color: #47687f; margin-bottom: 6px; }
+    .detail-next { margin: 21px 0; padding: 14px 16px; border-left: 3px solid #4d89b0; background: var(--blue-soft); border-radius: 0 7px 7px 0; }
+    .detail-next h3 { font-size: 12px; color: var(--blue); margin-bottom: 6px; }
     .prose { font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
     .muted { color: var(--muted); }
     .detail-warning { padding: 12px 14px; background: var(--amber-soft); border-radius: 7px; font-size: 13px; line-height: 1.5; color: var(--amber); margin: 16px 0; overflow-wrap: anywhere; }
@@ -178,7 +181,7 @@
     .dialog-body { padding: 0 26px 23px; display: grid; gap: 16px; }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .help { font-size: 11px; line-height: 1.5; color: var(--muted); }
-    .dialog-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 26px; background: #f6f8fb; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
+    .dialog-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 26px; background: var(--cc-canvas); border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
     .form-error { font-size: 13px; padding: 12px; border-radius: 8px; background: var(--red-soft); color: var(--red); line-height: 1.5; overflow-wrap: anywhere; }
     .form-error .btn { margin-top: 10px; }
     .form-notice { font-size: 12px; padding: 11px 12px; border-radius: 8px; background: var(--amber-soft); color: var(--amber); line-height: 1.5; }
@@ -194,7 +197,7 @@
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
     @media (max-width: 999px) {
       .shell { padding: 28px 24px; }
-      .topbar-inner { padding: 16px 24px; }
+
       .workspace { display: block; }
       .detail { display: none; position: static; max-height: none; overflow: visible; }
       body.detail-open .detail { display: block; }
@@ -204,12 +207,12 @@
       .detail-title { font-size: 25px; }
     }
     @media (max-width: 559px) {
-      .topbar-inner { padding: 15px 18px; gap: 10px; }
-      .topbar-label { display: none; }
+
+
       .connection { font-size: 11px; gap: 6px; }
       .shell { padding: 25px 16px; }
       .page-heading { display: block; margin-bottom: 24px; }
-      .subtitle { font-size: 13px; max-width: 33ch; margin-top: 9px; }
+
       .page-heading > .btn { margin-top: 18px; }
       .toolbar { flex-wrap: wrap; gap: 12px; margin-bottom: 15px; }
       .search-field { flex-basis: 100%; }
@@ -242,17 +245,11 @@
   </style>
 <link rel="stylesheet" href="/static/site.css?v=1">
 </head>
-<body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Cognitive Core</div>
-      <span class="topbar-label">Координация работы</span>
-      <div class="connection" id="connection" role="status" data-state="loading"><span class="connection-dot" aria-hidden="true"></span><span id="connectionText">Подключение</span></div>
-    </div>
-  </header>
+<body class="glass-mode coordination-page">
+  <!-- WORKSPACE_HEADER -->
   <main class="shell">
     <div class="page-heading">
-      <div><h1>Очередь задач</h1><p class="subtitle">От следующего шага до проверенного результата.</p></div>
+      <div><h1>Очередь задач</h1><div class="connection" id="connection" role="status" data-state="loading"><span class="connection-dot" aria-hidden="true"></span><span id="connectionText">Подключение</span></div></div>
       <button class="btn btn-primary" id="newTaskButton" type="button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Новая задача</button>
     </div>
     <div class="banner" id="globalBanner" role="alert" hidden><p id="globalMessage"></p><a class="btn btn-small" href="/ui/login" id="loginLink" target="_blank" rel="noopener noreferrer" aria-label="Войти в Core в новой вкладке" hidden>Войти в Core</a><button type="button" class="btn btn-small" id="bannerRefresh">Обновить данные</button></div>
