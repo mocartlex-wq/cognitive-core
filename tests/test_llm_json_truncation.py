@@ -97,6 +97,23 @@ async def test_unrelated_provider_error_is_not_swallowed():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bad", [
+    {"new_or_updated": {}}, {"deprecated_l3_ids": ""}, {"new_or_updated": None},
+    {"new_or_updated": [], "tools": {}}, {"new_or_updated": [{}]},
+    {"new_or_updated": [], "tools": [{}]}, ["new_or_updated"],
+])
+async def test_weekly_malformed_proposal_cannot_complete_an_empty_window(bad):
+    client = MagicMock()
+    client._try_call = AsyncMock(return_value=bad)
+    with patch.object(analyzer, "get_llm_client", return_value=client):
+        with pytest.raises(ValueError):
+            await analyzer.analyze_weekly("sample", [], [], [{"id": "b1"}])
+        assert client._try_call.await_count == 3
+        client._try_call.return_value = {"new_or_updated": []}
+        assert await analyzer.analyze_weekly("sample", [], [], [{"id": "b1"}]) == {"new_or_updated": []}
+
+
+@pytest.mark.asyncio
 async def test_weekly_missing_model_response_fails_but_valid_empty_synthesis_succeeds():
     client = MagicMock()
     client._try_call = AsyncMock(return_value=None)
@@ -124,6 +141,27 @@ async def test_weekly_retries_on_broken_json_and_asks_for_strict_json():
     assert c._try_call.await_count == 2
     second_user = c._try_call.await_args_list[1].args[2][1]["content"]
     assert "JSON" in second_user and len(second_user) > len(c._try_call.await_args_list[0].args[2][1]["content"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("truncated_twice", [False, True])
+async def test_weekly_retries_truncation_once_with_same_inputs_and_compact_changes(truncated_twice):
+    expected = {"new_or_updated": [{"content": {"description": "verified correction", "confidence": 0.98}}]}
+    client = MagicMock()
+    client._try_call = AsyncMock(side_effect=[
+        LLMTruncatedError("first"), LLMTruncatedError("second") if truncated_twice else expected,
+    ])
+    with patch.object(analyzer, "get_llm_client", return_value=client):
+        run = analyzer.analyze_weekly("d", [{"id": "old"}], [{"tool_name": "existing"}], [{"id": "verified"}])
+        if truncated_twice:
+            with pytest.raises(LLMTruncatedError, match="second"):
+                await run
+        else:
+            assert await run == expected
+    first, second = client._try_call.await_args_list
+    assert first.args[:2] == second.args[:2]
+    assert first.args[2][0] == second.args[2][0]
+    assert analyzer.get_user_weekly_compact(analyzer.lang()) in second.args[2][1]["content"]
 
 
 @pytest.mark.asyncio

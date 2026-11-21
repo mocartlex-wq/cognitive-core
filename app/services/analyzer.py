@@ -1,12 +1,13 @@
 import json
 
 from app.security.validator import validate_llm_response
-from app.services.llm_client import get_llm_client
+from app.services.llm_client import LLMTruncatedError, get_llm_client
 from app.services.prompts import (
     get_daily_prompt,
     get_user_daily,
     get_user_retry,
     get_user_weekly,
+    get_user_weekly_compact,
     get_weekly_prompt,
     lang,
 )
@@ -64,12 +65,18 @@ async def analyze_weekly(
     client = get_llm_client("weekly_consolidator")
     max_attempts = 3
     user = get_user_weekly(l)
+    compact = ""
     for attempt in range(max_attempts):
         try:
             raw = await client._try_call(client.primary_config, client.primary_model, [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": user + compact},
             ])
+        except LLMTruncatedError:
+            if compact or attempt == max_attempts - 1:
+                raise
+            compact = "\n\n" + get_user_weekly_compact(l)
+            continue
         except json.JSONDecodeError:
             # Битый JSON от модели — повод попросить ещё раз, а не ронять домен
             # с первой попытки (03.11.2026 так остались без L3 четыре домена).

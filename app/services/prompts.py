@@ -37,6 +37,17 @@ USER_WEEKLY = {
     "pt": "Analise os buffers semanais.",
 }
 
+USER_WEEKLY_COMPACT = {
+    "ru": "Предыдущий ответ превысил лимит. Верни полный JSON только с изменениями. Опусти неизменившиеся знания и инструменты. Кратко сохрани все исправления, основания и точные ID связей.",
+    "en": "The response exceeded the limit. Return complete JSON containing changes only. Omit unchanged knowledge and tools. Preserve every correction, its evidence and exact reference IDs concisely.",
+    "zh": "上次回答超出长度限制。只返回包含变更的完整 JSON，省略未变的知识和工具。简明保留所有修正、依据及准确的引用 ID。",
+    "ja": "前の回答は長さの上限を超えました。変更点だけを完全な JSON で返し、変更のない知識やツールは省略してください。すべての訂正と根拠、正確な参照 ID を簡潔に残してください。",
+    "ko": "이전 응답이 길이 제한을 초과했습니다. 변경 사항만 완전한 JSON으로 반환하고 변경되지 않은 지식과 도구는 생략하세요. 모든 수정 사항과 근거, 정확한 참조 ID를 간결하게 유지하세요.",
+    "es": "La respuesta excedió el límite. Devuelve un JSON completo solo con los cambios. Omite los conocimientos y herramientas sin cambios. Conserva de forma concisa cada corrección, su evidencia y los identificadores exactos.",
+    "ar": "تجاوز الرد السابق حد الطول. أعد JSON كاملا بالتغييرات فقط، واحذف المعارف والأدوات التي لم تتغير. احتفظ بإيجاز بكل تصحيح ودليله ومعرّفات مراجعه الدقيقة.",
+    "pt": "A resposta excedeu o limite. Retorne um JSON completo somente com as mudanças. Omita conhecimentos e ferramentas inalterados. Preserve de forma concisa cada correção, suas evidências e os identificadores exatos.",
+}
+
 USER_RETRY = {
     "ru": "Предыдущий ответ был в неверном формате. Ответь СТРОГО в JSON.",
     "en": "Previous response was in wrong format. Answer STRICTLY in JSON.",
@@ -410,6 +421,10 @@ def get_user_daily(language: str | None = None) -> str:
 
 def get_user_weekly(language: str | None = None) -> str:
     return USER_WEEKLY.get(language or lang(), USER_WEEKLY["ru"])
+
+
+def get_user_weekly_compact(language: str | None = None) -> str:
+    return USER_WEEKLY_COMPACT.get(language or lang(), USER_WEEKLY_COMPACT["ru"])
 
 def get_user_retry(language: str | None = None) -> str:
     return USER_RETRY.get(language or lang(), USER_RETRY["ru"])
