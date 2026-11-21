@@ -1848,6 +1848,8 @@ UI_TOP_NAV_CSS = """
 UI_HEAD_LINKS = (
     '<link rel="stylesheet" href="/static/shared.css?v=20260512o">'
     '<link rel="stylesheet" href="/static/glass.css?v=20260512o">'
+    '<script src="/static/site-theme.js?v=1"></script>'
+    '<link rel="stylesheet" href="/static/site.css?v=1">'
     '<script src="/static/theme.js?v=20260512o" defer></script>'
 )
 
@@ -1996,6 +1998,8 @@ def _ui_top_nav(active=""):
         # «AI-чат» (/ui/team) убран из меню 2026-05-30 — дублировал плавающее окно
         # ассистента и «Комнаты». Страница доступна по прямой ссылке /ui/team.
         ("/ui", "Комнаты", "rooms"),
+        ("/ui/memory", "Память", "memory"),
+        ("/ui/shared-tools", "Инструменты", "tools"),
         ("/ui/profile", "Профиль", "profile"),
         ("/sandbox", "API", "api"),
     ]

@@ -260,6 +260,8 @@ _TOPNAV_ITEMS = (
     # плавающее окно (на всех страницах), а командные чаты — «Комнаты».
     # Страница /ui/team остаётся доступной по прямой ссылке.
     ("/ui", "Комнаты", "rooms"),
+    ("/ui/memory", "Память", "memory"),
+    ("/ui/shared-tools", "Инструменты", "tools"),
     ("/ui/profile", "Профиль", "profile"),
     ("/sandbox", "API", "api"),
 )
@@ -270,15 +272,25 @@ _PAGE_ACTIVE = {
     "dashboard.html": "rooms",
     "webchat.html": "chat",
     "profile.html": "profile",
-    "memory.html": "profile",
-    "shared-tools.html": "profile",
+    "memory.html": "memory",
+    "shared-tools.html": "tools",
 }
+
+
+_WORKSPACE_HEADER = """
+<header class="top-bar">
+  <a class="brand" href="/"><span class="brand-icon"><span class="brand-dot"></span></span><span class="brand-name">Cognitive Core</span></a>
+  <!-- TOPNAV -->
+  <div class="top-status"><button class="theme-toggle" onclick="toggleTheme()" aria-label="Сменить тему" title="Сменить тему">
+    <svg class="icon icon-sun" aria-hidden="true"><use href="/static/icons.svg#sun"/></svg>
+    <svg class="icon icon-moon" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg></button></div>
+</header>"""
 
 
 def render_top_nav(active: str = "") -> str:
     parts = ['<nav class="top-nav">']
     for href, label, key in _TOPNAV_ITEMS:
-        cls = ' class="active"' if key == active else ""
+        cls = ' class="active" aria-current="page"' if key == active else ""
         parts.append(f'<a href="{href}"{cls}>{label}</a>')
     parts.append("</nav>")
     return "".join(parts)
@@ -291,6 +303,8 @@ def _html(path: str):
             content = fh.read()
     except OSError:
         return FileResponse(full, headers=_NO_CACHE_HTML)
+    if "<!-- WORKSPACE_HEADER -->" in content:
+        content = content.replace("<!-- WORKSPACE_HEADER -->", _WORKSPACE_HEADER)
     if "<!-- TOPNAV -->" in content:
         content = content.replace("<!-- TOPNAV -->", render_top_nav(_PAGE_ACTIVE.get(path, "")))
     content = _inject_assistant_widget(content)

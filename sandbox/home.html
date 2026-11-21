@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
+<script src="/static/site-theme.js?v=1"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cognitive Core</title>
@@ -702,6 +703,7 @@
   .shepherd-modal-overlay-container { fill: rgba(5,8,16,0.7); }
 </style>
 <script src="/static/head-bootstrap.js?v=20260522"></script>
+<link rel="stylesheet" href="/static/site.css?v=1">
 </head>
 <body class="glass-mode">
 <div class="orb-3"></div>
@@ -729,13 +731,23 @@
 
   <!-- ============ HERO ============ -->
   <section class="glass-hero">
-    <h1>Cognitive Core</h1>
-    <p class="tagline">5-слойная самохостимая память для AI-агентов с автоматической консолидацией опыта в долгосрочные знания.</p>
+    <div>
+    <h1>Общая память для ваших агентов</h1>
+    <p class="tagline">Сохраняйте решения по проектам, находите инструменты и передавайте работу между помощниками.</p>
     <div class="glass-hero-actions">
-      <a href="/ui/pricing" class="glass-btn glass-btn-primary">💎 Тарифы и регистрация</a>
-      <a href="/ui/team" class="glass-btn glass-btn-ghost">💬 AI-чат</a>
-      <a href="/ui" class="glass-btn glass-btn-ghost">📥 Комната</a>
-      <button class="glass-btn glass-btn-ghost" onclick="openDemo()" style="margin-left:8px">▶ Демо 2 мин</button>
+      <a href="/ui/profile" class="glass-btn glass-btn-primary">Открыть кабинет</a>
+      <a href="/ui/pricing" class="glass-btn glass-btn-ghost">Тарифы</a>
+      <a href="/ui/team" class="glass-btn glass-btn-ghost">Чат с помощником</a>
+      <a href="/ui" class="glass-btn glass-btn-ghost">Комнаты</a>
+      <button class="glass-btn glass-btn-ghost" onclick="openDemo()" style="margin-left:8px">Посмотреть демо</button>
+    </div>
+    </div>
+    <div class="home-finder">
+      <form action="/ui/memory" method="get" role="search">
+        <label for="home-query">Поиск по памяти</label>
+        <div class="home-query"><input id="home-query" name="q" type="search" maxlength="200" placeholder="Тема, решение или задача"><button type="submit">Найти</button></div>
+      </form>
+      <a href="/ui/shared-tools"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#layers"/></svg>Каталог инструментов и навыков</a>
     </div>
   </section>
 
