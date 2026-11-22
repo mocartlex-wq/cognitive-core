@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Решения по правилам · Cognitive Core</title><script src="/static/site-theme.js?v=1"></script>
+<link rel="stylesheet" href="/static/site.css?v=1">
+<style>
+body{margin:0;background:var(--cc-canvas);color:var(--cc-ink);font:16px/1.5 var(--font)}
+main{max-width:720px;margin:0 auto;padding:32px 18px 80px}h1{line-height:1.12;letter-spacing:-.035em}
+a{color:var(--cc-link)}article,fieldset{margin:18px 0;padding:16px 20px;border:1px solid var(--cc-line);border-radius:12px;background:var(--cc-paper)}
+label{display:block;padding:6px 0}button{font:inherit;padding:8px 16px;border-radius:8px;color:white;background:var(--cc-action);border:0;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible{outline:3px solid var(--cc-link);outline-offset:2px}
+#scope,.hint{color:var(--cc-muted)}li{margin:8px 0}p{overflow-wrap:anywhere}select,input{font:inherit;max-width:100%}
+</style></head><body><main><a href="/ui/profile">← Личный кабинет</a>
+<h1>Решения по правилам</h1><p role="status" id="status">Загрузка…</p>
+<p id="login" hidden><a href="/ui/login" target="_blank" rel="noopener">Войти в кабинет</a> в новой вкладке. После входа <button id="retry" type="button">Открыть решение</button>.</p>
+<section id="recent" hidden><h2>Последние просмотры</h2><ul></ul></section>
+<article id="detail" hidden><h2 id="title"></h2><p id="scope"></p><p class="hint" id="instance"></p><ul id="rules"></ul>
+<p id="outcome"></p><form id="vote" hidden>
+<fieldset><legend>Что посмотреть первым?</legend>
+<label><input type="radio" required name="choice" value="diagram_first"> Сначала схема, затем таблица</label>
+<label><input type="radio" required name="choice" value="table_first"> Сначала таблица, затем схема</label></fieldset>
+<fieldset><legend>Только сейчас или и на будущее?</legend>
+<label><input type="radio" required name="duration" value="once"> Только для этого просмотра</label>
+<label><input type="radio" required name="duration" value="future"> Для этого и следующих просмотров в указанной области</label></fieldset>
+<button>Подтвердить выбор</button></form><button id="revoke" hidden>Отозвать решение на будущее</button>
+<details id="feedback" hidden><summary>Оценить применимость правила</summary>
+<form id="rate"><label>Правило <select required name="rule_id" id="rule-select"></select></label>
+<label>Изменение веса <select required name="delta"><option value="">Выберите</option><option value="1">Повысить на 1</option><option value="-1">Снизить на 1</option></select></label>
+<label>Что показал этот просмотр? <input required name="reason" maxlength="120"></label><button>Сохранить отзыв</button>
+</form></details></article></main><script src="/static/team-decisions.js" defer></script></body></html>

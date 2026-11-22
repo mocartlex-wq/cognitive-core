@@ -59,10 +59,12 @@ GLOBAL_HARD_CAP_S = 35.0
 # ─────────────────────────────────────────────────────────────────
 # Tool schemas — registered with MCP `tools/list`
 # ─────────────────────────────────────────────────────────────────
+from app.api import team_rule_tools
 from app.models.coordination import TaskAction, TaskCreate
 from app.models.event import TaskCheckpoint
 
 TOOLS: list[dict[str, Any]] = [
+    *team_rule_tools.TOOLS,
     {
         "name": "cognitive_remember",
         "description": (
@@ -99,6 +101,7 @@ TOOLS: list[dict[str, Any]] = [
             "Для статуса задачи учитывайте task_state и дату наблюдения; L3 — общий опыт, не текущий статус. "
             "Полный источник и его преемник доступны через cognitive_read_record по id. "
             "Полный текст карточки из frame.tools открывается через cognitive_read_tool. "
+            "Для решения конфликта командных правил и порядка просмотра материалов начните с cognitive_team_rules. "
             "domain НЕОБЯЗАТЕЛЕН: без него поиск идёт по доменам знаний "
             "(work_journal, infra_lessons, skills, setup_log, deploy) — там "
             "выводы, а не переписка. Указывайте домен, только если точно знаете "
@@ -1124,6 +1127,10 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
     """Map MCP tool name to existing REST endpoint and execute."""
     a = args or {}
 
+    if name in team_rule_tools.CATALOG:
+        agent, owner = await _resolve_agent_full(request)
+        return await team_rule_tools.dispatch(name, a, owner, agent)
+
     if name == "cognitive_remember":
         domain = a.get("domain")
         if not domain or not a.get("task"):
@@ -1460,6 +1467,7 @@ async def _dispatch_tool(request: Request, name: str, args: dict) -> dict:
             },
             "best_practices": [
                 "После каждого важного решения/lesson → cognitive_remember (lessons-поле, без — — двойного дефиса и без ; ).",
+                "При поручении выбрать порядок демонстрационных материалов → cognitive_team_rules без ID, затем cognitive_resolve_team_rules.",
                 "ПЕРЕД новой задачей → cognitive_recall(query) — проверь не делал ли уже похожее.",
                 "Длинная сессия → cognitive_save_state в начале (snapshot working memory).",
                 "Команда — через rooms (открытый коллективный чат) или DM (приватный 1-to-1).",
