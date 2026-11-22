@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.db.postgres import get_pool
-from app.models.team_rules import Answer, Case, Feedback
+from app.models.team_rules import Answer, Case, Feedback, Rule
 from app.security.middleware import require_user
 from app.security.session import SESSION_COOKIE_NAME
 from app.security.session_origin import require_same_origin_write
@@ -30,6 +30,13 @@ async def create_case(body: Case, owner=Depends(cabinet)):
         if rules.case_key(owner, body) == rules.case_key(owner, rules.DEMO) and body != rules.DEMO:
             raise HTTPException(409, "Область демонстрационного примера зарезервирована.")
         return rules.card(await rules.register(conn, owner, body), body)
+
+
+@router.post("/cases/{case_id}/refinements")
+async def refine_rule(case_id: UUID, body: Rule, owner=Depends(cabinet)):
+    pool = await get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        return await rules.refine(conn, owner, case_id, body)
 
 
 @router.post("/cases/{case_id}/feedback")

@@ -146,6 +146,15 @@ async def test_weight_log_and_compatible_rules(env):
     history = await call("team_rule_history", owner, {"case_id": key})
     assert len(history["recent_feedback"]) == 2 and len(history["decisions"]) == 2
     exact = await call("team_rule_history", owner, {"case_id": key, "feedback_id": feedback["id"]})
+    child = {"address": exact["address"] + ".10", "weight": 8, "reason": "Уточнение", "choice": "table_first", "when": ["Демонстрация"]}
+    route = "/user/team-decisions/cases/" + key + "/refinements"
+    refined = await client.post(route, json=child, headers=owner_headers())
+    assert refined.status_code == 200 and refined.json()["refined_at"]
+    assert (await client.post(route, json=child, headers=owner_headers())).json() == refined.json()
+    assert (await client.post(route, json={**child, "address": exact["address"] + ".11", "when": ["чужая область"]}, headers=owner_headers())).status_code == 422
+    new_run = await call("resolve_team_rules", owner, {"case_id": key, "instance_id": str(uuid4())})
+    assert new_run["ask_owner"] and refined.json()["rule_id"] in new_run["assessment"]["applied_rule_ids"]
+    assert (await call("resolve_team_rules", owner, {"case_id": key, "instance_id": run["instance_id"]}))["choice"] == "diagram_first"
     assert exact["source"] == "owner_cabinet" and exact["reason"] == feedback["reason"] and exact["version"] == 2
 
 

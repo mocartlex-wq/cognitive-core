@@ -76,9 +76,12 @@ async def locked_case(conn, owner, case_id, agent=None):
 
 async def rules_at(conn, key, spec):
     rules = {}
-    for r in spec.rules:
+    additions = await conn.fetch("SELECT rule,created_at FROM team_rule_refinements WHERE case_id=$1 ORDER BY created_at,address", key)
+    declared = [(r, None) for r in spec.rules]
+    declared.extend((Rule.model_validate_json(row["rule"]), row["created_at"].isoformat()) for row in additions)
+    for r, created in declared:
         rule_id = str(uuid5(key, r.address))
-        rules[rule_id] = {"rule_id": rule_id, **r.model_dump(), "version": 1}
+        rules[rule_id] = {"rule_id": rule_id, **r.model_dump(), "version": 1, "refined_at": created}
     # Each accepted feedback has the resulting version. Read only the newest for each rule.
     rows = await conn.fetch(
         """SELECT DISTINCT ON (payload->>'rule_id') receipt FROM team_rule_feedback
@@ -206,6 +209,22 @@ async def revoke(conn, owner, run_id):
         run_id,
     )
     return result(run, spec)
+
+
+async def refine(conn, owner, case_id, rule: Rule):
+    spec = await locked_case(conn, owner, case_id)
+    rules = await rules_at(conn, case_id, spec)
+    rid = str(uuid5(case_id, rule.address))
+    existing = await conn.fetchval("SELECT rule FROM team_rule_refinements WHERE case_id=$1 AND address=$2", case_id, rule.address)
+    if existing and Rule.model_validate_json(existing) == rule:
+        return rules[rid]
+    if rid in rules:
+        raise HTTPException(409, "Этот адрес занят другим правилом.")
+    parent = rules.get(str(uuid5(case_id, rule.address.rpartition(".")[0])))
+    if not parent or parent["weight"] != 10 or parent["required"] != rule.required or not set(parent["when"]) < set(rule.when) <= set(spec.conditions) or len(rules) >= 32:
+        raise HTTPException(422, "Нужен родитель веса 10 и более узкое условие внутри этой области.")
+    await conn.execute("INSERT INTO team_rule_refinements(case_id,address,rule) VALUES($1,$2,$3)", case_id, rule.address, rule.model_dump_json())
+    return (await rules_at(conn, case_id, spec))[rid]
 
 
 async def feedback(conn, owner, case_id, body: Feedback):

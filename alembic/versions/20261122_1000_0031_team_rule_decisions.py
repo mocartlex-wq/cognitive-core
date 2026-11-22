@@ -23,6 +23,10 @@ def upgrade():
         );
         CREATE UNIQUE INDEX team_case_future ON team_rule_runs(case_id)
             WHERE duration='future' AND revoked_at IS NULL;
+        CREATE TABLE team_rule_refinements (
+            case_id uuid NOT NULL REFERENCES team_rule_cases ON DELETE CASCADE, address text NOT NULL,
+            rule jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(case_id,address)
+        );
         CREATE TABLE team_rule_feedback (
             case_id uuid NOT NULL REFERENCES team_rule_cases ON DELETE CASCADE, id uuid NOT NULL,
             payload jsonb NOT NULL, receipt jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
@@ -34,4 +38,4 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("DROP TABLE team_rule_feedback, team_rule_runs, team_rule_cases")
+    op.execute("DROP TABLE team_rule_feedback, team_rule_refinements, team_rule_runs, team_rule_cases")
