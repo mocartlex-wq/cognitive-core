@@ -102,7 +102,8 @@ class TestAlembicChainStaysLinear:
         all_revs = {r for _, r, _ in revs}
         downs = {d for _, _, d in revs}
         heads = all_revs - downs
-        assert heads == {"0030"}, f"ожидали единственную голову 0030, получили {heads}"
+        assert heads == {"0031"}, f"ожидали единственную голову 0031, получили {heads}"
+        assert any(rev == "0031" and down == "0030" for _, rev, down in revs)
         assert any(rev == "0030" and down == "0029" for _, rev, down in revs)
         assert any(rev == "0029" and down == "0028" for _, rev, down in revs)
         assert any(rev == "0028" and down == "0027" for _, rev, down in revs)

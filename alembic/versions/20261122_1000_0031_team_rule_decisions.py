@@ -38,4 +38,12 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("DROP TABLE team_rule_feedback, team_rule_refinements, team_rule_runs, team_rule_cases")
+    op.execute("""
+        LOCK TABLE team_rule_cases IN ACCESS EXCLUSIVE MODE;
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM team_rule_cases) THEN
+                RAISE EXCEPTION 'Team rule cases exist: retain schema and roll back code only';
+            END IF;
+        END $$;
+        DROP TABLE team_rule_feedback, team_rule_refinements, team_rule_runs, team_rule_cases;
+    """)
