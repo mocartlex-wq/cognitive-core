@@ -3,6 +3,13 @@
   const id = new URLSearchParams(location.search).get('conflict');
   const base = '/user/team-decisions';
   let detail, feedbackId;
+  function chatDraft(conflict) {
+    const values = new URLSearchParams(location.hash.slice(1));
+    const choice = values.get('choice'), duration = values.get('duration');
+    if (values.size !== 3 || values.get('for') !== conflict ||
+        !['diagram_first', 'table_first'].includes(choice) || !['once', 'future'].includes(duration)) return null;
+    return {choice, duration};
+  }
   el('retry').onclick = () => location.reload();
   async function request(path, body) {
     const options = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
@@ -10,7 +17,9 @@
     if (response.status === 401) el('login').hidden = false;
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw Error(typeof error.detail === 'string' ? error.detail : 'Не удалось выполнить запрос.');
+      const failure = Error(typeof error.detail === 'string' ? error.detail : 'Не удалось выполнить запрос.');
+      failure.status = response.status;
+      throw failure;
     }
     return response.json();
   }
@@ -36,9 +45,13 @@
     }
     const duration = {future:'Для будущих просмотров в этой области.',once:'Только для этого просмотра.',
                       inherited:'По ранее подтверждённому решению владельца.',rules:'По применимым правилам.'};
+    const draft = data.choice ? null : chatDraft(data.conflict_id);
     el('outcome').textContent = data.choice ? data.options[data.choice] + '. ' +
-      (data.revoked_at ? 'Решение на будущее отозвано.' : duration[data.duration]) : 'Два правила задают разный порядок. Выберите вариант и срок.';
-    el('vote').hidden = !!data.choice;
+      (data.revoked_at ? 'Решение на будущее отозвано.' : duration[data.duration]) :
+      'Ожидает подтверждения. Ответ в чате вступит в силу, когда вы подтвердите выбор здесь.';
+    el('chat-draft').hidden = !draft;
+    if (draft) el('draft-summary').textContent = data.options[draft.choice] + '. ' + duration[draft.duration];
+    el('vote').hidden = !!data.choice || !!draft;
     el('feedback').hidden = !data.choice;
     el('revoke').hidden = data.duration !== 'future' || !!data.revoked_at;
   }
@@ -48,12 +61,29 @@
     catch (error) { el('status').textContent = error.message; }
     finally { button.disabled = false; }
   }
+  async function confirmAnswer(body) {
+    try {
+      display(await request(base+'/'+id+'/answer', body));
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      display(await request(base+'/'+id));
+      throw error;
+    }
+    el('status').textContent = 'Ваш выбор сохранён. Вернитесь в исходный чат, чтобы продолжить этот просмотр.';
+  }
+  el('confirm-draft').onclick = event => emit(event.currentTarget, async () => {
+    const draft = chatDraft(detail.conflict_id);
+    if (draft && !detail.choice) await confirmAnswer(draft);
+    else display(detail);
+  });
+  el('edit-draft').onclick = () => {
+    history.replaceState(null, '', location.pathname + location.search);
+    display(detail);
+    el('vote').querySelector('input').focus();
+  };
   el('vote').onsubmit = event => {
     event.preventDefault();
-    emit(event.submitter, async () => {
-      display(await request(base+'/'+id+'/answer', Object.fromEntries(new FormData(el('vote')))));
-      el('status').textContent = 'Ваш выбор сохранён.';
-    });
+    emit(event.submitter, () => confirmAnswer(Object.fromEntries(new FormData(el('vote')))));
   };
   el('revoke').onclick = event => emit(event.currentTarget, async () => {
     display(await request(base+'/'+id+'/revoke', {}));
@@ -88,5 +118,6 @@
     }
     el('status').textContent = '';
   }
+  window.addEventListener('hashchange', () => { if (detail) display(detail); });
   load().catch(error => { el('status').textContent = error.message; });
 })();

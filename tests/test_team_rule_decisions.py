@@ -120,6 +120,31 @@ async def test_two_scopes_and_concurrent_ballots(env):
 
 
 @pytest.mark.asyncio
+async def test_chat_answer_prepares_existing_confirmation(env):
+    client, owner, other = env
+    key = (await call("team_rules", owner))["cases"][0]["case_id"]
+    action = {"case_id": key, "instance_id": str(uuid4())}
+    answer = {"choice": "diagram_first", "duration": "once"}
+    draft = {**action, "chat_answer": answer}
+    assert (await call("resolve_team_rules", owner, draft))["_status"] == 404
+    initial = await call("resolve_team_rules", owner, action)
+    assert initial["ask_owner"]
+    pending = await call("resolve_team_rules", owner, draft)
+    assert pending["confirmation_url"] == initial["owner_url"] + f"#for={initial['conflict_id']}&choice=diagram_first&duration=once"
+    assert pending["status"] == "pending_owner" and pending["choice"] is pending["decision_source"] is None
+    assert not pending["ask_owner"] and "question" not in pending
+    assert await call("resolve_team_rules", owner, draft) == pending
+    assert (await call("resolve_team_rules", other, draft))["_status"] == 404
+    url = "/user/team-decisions/" + initial["conflict_id"]
+    assert (await client.get(url, headers=owner_headers())).json()["decided_at"] is None
+    changed = {**answer, "choice": "table_first"}
+    assert (await client.post(url + "/answer", json=changed, headers=owner_headers())).status_code == 200
+    resolved = await call("resolve_team_rules", owner, draft)
+    assert resolved["choice"] == "table_first" and resolved["decision_source"] == "owner_cabinet"
+    assert "confirmation_url" not in resolved
+
+
+@pytest.mark.asyncio
 async def test_weight_log_and_compatible_rules(env):
     client, owner, _ = env
     cfg = ledger.DEMO.model_dump()
