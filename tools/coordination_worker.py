@@ -328,6 +328,8 @@ def _dbos_client(settings: WorkerSettings):
 def enqueue_task(client: CoordinationClient, durable_client, settings: WorkerSettings, task_id: str) -> dict:
     task_id = str(UUID(task_id))
     task = client.get(task_id)
+    if task.get("reference_acceptance"):
+        raise ValueError("Git snapshot worker cannot inspect a reference deliverable")
     allowed_worktree(task, settings)  # Reject unsafe/unconfigured input before taking ownership.
     fingerprint = input_fingerprint(task)
     if task["status"] == "queued":

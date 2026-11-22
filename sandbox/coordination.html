@@ -277,7 +277,7 @@
           <div class="detail-warning" id="leaseWarning" hidden><strong>Исполнитель давно не подтверждал работу</strong>Срок подтверждения истёк. Перед продолжением нужно сверить состояние попытки и её результат.</div>
           <div class="detail-warning" id="blockerBox" hidden><strong>Что мешает продолжить</strong><span id="detailBlocker"></span></div>
           <dl class="people"><div><dt>Исполнитель</dt><dd id="detailWorker"></dd></div><div><dt>Координатор</dt><dd id="detailCoordinator"></dd></div></dl>
-          <section class="section"><div class="section-title"><h3>Критерий готовности</h3></div><p class="prose" id="detailAcceptance"></p></section>
+          <section class="section"><div class="section-title"><h3>Критерий готовности</h3></div><p class="prose" id="detailAcceptance"></p><div id="referenceDetail" class="prose"></div></section>
           <details class="section" id="descriptionSection"><summary>Описание задачи</summary><p class="prose" id="detailDescription"></p></details>
           <section class="section"><div class="result-track"><div class="section-title"><h3>Результат исполнителя</h3><span class="section-label" id="resultLabel"></span></div><p class="prose" id="detailResult"></p><ul class="evidence-list" id="resultEvidence"></ul></div></section>
           <section class="section"><div class="review-track" id="reviewTrack"><div class="section-title"><h3>Независимая приёмка</h3></div><p class="prose" id="detailReview"></p><ul class="evidence-list" id="reviewEvidence"></ul><p class="review-meta" id="reviewMeta" hidden></p></div><button class="btn btn-primary review-button" id="openReview" type="button" hidden>Проверить результат</button></section>
@@ -296,6 +296,14 @@
         <div class="form-error" id="createError" role="alert" hidden></div>
         <div class="field"><label for="createTitle">Что нужно сделать</label><input id="createTitle" name="title" required maxlength="300" placeholder="Например, проверить восстановление после перезапуска"></div>
         <div class="form-row"><div class="field"><label for="createProject">Проект</label><input id="createProject" name="project" required maxlength="160" list="projectOptions" placeholder="cognitive_core"><datalist id="projectOptions"></datalist></div><div class="field"><label for="createAgent">Исполнитель <span class="muted">(необязательно)</span></label><input id="createAgent" name="assigned_agent_id" maxlength="200" placeholder="Идентификатор агента"></div></div>
+        <label><input id="useReference" type="checkbox" style="width:auto;min-height:0"> Сверить итоговый файл с образцом</label>
+        <fieldset id="referenceFields" class="field" hidden disabled>
+          <legend>Образец и требования владельца</legend>
+          <label for="refUri">Путь или ссылка на образец</label><input id="refUri" required maxlength="2048">
+          <label for="refHash">SHA-256 образца</label><input id="refHash" required pattern="[a-fA-F0-9]{64}" maxlength="64">
+          <label for="targetUri">Путь или ссылка на файл для выдачи</label><input id="targetUri" required maxlength="2048">
+          <label for="refCriteria">Что сверить в итоговом файле (по одному требованию в строке)</label><textarea id="refCriteria" required maxlength="12000"></textarea>
+        </fieldset>
         <div class="field"><label for="createAcceptance">Критерий готовности</label><textarea id="createAcceptance" name="acceptance" required maxlength="6000" placeholder="Какой результат должен увидеть независимый проверяющий"></textarea></div>
         <div class="field"><label for="createNext">Первый шаг</label><textarea id="createNext" name="next_step" required maxlength="2000" placeholder="Конкретное действие, с которого начнётся работа"></textarea></div>
         <div class="field"><label for="createDescription">Контекст <span class="muted">(необязательно)</span></label><textarea id="createDescription" name="description" maxlength="12000" placeholder="Исходные данные, ограничения и ссылки"></textarea></div>
@@ -313,6 +321,14 @@
         <div class="form-notice" id="reviewChanged" hidden>Состояние задачи обновилось. Перечитайте его перед отправкой приёмки. Ваш ввод сохранён.</div>
         <p class="help">Проверьте результат по критерию готовности. Ссылка ниже должна подтверждать вашу проверку.</p>
         <fieldset class="verdicts"><legend>Решение</legend><div class="verdict-options"><label class="verdict-choice"><input type="radio" name="verdict" value="approve" checked><span><strong>Принять</strong><small>Результат проверен</small></span></label><label class="verdict-choice"><input type="radio" name="verdict" value="reject"><span><strong>На доработку</strong><small>Есть замечания</small></span></label></div></fieldset>
+        <fieldset id="inspectionFields" class="field" hidden disabled>
+          <legend>Независимая сверка итогового файла</legend>
+          <p id="inspectionTarget" class="prose"></p>
+          <label for="checkedReferenceHash">SHA-256 открытого образца</label><input id="checkedReferenceHash" required pattern="[a-fA-F0-9]{64}" maxlength="64">
+          <label for="inspectionHash">SHA-256 открытого файла</label><input id="inspectionHash" required pattern="[a-fA-F0-9]{64}" maxlength="64">
+          <div id="criterionInputs" class="field"></div>
+          <label for="inspectionLesson">Как следующему агенту повторить проверку</label><textarea id="inspectionLesson" maxlength="2000" required></textarea>
+        </fieldset>
         <div class="field"><label for="reviewComment">Комментарий к проверке</label><textarea id="reviewComment" name="detail" required maxlength="4000" placeholder="Что вы проверили и почему принимаете результат или возвращаете его"></textarea></div>
         <div class="field"><label for="reviewUrl">Ссылка на подтверждение проверки</label><input id="reviewUrl" name="evidence_uri" type="url" required maxlength="2048" placeholder="https://…"><p class="help">Веб-ссылка на протокол, проверенный результат или отчёт.</p></div>
         <div class="field"><label for="reviewEvidenceDescription">Что подтверждает ссылка</label><input id="reviewEvidenceDescription" name="evidence_description" required maxlength="1000" placeholder="Например, результаты повторного запуска и сравнения"></div>
@@ -341,7 +357,7 @@
         hasLoaded: false, loading: false, authRequired: false, loadSerial: 0, historySerial: 0,
         listController: null, renderedTask: '', historyKey: '', lastSync: null, limit: 200, nextCursor: null, pagesLoaded: 1,
         historyEvents: [], historyCursor: null, historyPagesLoaded: 1, historyLoading: false, historyRetryMore: false,
-        reviewBase: null, reviewDraftTask: null, createReceipt: null, reviewReceipt: null,
+        reviewBase: null, reviewDraftAttempt: null, createReceipt: null, reviewReceipt: null,
         creating: false, reviewing: false, reviewConflict: false, toastTimer: null
       };
 
@@ -562,6 +578,10 @@
           return row;
         }));
       }
+      function describeFinding(finding) {
+        const statuses = {matched: 'Совпадает', different: 'Расхождение', missing: 'Отсутствует'};
+        return statuses[finding.outcome] + ' · ' + finding.location + ' · ' + finding.observed;
+      }
       function renderDetail(force = false) {
         const task = state.selected;
         $('detailEmpty').hidden = !!task;
@@ -578,6 +598,22 @@
         $('detailStatus').className = status.className;
         text('detailStatus', status.textContent);
         text('detailNext', task.next_step || 'Следующий шаг не указан');
+        const ref = task.reference_acceptance;
+        const detail = $('referenceDetail');
+        detail.replaceChildren();
+        if (ref) {
+          detail.append(node('p', '', 'Образец: ' + ref.reference.uri + ' · SHA-256 ' + ref.reference.sha256),
+            node('p', '', 'Файл для выдачи: ' + ref.deliverable_uri));
+          for (const [key, expected] of Object.entries(ref.criteria)) {
+            detail.append(node('h3', '', expected));
+            for (const [label, inspection] of [['Исполнитель', task.inspection], ['Проверяющий', task.review?.inspection]]) {
+              const finding = inspection?.findings?.[key];
+              if (finding) detail.append(node('p', '', label + ' · ' + describeFinding(finding)));
+            }
+          }
+          if (task.inspection) detail.append(node('p', '', 'SHA-256 предъявленного файла: ' + task.inspection.artifact.sha256));
+          if (task.review?.lesson) detail.append(node('p', '', 'Как повторить проверку: ' + task.review.lesson));
+        }
         text('detailAcceptance', task.acceptance || 'Критерий не указан');
         text('detailDescription', task.description || 'Дополнительного описания нет.');
         $('descriptionSection').hidden = !task.description;
@@ -745,6 +781,15 @@
               }
               detail.append(reviewBlock);
             }
+            const inspection = event.action === 'review' ? event.review?.inspection :
+              event.action === 'submit' ? event.inspection : null;
+            if (inspection) {
+              detail.append(historyField('Проверенный файл', inspection.artifact.uri + ' · ' + inspection.artifact.sha256));
+              for (const [key, finding] of Object.entries(inspection.findings)) {
+                detail.append(historyField(event.reference_acceptance?.criteria[key] || key, describeFinding(finding)));
+              }
+            }
+            if (event.review?.lesson) detail.append(historyField('Как повторить проверку', event.review.lesson));
             if (event.worker) detail.append(historyField('Исполнитель в этой попытке', actorName(event.worker) + (event.worker.session_id ? '\nСеанс ' + event.worker.session_id : '')));
             if (event.attempt_id) detail.append(historyField('Попытка', event.attempt_id));
             row.append(detail);
@@ -814,6 +859,12 @@
       function requiredText(ids) {
         ids.forEach(id => $(id).setCustomValidity($(id).value.trim() ? '' : 'Заполните поле содержательным текстом.'));
       }
+      function showReferenceFields() {
+        const enabled = $('useReference').checked;
+        $('referenceFields').hidden = $('referenceFields').disabled = !enabled;
+      }
+      $('useReference').addEventListener('change', showReferenceFields);
+      $('createForm').addEventListener('reset', () => queueMicrotask(showReferenceFields));
       async function createTask(event) {
         event.preventDefault();
         if (state.creating) return;
@@ -823,6 +874,18 @@
           session_id: sessionId, title: trimField('createTitle'), project: trimField('createProject'),
           acceptance: trimField('createAcceptance'), next_step: trimField('createNext'), description: trimField('createDescription')
         };
+        if ($('useReference').checked) {
+          const lines = trimField('refCriteria').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          if (!lines.length || lines.length > 30 || lines.some(line => line.length > 1000)) {
+            text('createError', 'Укажите от 1 до 30 требований длиной до 1000 символов каждое.');
+            $('createError').hidden = false; return;
+          }
+          payload.reference_acceptance = {
+            reference: {uri: trimField('refUri'), sha256: trimField('refHash').toLowerCase()},
+            deliverable_uri: trimField('targetUri'),
+            criteria: Object.fromEntries(lines.map((line, i) => ['c' + (i + 1), line]))
+          };
+        }
         if (trimField('createAgent')) payload.assigned_agent_id = trimField('createAgent');
         state.creating = true; $('createSubmit').disabled = true; text('createSubmit', 'Создаём…'); $('createError').hidden = true;
         try {
@@ -841,8 +904,24 @@
       function openReview() {
         const task = state.selected;
         if (!task || task.status !== 'review') return;
-        if (state.reviewDraftTask !== task.task_id) { $('reviewForm').reset(); state.reviewReceipt = null; }
-        state.reviewDraftTask = task.task_id;
+        if (state.reviewDraftAttempt !== task.attempt_id) { $('reviewForm').reset(); state.reviewReceipt = null; }
+        if (task.reference_acceptance && $('criterionInputs').dataset.attempt !== task.attempt_id) {
+          const ref = task.reference_acceptance;
+          $('criterionInputs').replaceChildren();
+          $('checkedReferenceHash').value = ''; $('inspectionHash').value = ''; $('inspectionLesson').value = '';
+          text('inspectionTarget', 'Откройте файл ' + ref.deliverable_uri + ' и сравните с ' + ref.reference.uri);
+          for (const [key, expected] of Object.entries(ref.criteria)) {
+            const group = node('div', 'field'); group.dataset.key = key;
+            group.append(node('strong', '', expected));
+            for (const [name, label] of [['location', 'Где в файле проверено'], ['observed', 'Что обнаружено']]) {
+              const field = node('input'); field.name = name; field.required = true; field.maxLength = 1000;
+              const caption = node('label', '', label); caption.append(field); group.append(caption);
+            }
+            $('criterionInputs').append(group);
+          }
+          $('criterionInputs').dataset.attempt = task.attempt_id;
+        }
+        state.reviewDraftAttempt = task.attempt_id;
         state.reviewConflict = false;
         state.reviewBase = { task_id: task.task_id, version: task.version, status: task.status };
         text('reviewTaskTitle', task.title);
@@ -851,6 +930,7 @@
       }
       function updateVerdict() {
         const reject = $('reviewForm').elements.verdict.value === 'reject';
+        $('inspectionFields').disabled = $('inspectionFields').hidden = reject || !state.selected?.reference_acceptance;
         $('reviewNextField').hidden = !reject;
         text('reviewSubmit', reject ? 'Вернуть на доработку' : 'Принять результат');
       }
@@ -871,6 +951,9 @@
         $('reviewReload').disabled = true;
         try {
           const task = await request('/coord/tasks/' + encodeURIComponent(state.reviewBase.task_id));
+          if (task.status === 'review' && state.reviewDraftAttempt !== task.attempt_id) {
+            upsertTask(task); $('reviewDialog').close(); openReview(); return;
+          }
           state.reviewBase = { task_id: task.task_id, version: task.version, status: task.status };
           state.reviewConflict = false;
           upsertTask(task);
@@ -895,12 +978,20 @@
           verdict: $('reviewForm').elements.verdict.value, detail: trimField('reviewComment'),
           evidence: [{ uri, description: trimField('reviewEvidenceDescription') }]
         };
+        if (state.selected?.reference_acceptance && payload.verdict === 'approve') {
+          const findings = Object.fromEntries([...$('criterionInputs').children].map(group =>
+            [group.dataset.key, {location: group.querySelector('[name=location]').value.trim(),
+              observed: group.querySelector('[name=observed]').value.trim(), outcome: 'matched'}]));
+          payload.inspection = {reference_sha256: trimField('checkedReferenceHash').toLowerCase(), artifact: {uri: state.selected.reference_acceptance.deliverable_uri,
+            sha256: trimField('inspectionHash').toLowerCase()}, findings};
+          payload.lesson = trimField('inspectionLesson');
+        }
         if (payload.verdict === 'reject' && trimField('reviewNext')) payload.next_step = trimField('reviewNext');
         state.reviewing = true; $('reviewSubmit').disabled = true; text('reviewSubmit', 'Сохраняем…'); $('reviewError').hidden = true;
         try {
           const task = await request('/coord/tasks/' + encodeURIComponent(state.reviewBase.task_id) + '/actions', { method: 'POST', body: JSON.stringify(receipt('review', payload)) });
           if (!task.task_id || typeof task.version !== 'number') throw new Error('Проверка отправлена, но подтверждение неполное. Обновите задачу перед повтором.');
-          state.reviewBase = null; state.reviewDraftTask = null; state.reviewReceipt = null;
+          state.reviewBase = null; state.reviewDraftAttempt = null; state.reviewReceipt = null;
           $('reviewDialog').close(); $('reviewForm').reset();
           upsertTask(task);
           toast(payload.verdict === 'approve' ? 'Результат принят после проверки.' : 'Задача возвращена на доработку с замечаниями.');

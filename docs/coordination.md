@@ -97,3 +97,46 @@ isolated DB, restart recovery and independent Git/hash verification. The same
 attempt produced one artifact and one submission, then the real browser accepted
 it from another session. This does not establish long-running service reliability,
 Claude compatibility, arbitrary write-side effects or automatic control of all chats.
+
+## Optional acceptance against an approved reference
+
+Use `reference_acceptance` on creation when a specific output must match an
+owner-approved sample. The coordinator supplies the reference URI and SHA-256,
+the exact URI of the deliverable, and a map from stable criterion IDs to the
+owner's requirements. Record which portions may change. Only criteria declared
+at creation govern that task. A new specification needs a new task.
+
+For example, a synthetic release archive has two criteria, `title` and `annex`.
+The owner requires the approved title in the archive and the attachment inside
+that same archive. An attachment next to the archive cannot establish inclusion.
+Read the task with `coord_task_get`. In both `submit` and independent
+`review/approve`, inspect the reference and final bytes, hash them, then send:
+
+    "inspection": {
+      "reference_sha256": "<64 lowercase hex digits>",
+      "artifact": {"uri": "qa://release/volume.zip", "sha256": "<SHA-256 of the final bytes>"},
+      "findings": {
+        "title": {"location": "title.txt", "observed": "Title bytes equal the sample", "outcome": "matched"},
+        "annex": {"location": "annex.txt", "observed": "Entry opened inside volume.zip; bytes equal the sample", "outcome": "matched"}
+      }
+    }
+
+Attach the comparison receipt in the existing `evidence` field. The inspector
+must read the actual file. Core validates completeness, identity and reported
+digests; it cannot attest that a client opened a URI or truthfully reported
+its observations. Use an appropriate independent comparator for the format.
+Different bytes at the same output URI require a new submission.
+
+On review, use `reject` with the evidence, reason and next step to return work.
+A partial inspection may record `missing` or `different` for known criteria.
+When a file cannot be opened, rejection can omit inspection entirely. The
+coordinator reconciles and retries. Previous inspections remain in history.
+
+On approval include `lesson` with the repeatable check for the next agent.
+The accepted task and its history retain the text. To make it available to
+memory search, explicitly call `cognitive_remember` in the project domain
+after approval with the lesson, scope, accepted task ID, attempt, evidence and
+a stable idempotency key. Confirm recall from a new session with an ordinary
+question, read the cited source and try it on a different artifact. Queue
+approval alone does not publish a memory or promote it into an L3 rule.
+Existing tasks can continue to use their original evidence-only workflow.

@@ -570,7 +570,7 @@ _coord_action_schema["required"].append("task_id")
 _coord_task_id_schema = {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"}},
                          "required": ["task_id"], "additionalProperties": False}
 TOOLS.extend([
-    {"name": "coord_task_create", "description": "Поставить задачу в общую очередь владельца с критериями приёмки и конкретным сеансом координатора. Повтор с тем же ключом не создаёт дубль.",
+    {"name": "coord_task_create", "description": "Поставить задачу в общую очередь владельца с критериями приёмки и конкретным сеансом координатора. Для работы по образцу передайте reference_acceptance с эталоном, файлом выдачи и критериями. Повтор с тем же ключом не создаёт дубль.",
      "inputSchema": TaskCreate.model_json_schema(), "annotations": {"readOnlyHint": False, "idempotentHint": True}},
     {"name": "coord_task_list", "description": "Прочитать общую очередь задач. При next_cursor продолжить обход. Статус review ожидает независимой проверки.",
      "inputSchema": {"type": "object", "properties": {"project": {"type": "string"}, "status": {"type": "string"},
@@ -582,7 +582,7 @@ TOOLS.extend([
      "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"},
                       "before_version": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}},
                       "required": ["task_id"], "additionalProperties": False}, "annotations": {"readOnlyHint": True}},
-    {"name": "coord_task_action", "description": "Взять задачу, продлить/восстановить собственную попытку, представить результат или независимо проверить. При 409 перечитать состояние. Не принимать свою работу и не менять чужую попытку.",
+    {"name": "coord_task_action", "description": "Взять задачу, продлить/восстановить собственную попытку, представить результат или независимо проверить. При 409 перечитать состояние. Для задачи по образцу submit и approve требуют inspection по всем критериям в файле выдачи. При approve передайте воспроизводимый lesson. При расхождении используйте review с reject. Не принимайте свою работу.",
      "inputSchema": _coord_action_schema, "annotations": {"readOnlyHint": False, "idempotentHint": True}},
 ])
 
