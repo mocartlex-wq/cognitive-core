@@ -52,6 +52,49 @@ def view(row, now: datetime | None = None) -> dict:
     }
 
 
+def validate_inspection(item: dict, body: TaskAction) -> None:
+    contract = item.get("reference_acceptance")
+    inspection = body.inspection
+    if not contract or body.action not in {"submit", "review"}:
+        if inspection or body.lesson:
+            fail("inspection_requires_reference_task_and_submission_or_review", 422)
+        return
+
+    approval = body.action == "review" and body.verdict == "approve"
+    rejection = body.action == "review" and body.verdict == "reject"
+    if body.lesson and not approval:
+        fail("only_an_approved_review_can_publish_a_lesson", 422)
+    if rejection and inspection is None:
+        # An unreadable or absent final artifact must still be returnable.
+        return
+    if inspection is None:
+        fail("final_artifact_inspection_required", 422)
+    if inspection.artifact.uri != contract["deliverable_uri"]:
+        fail("inspect_the_declared_final_artifact", 422)
+    if inspection.findings.keys() - contract["criteria"].keys():
+        fail("unknown_criterion", 422)
+    if rejection:
+        return
+    if inspection.reference_sha256 != contract["reference"]["sha256"]:
+        fail("reference_digest_differs_from_contract", 422)
+    if inspection.findings.keys() != contract["criteria"].keys():
+        fail("every_criterion_requires_a_finding", 422)
+    if any(f.outcome != "matched" for f in inspection.findings.values()):
+        fail("unconfirmed_criterion: return_for_correction", 422)
+    if approval:
+        if inspection.artifact.model_dump() != item["inspection"]["artifact"]:
+            fail("reviewed_artifact_differs_from_submission", 422)
+        if not body.lesson:
+            fail("reusable_verification_lesson_required", 422)
+
+
+def request_hash(body: TaskAction | TaskCreate, actor: dict) -> str:
+    # Old receipts include old default/null fields. Omit only new absent fields.
+    optional = ("reference_acceptance",) if isinstance(body, TaskCreate) else ("inspection", "lesson")
+    absent = {key for key in optional if getattr(body, key) is None}
+    return fingerprint({"actor": actor, "body": body.model_dump(mode="json", exclude=absent)})
+
+
 def transition(task: dict, body: TaskAction, actor: dict, *, now: datetime,
                dependencies_ready: bool = True, account_user: bool = False) -> dict:
     """Pure state transition; producer claims are never independent acceptance."""
@@ -64,6 +107,8 @@ def transition(task: dict, body: TaskAction, actor: dict, *, now: datetime,
     active = worker and same_attempt and item["status"] == "running"
     expired = bool(item.get("lease_until") and datetime.fromisoformat(item["lease_until"]) <= now)
     action = body.action
+    if action not in {"submit", "review"}:
+        validate_inspection(item, body)
     if action == "claim":
         if item["status"] != "queued" or not dependencies_ready:
             fail("not_claimable: задача занята либо зависимости не приняты")
@@ -84,6 +129,9 @@ def transition(task: dict, body: TaskAction, actor: dict, *, now: datetime,
             fail("stale_attempt_or_lease")
         if not body.detail.strip() or not body.evidence:
             fail("result_and_evidence_required", 422)
+        validate_inspection(item, body)
+        if body.inspection:
+            item["inspection"] = body.inspection.model_dump()
         item.update(status="review", result=body.detail,
                     evidence=[x.model_dump(exclude_none=True) for x in body.evidence],
                     next_step=body.next_step or "Независимая проверка результата", lease_until=None)
@@ -94,9 +142,14 @@ def transition(task: dict, body: TaskAction, actor: dict, *, now: datetime,
             fail("independent_session_required: исполнитель не принимает свою работу", 403)
         if not body.detail.strip() or not body.evidence:
             fail("review_evidence_required", 422)
+        validate_inspection(item, body)
         item["review"] = {"actor": actor, "verdict": body.verdict, "detail": body.detail,
                           "evidence": [x.model_dump(exclude_none=True) for x in body.evidence],
                           "observed_at": now.isoformat()}
+        if body.inspection:
+            item["review"]["inspection"] = body.inspection.model_dump()
+        if body.lesson:
+            item["review"]["lesson"] = body.lesson
         if body.verdict == "approve":
             item.update(status="verified_done", next_step="Завершено после проверки", blocker="")
         else:
@@ -122,6 +175,7 @@ def transition(task: dict, body: TaskAction, actor: dict, *, now: datetime,
             fail("not_retryable")
         if not body.reconciliation.strip():
             fail("retry_requires_reconciliation", 422)
+        item.pop("inspection", None)
         item.update(status="queued", worker=None, attempt_id=None, lease_until=None,
                     blocker="", result=None, evidence=[], review=None,
                     next_step=body.next_step or "Повторить после сверки прежнего результата")
@@ -139,8 +193,10 @@ def transition(task: dict, body: TaskAction, actor: dict, *, now: datetime,
 
 async def create_task(pool, owner: str, actor: dict, body: TaskCreate) -> dict:
     task_id = uuid5(NAMESPACE_URL, f"cogcore-task:{owner}:{body.idempotency_key}")
-    digest = fingerprint({"actor": actor, "body": body.model_dump(mode="json")})
+    digest = request_hash(body, actor)
     data = body.model_dump(mode="json", exclude={"idempotency_key", "session_id", "description"})
+    if body.reference_acceptance is None:
+        data.pop("reference_acceptance")
     data.update(schema_version=1, coordinator=actor, worker=None, attempt_id=None,
                 attempt_no=0, result=None, evidence=[], review=None, blocker="", create_hash=digest)
     async with pool.acquire() as conn, conn.transaction():
@@ -200,7 +256,7 @@ async def read_task(pool, owner: str, task_id: UUID) -> dict:
 
 
 async def act(pool, owner: str, task_id: UUID, actor: dict, body: TaskAction, *, account_user: bool = False) -> dict:
-    digest = fingerprint({"actor": actor, "body": body.model_dump(mode="json")})
+    digest = request_hash(body, actor)
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow("SELECT * FROM orchestrator_tasks WHERE task_id=$1 AND owner_user_id=$2 AND coord_data IS NOT NULL FOR UPDATE", task_id, UUID(owner))
         if not row:
@@ -245,5 +301,6 @@ async def history(pool, owner: str, task_id: UUID, limit: int = 200, before_vers
         events.append({"actor": unpack(row["actor"]), "action": row["action"],
             "status": result["status"], "version": result["version"], "at": row["created_at"].isoformat(),
             **{key: request.get(key) for key in ("detail", "reconciliation", "next_step", "evidence")},
+            **{key: result[key] for key in ("reference_acceptance", "inspection") if key in result},
             **{key: result.get(key) for key in ("attempt_id", "worker", "result", "review")}})
     return {"events": events, "next_cursor": events[0]["version"] if more else None, "limit": limit}

@@ -119,3 +119,38 @@ async def test_native_mcp_uses_same_owner_and_contract(api, actors):
     invalid = await api.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": {"name": "coord_task_get", "arguments": {"task_id": "../../events"}}})
     assert invalid.json()["error"]["code"] == -32602
+
+async def test_reference_mcp_receipt_and_history(api, actors):
+    headers = {"X-API-Key": actors[0]["key"]}
+
+    async def call(name, **args):
+        response = await api.post("/mcp", headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
+        result = response.json()["result"]
+        assert not result["isError"], result
+        return result["structuredContent"]
+
+    contract = {"reference": {"uri": "qa://sample", "sha256": "1"*64}, "deliverable_uri": "qa://volume",
+                "criteria": {"cover": "approved title inside volume"}}
+    task = await call("coord_task_create", **create_body(), reference_acceptance=contract)
+    task_id = task["task_id"]
+
+    async def act(verb, version, session, **extra):
+        return await call("coord_task_action", action=verb, task_id=task_id, expected_version=version,
+                          session_id=session, idempotency_key=uuid4().hex, **extra)
+
+    claimed = await act("claim", 0, "producer")
+    evidence = [{"uri": "qa://comparison", "description": "Receipt for this build"}]
+    inspection = {"reference_sha256": "1"*64, "artifact": {"uri": "qa://volume", "sha256": "2"*64},
+                  "findings": {"cover": {"location": "entry 0", "observed": "title matches", "outcome": "matched"}}}
+    await act("submit", 1, "producer", attempt_id=claimed["attempt_id"], detail="Ready",
+              evidence=evidence, inspection=inspection)
+    done = await act("review", 2, "reader", verdict="approve", detail="Compared the actual volume",
+                     evidence=evidence, inspection=inspection, lesson="Compare entry 0 inside the same archive by digest.")
+    assert done["status"] == "verified_done"
+    replay = await call("coord_task_get", task_id=task_id)
+    history = await call("coord_task_history", task_id=task_id)
+    assert replay["reference_acceptance"] == contract
+    assert replay["review"]["lesson"] == done["review"]["lesson"]
+    assert history["events"][-2]["inspection"] == inspection
+    assert history["events"][-1]["review"] == replay["review"]

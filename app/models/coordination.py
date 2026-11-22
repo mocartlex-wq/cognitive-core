@@ -1,7 +1,7 @@
 """Explicit contracts for the shared task ledger (separate from chat replies)."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +14,37 @@ class Evidence(BaseModel):
     sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
+class ContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+CriterionId = Annotated[str, Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")]
+Statement = Annotated[str, Field(min_length=1, max_length=1000)]
+
+
+class Artifact(ContractModel):
+    uri: str = Field(min_length=1, max_length=2048)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class ReferenceAcceptance(ContractModel):
+    reference: Artifact
+    deliverable_uri: str = Field(min_length=1, max_length=2048)
+    criteria: dict[CriterionId, Statement] = Field(min_length=1, max_length=30)
+
+
+class Finding(ContractModel):
+    location: Statement
+    observed: Statement
+    outcome: Literal["matched", "different", "missing"]
+
+
+class Inspection(ContractModel):
+    reference_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    artifact: Artifact
+    findings: dict[CriterionId, Finding] = Field(min_length=1, max_length=30)
+
+
 class TaskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     idempotency_key: str = Field(min_length=8, max_length=160)
@@ -23,6 +54,7 @@ class TaskCreate(BaseModel):
     description: str = Field(default="", max_length=12000)
     acceptance: str = Field(min_length=1, max_length=6000)
     next_step: str = Field(min_length=1, max_length=2000)
+    reference_acceptance: ReferenceAcceptance | None = None
     depends_on: list[UUID] = Field(default_factory=list, max_length=30)
     assigned_agent_id: str | None = Field(default=None, max_length=200)
     assigned_session_id: str | None = Field(default=None, max_length=200)
@@ -40,6 +72,8 @@ class TaskAction(BaseModel):
     detail: str = Field(default="", max_length=4000)
     next_step: str = Field(default="", max_length=2000)
     evidence: list[Evidence] = Field(default_factory=list, max_length=30)
+    inspection: Inspection | None = None
+    lesson: str | None = Field(default=None, min_length=1, max_length=2000)
     verdict: Literal["approve", "reject"] | None = None
     reconciliation: str = Field(default="", max_length=4000)
     assigned_agent_id: str | None = Field(default=None, max_length=200)

@@ -129,3 +129,83 @@ def test_required_task_contract_is_not_whitespace(field):
     data[field] = " \t "
     with pytest.raises(ValueError):
         TaskCreate(**data)
+
+def test_reference_mode_checks_final_artifact_and_survives_retry(queued, tmp_path):
+    import hashlib
+    from zipfile import ZipFile
+
+    reference = tmp_path / "approved.zip"
+    final = tmp_path / "deliverable.zip"
+    loose = tmp_path / "attachment.txt"
+    loose.write_bytes(b"annex")
+    with ZipFile(reference, "w") as z:
+        z.writestr("title.txt", "cover")
+        z.writestr(loose.name, loose.read_bytes())
+    with ZipFile(final, "w") as z:
+        z.writestr("title.txt", "cover")
+
+    def artifact(path):
+        return {"uri": path.as_uri(), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+    contract = {"reference": artifact(reference), "deliverable_uri": final.as_uri(),
+                "criteria": {"title": "Title matches the approved sample", "annex": "Annex included inside ZIP"}}
+    queued["reference_acceptance"] = contract
+
+    def inspect():
+        findings = {}
+        with ZipFile(final) as actual, ZipFile(reference) as sample:
+            for key, name in [("title", "title.txt"), ("annex", loose.name)]:
+                present = name in actual.namelist()
+                match = present and actual.read(name) == sample.read(name)
+                findings[key] = {"location": name, "observed": "matches sample" if match else "not identical or absent",
+                                 "outcome": "matched" if match else "different" if present else "missing"}
+        return {"artifact": artifact(final), "reference_sha256": artifact(reference)["sha256"], "findings": findings}
+
+    def submit(task, inspection):
+        return action(task, "submit", attempt_id=task["attempt_id"], detail="Compared", evidence=EVIDENCE,
+                      inspection=inspection)
+
+    def review(task, inspection, verdict="approve", lesson=None):
+        return action(task, "review", REVIEWER, verdict=verdict, detail="Independent inspection", evidence=EVIDENCE,
+                      inspection=inspection, lesson=lesson)
+
+    task = action(queued, "claim")
+    first = inspect()
+    assert loose.exists() and first["findings"]["annex"]["outcome"] == "missing"
+    with pytest.raises(HTTPException, match="unconfirmed_criterion"):
+        submit(task, first)
+    with pytest.raises(HTTPException, match="every_criterion"):
+        submit(task, {**first, "findings": {"title": first["findings"]["title"]}})
+    with pytest.raises(HTTPException, match="inspect_the_declared"):
+        submit(task, {**first, "artifact": artifact(loose)})
+    # A plausible but false producer declaration is exposed by independent inspection.
+    claimed = {**first, "findings": {**first["findings"], "annex": {**first["findings"]["annex"], "outcome": "matched"}}}
+    waiting = submit(task, claimed)
+    blocked = review(waiting, inspect(), "reject")
+    assert blocked["status"] == "blocked" and "lesson" not in blocked["review"]
+    assert review(waiting, None, "reject")["status"] == "blocked"
+    queued_again = action(blocked, "retry", COORD, reconciliation="Rebuild final file")
+    assert "inspection" not in queued_again and queued_again["reference_acceptance"] == contract
+    with ZipFile(final, "a") as z:
+        z.writestr(loose.name, loose.read_bytes())
+    waiting = submit(action(queued_again, "claim"), inspect())
+    with pytest.raises(HTTPException, match="reference_digest"):
+        review(waiting, {**inspect(), "reference_sha256": "0" * 64})
+    with pytest.raises(HTTPException, match="differs_from_submission"):
+        review(waiting, claimed)
+    with pytest.raises(HTTPException, match="lesson_required"):
+        review(waiting, inspect())
+    lesson = "Open the final archive by digest and compare the embedded entries with the pinned sample."
+    done = review(waiting, inspect(), lesson=lesson)
+    assert done["status"] == "verified_done" and done["review"]["lesson"] == lesson
+
+
+def test_legacy_coordination_receipt_hashes_are_unchanged():
+    from app.services.task_ledger import fingerprint, request_hash
+
+    legacy = TaskCreate(idempotency_key="old-create", session_id="coordinator", project="x",
+                        title="x", acceptance="x", next_step="x")
+    claim = TaskAction(idempotency_key="old-claim", session_id="coordinator", expected_version=0, action="claim")
+    for body, added in [(legacy, {"reference_acceptance"}), (claim, {"inspection", "lesson"})]:
+        before_upgrade = body.model_dump(mode="json", exclude=added)
+        assert request_hash(body, COORD) == fingerprint({"actor": COORD, "body": before_upgrade})

@@ -804,3 +804,12 @@ def test_postgres_incompatible_version_cannot_resume_pending_workflow(postgres_w
     assert case.ledger.get(before["task_id"])["attempt_id"] == before["attempt_id"]
     assert "recover" in [action["action"] for action in case.ledger.actions]
     case.assert_single_submission()
+
+def test_snapshot_worker_leaves_reference_task_unclaimed(workspace):
+    repo, _, settings = workspace
+    ledger, durable = Ledger(repo, settings), Durable()
+    ledger.task["reference_acceptance"] = {"criteria": {"cover": "Check the output cover"}}
+    with pytest.raises(ValueError, match="cannot inspect a reference deliverable"):
+        worker.enqueue_task(ledger, durable, settings, ledger.task["task_id"])
+    assert ledger.task["status"] == "queued"
+    assert not durable.calls
