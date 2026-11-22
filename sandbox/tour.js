@@ -34,8 +34,8 @@
     tour.addStep({
       id: 'flow',
       title: 'Идея в одной картинке',
-      attachTo: { element: '.flow', on: 'top' },
-      text: `<p>Данные движутся слева направо: <strong>сырые события (L1) → дневные срезы (L2) → выученные знания (L3) → бэкапы (L4)</strong>.</p>
+      attachTo: { element: '#memory-flow', on: 'top' },
+      text: `<p>Путь данных: <strong>сырые события (L1) → дневные срезы (L2) → выученные знания (L3) → бэкапы (L4)</strong>.</p>
              <p>L5 — журнал аудита всех действий.</p>
              <p>Числа в карточках — реальное состояние памяти прямо сейчас.</p>`,
       buttons: [
@@ -113,7 +113,7 @@
 
   // Auto-start on first visit
   document.addEventListener('DOMContentLoaded', () => {
-    if (!localStorage.getItem(STORAGE_KEY)) {
+    if (location.hash !== '#memory-flow' && !localStorage.getItem(STORAGE_KEY)) {
       // Маленькая задержка чтобы health/stats успели загрузиться
       setTimeout(() => window.startCognitiveTour(), 1200);
     }
