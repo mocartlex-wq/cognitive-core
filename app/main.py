@@ -450,6 +450,9 @@ app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(user_memory_router)
 app.include_router(owner_tools_router)
+from app.api.team_rules import router as team_rule_router
+
+app.include_router(team_rule_router)
 app.include_router(push_router)
 
 # Frontend error reporter (2026-05-20): /api/errors POST/GET
@@ -555,6 +558,11 @@ async def profile_page():
 @app.get("/ui/memory")
 async def owner_memory_page():
     return _html("memory.html")
+
+
+@app.get("/ui/team-decisions")
+async def team_decisions_page():
+    return _html("team-decisions.html")
 
 
 @app.get("/ui/shared-tools")
