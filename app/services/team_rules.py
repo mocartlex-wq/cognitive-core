@@ -128,10 +128,19 @@ def result(run, spec):
 
 
 async def resolve(conn, owner, agent, body: Start):
-    if body.case_id == case_key(owner, DEMO):
+    if body.chat_answer is None and body.case_id == case_key(owner, DEMO):
         await register(conn, owner, DEMO)
     spec = await locked_case(conn, owner, body.case_id, agent)
     run = await conn.fetchrow("SELECT * FROM team_rule_runs WHERE case_id=$1 AND instance_id=$2", body.case_id, body.instance_id)
+    if body.chat_answer is not None:
+        if run is None:
+            raise HTTPException(404, "Просмотр не найден. Используйте instance_id исходного вопроса.")
+        view = result(run, spec)
+        if view["status"] == "pending_owner":
+            draft = body.chat_answer
+            view["confirmation_url"] = f"{view['owner_url']}#for={run['id']}&choice={draft.choice}&duration={draft.duration}"
+            view.pop("question", None)
+        return {**view, "ask_owner": False}
     created = run is None
     if created:
         assessment = assess(await rules_at(conn, body.case_id, spec))

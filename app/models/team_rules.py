@@ -48,14 +48,15 @@ class Case(Strict):
         return self
 
 
-class Start(Strict):
-    case_id: UUID
-    instance_id: UUID
-
-
 class Answer(Strict):
     choice: Order
     duration: Literal["once", "future"]
+
+
+class Start(Strict):
+    case_id: UUID
+    instance_id: UUID
+    chat_answer: Answer | None = Field(default=None, description="Вариант и срок, явно названные владельцем в чате. Готовит ссылку для подтверждения.")
 
 
 class Feedback(Strict):
